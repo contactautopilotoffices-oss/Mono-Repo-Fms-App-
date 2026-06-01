@@ -186,7 +186,7 @@ async def validate_membership(user_id: str, property_id: str) -> Optional[dict]:
         "Accept": "application/json",
     }
     params = {
-        "select": "organization_id,role,properties(name),organizations(name)",
+        "select": "organization_id,properties(name),organizations(name,organization_members(role))",
         "user_id": f"eq.{user_id}",
         "property_id": f"eq.{property_id}",
         "limit": "1",
@@ -358,7 +358,14 @@ async def create_session_token(req: SimpleSessionRequest):
         raise HTTPException(status_code=401, detail="User does not belong to this property")
 
     org_id = membership.get("organization_id", "")
-    role = membership.get("role", "tenant")
+    # role lives in organization_members, not property_memberships
+    role = "member"
+    try:
+        org_members = (membership.get("organizations") or {}).get("organization_members") or []
+        if org_members:
+            role = org_members[0].get("role", "member")
+    except Exception:
+        pass
     org_name = None
     property_name = None
 
