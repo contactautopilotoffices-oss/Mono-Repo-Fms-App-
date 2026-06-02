@@ -24,6 +24,8 @@ interface MediaActionsSheetProps {
   onViewFullScreen: () => void;
   /** Called when user wants to download */
   onDownload: () => void;
+  /** Called when user wants to close the sheet (cancel, backdrop, back button) */
+  onClose: () => void;
   mediaType: MediaType;
   fileType: FileType;
 }
@@ -33,6 +35,7 @@ export default function MediaActionsSheet({
   onReplace,
   onViewFullScreen,
   onDownload,
+  onClose,
   mediaType,
   fileType,
 }: MediaActionsSheetProps) {
@@ -53,17 +56,21 @@ export default function MediaActionsSheet({
     onViewFullScreen();
   };
 
+  const handleClose = () => {
+    onClose();
+  };
+
   return (
     <Modal
       visible={isOpen}
       animationType="slide"
       transparent
-      onRequestClose={handleReplace}
+      onRequestClose={handleClose}
     >
       <TouchableOpacity
         style={styles.backdrop}
         activeOpacity={1}
-        onPress={handleReplace}
+        onPress={handleClose}
       >
         <View />
       </TouchableOpacity>
@@ -81,7 +88,7 @@ export default function MediaActionsSheet({
               {mediaType === 'before' ? 'Before' : 'After'}{' '}
               {fileType === 'photo' ? 'Photo' : 'Video'}
             </Text>
-            <TouchableOpacity onPress={handleReplace} style={styles.closeBtn}>
+            <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
               <Ionicons name="close" size={20} color="#94A3B8" />
             </TouchableOpacity>
           </View>
@@ -145,7 +152,7 @@ export default function MediaActionsSheet({
           {/* Cancel */}
           <TouchableOpacity
             style={styles.cancelBtn}
-            onPress={handleReplace}
+            onPress={handleClose}
             activeOpacity={0.7}
           >
             <Text style={styles.cancelText}>Cancel</Text>

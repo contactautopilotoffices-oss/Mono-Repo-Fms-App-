@@ -34,6 +34,25 @@ import { queryKeys } from '@/utils/queryKeys';
 
 type StatusFilter = 'all' | 'mine' | 'open' | 'in_progress' | 'resolved' | 'closed';
 type DateRangeFilter = 'all' | 'today' | 'week' | 'month';
+type SortBy = 'newest' | 'oldest' | 'priority_high' | 'priority_low';
+
+const CATEGORIES = [
+  { value: 'all', label: 'All Categories' },
+  { value: 'technical', label: 'Technical' },
+  { value: 'soft_services', label: 'Soft Service' },
+  { value: 'plumbing', label: 'Plumbing' },
+];
+
+const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: 'newest', label: 'Newest First' },
+  { value: 'oldest', label: 'Oldest First' },
+  { value: 'priority_high', label: 'Priority: High → Low' },
+  { value: 'priority_low', label: 'Priority: Low → High' },
+];
+
+const PRIORITY_ORDER: Record<string, number> = {
+  critical: 0, urgent: 1, high: 2, medium: 3, low: 4,
+};
 
 const FILTER_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'all',                label: 'All' },
@@ -101,8 +120,17 @@ export default function TicketsScreen() {
   });
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<SortBy>('newest');
+  const [raisedByFilter, setRaisedByFilter] = useState('all');
+  const [assignedToFilter, setAssignedToFilter] = useState('all');
+  const [allUsers, setAllUsers] = useState<{ id: string; full_name: string }[]>([]);
   const insets = useSafeAreaInsets();
   const orgId = membership?.org_id ?? '';
+
+  const hasActiveFilters = categoryFilter !== 'all' || searchQuery.trim() !== '' || sortBy !== 'newest' || raisedByFilter !== 'all' || assignedToFilter !== 'all';
 
   // Client-side filter for needs-attention mode
   const displayedTickets = useMemo(() => {
@@ -133,7 +161,8 @@ export default function TicketsScreen() {
     let q = supabase
       .from('tickets')
       .select(`id, title, description, status, priority, ticket_number, created_at, updated_at,
-               property_id, organization_id, photo_before_url, is_internal,
+               property_id, organization_id, photo_before_url, is_internal, raised_by, assigned_to,
+               skill_group:skill_groups(name, code),
                assignee:users!assigned_to(id, full_name, user_photo_url),
                creator:users!raised_by(id, full_name),
                ticket_escalation_logs(from_level, to_level, escalated_at,
@@ -146,9 +175,7 @@ export default function TicketsScreen() {
       q = q.eq('property_id', propertyId);
     }
 
-    q = q
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    q = q.range(offset, offset + limit - 1);
 
     if (isNeedsAttentionMode) {
         // Fetch all active tickets so we can client-side filter for needs attention
@@ -181,8 +208,22 @@ export default function TicketsScreen() {
       q = q.gte('created_at', start).lte('created_at', end);
     }
 
+    // Advanced filters
+    if (categoryFilter !== 'all') {
+      q = q.eq('skill_group.code', categoryFilter);
+    }
+    if (raisedByFilter !== 'all') {
+      q = q.eq('raised_by', raisedByFilter);
+    }
+    if (assignedToFilter !== 'all') {
+      q = q.eq('assigned_to', assignedToFilter);
+    }
+
+    // Sort order — server-side for created_at, client-side for priority
+    q = q.order('created_at', { ascending: sortBy === 'oldest' });
+
     return q;
-  }, [propertyId, statusFilter, dateRange, supabase, isNeedsAttentionMode]);
+  }, [propertyId, statusFilter, dateRange, supabase, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy]);
 
   const fetchTickets = useCallback(async (reset = false) => {
     if (!propertyId) return;
@@ -198,8 +239,23 @@ export default function TicketsScreen() {
       } else if (error) {
         throw error;
       }
+      // Apply client-side search and priority sort
+      let filtered = items;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        filtered = filtered.filter(t =>
+          t.title.toLowerCase().includes(q) ||
+          (t.ticket_number ?? '').toLowerCase().includes(q) ||
+          (t.description ?? '').toLowerCase().includes(q)
+        );
+      }
+      if (sortBy === 'priority_high') {
+        filtered = [...filtered].sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 3) - (PRIORITY_ORDER[b.priority] ?? 3));
+      } else if (sortBy === 'priority_low') {
+        filtered = [...filtered].sort((a, b) => (PRIORITY_ORDER[b.priority] ?? 3) - (PRIORITY_ORDER[a.priority] ?? 3));
+      }
       const hasMoreItems = items.length > PAGE_SIZE;
-      setTickets(items.slice(0, PAGE_SIZE));
+      setTickets(filtered.slice(0, PAGE_SIZE));
       setHasMore(hasMoreItems);
     } catch (err) {
       console.error('Error fetching tickets:', err);
@@ -208,7 +264,7 @@ export default function TicketsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId, buildQuery]);
+  }, [propertyId, buildQuery, searchQuery, sortBy]);
 
   const { refetch } = useDashboardFetch(queryKeys.property.tickets(propertyId), fetchTickets, {
     staleTime: 1000 * 60 * 5,
@@ -343,6 +399,34 @@ export default function TicketsScreen() {
     refetch();
   };
 
+  // Fetch users for Raised By / Assigned To filters
+  const fetchFilterOptions = useCallback(async () => {
+    if (!propertyId) return;
+    try {
+      const { data } = await (supabase as any)
+        .from('property_memberships')
+        .select('user_id, users:user_id(id, full_name)')
+        .eq('property_id', propertyId)
+        .eq('is_active', true);
+      const users = (data ?? [])
+        .map((m: any) => ({ id: m.users?.id, full_name: m.users?.full_name }))
+        .filter((u: any) => u.id && u.full_name);
+      // Deduplicate by id
+      const seen = new Set<string>();
+      const unique = users.filter((u: any) => {
+        if (seen.has(u.id)) return false;
+        seen.add(u.id);
+        return true;
+      });
+      setAllUsers(unique);
+    } catch (err) {
+      console.error('Error fetching filter options:', err);
+    }
+  }, [propertyId, supabase]);
+
+  useEffect(() => {
+    fetchFilterOptions();
+  }, [fetchFilterOptions]);
 
   // Override status filter to 'all' when entering needs-attention mode
   useEffect(() => {
@@ -350,6 +434,14 @@ export default function TicketsScreen() {
       setStatusFilter('all');
     }
   }, [isNeedsAttentionMode]);
+
+  // Refetch when advanced filters change
+  useEffect(() => {
+    if (!isNeedsAttentionMode) {
+      fetchTickets(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryFilter, raisedByFilter, assignedToFilter, sortBy, searchQuery]);
 
   const renderTicket = ({ item }: { item: Ticket }) => {
     const logs = item.ticket_escalation_logs;
@@ -415,8 +507,19 @@ export default function TicketsScreen() {
             <Text style={[styles.headerTitleMain, { color: textPrimary }]}>
               {isNeedsAttentionMode ? 'Needs Attention' : 'Requests'}
             </Text>
-            <TouchableOpacity onPress={() => setShowCreateModal(true)} style={styles.headerAddBtn}>
-              <Ionicons name="add" size={24} color={textPrimary} />
+            <TouchableOpacity onPress={() => setShowFilterModal(true)} style={styles.headerAddBtn}>
+              <Ionicons name="options-outline" size={22} color={textPrimary} />
+              {hasActiveFilters && (
+                <View style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  backgroundColor: '#F59E0B',
+                }} />
+              )}
             </TouchableOpacity>
           </View>
 
@@ -569,6 +672,15 @@ export default function TicketsScreen() {
 
       </View>
 
+        {/* FAB Create Button */}
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => setShowCreateModal(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={28} color="#FFF" />
+        </TouchableOpacity>
+
         <TicketCreateModal
           isOpen={showCreateModal}
           onClose={() => setShowCreateModal(false)}
@@ -577,8 +689,235 @@ export default function TicketsScreen() {
           role={(membership as any)?.role === 'org_super_admin' ? 'super_admin' : ((membership as any)?.role === 'property_admin' ? 'admin' : 'tenant')}
         />
 
+        {/* Filter Modal */}
+        <Modal
+          visible={showFilterModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowFilterModal(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
+          >
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+              <TouchableOpacity
+                style={{ flex: 1 }}
+                activeOpacity={1}
+                onPress={() => setShowFilterModal(false)}
+              />
+              <View style={[
+                styles.filterModalContent,
+                { backgroundColor: isDark ? '#1E2633' : '#FFF' }
+              ]}>
+                {/* Handle */}
+                <View style={{ width: 40, height: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', borderRadius: 2, alignSelf: 'center', marginBottom: 16 }} />
 
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: textPrimary }}>Filters</Text>
+                  <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+                    <Ionicons name="close" size={22} color={textSecondary} />
+                  </TouchableOpacity>
+                </View>
 
+                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: '70%' }}>
+                  {/* Search */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.filterLabel, { color: textSecondary }]}>Search</Text>
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center',
+                      borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0',
+                      borderRadius: 12, paddingHorizontal: 12, backgroundColor: isDark ? '#2D3748' : '#F8FAFC'
+                    }}>
+                      <Ionicons name="search" size={16} color={textSecondary} />
+                      <TextInput
+                        style={{ flex: 1, paddingVertical: 10, paddingHorizontal: 8, color: textPrimary, fontSize: 14 }}
+                        placeholder="Search by title or ticket ID..."
+                        placeholderTextColor={isDark ? '#64748B' : '#CBD5E1'}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                      />
+                      {searchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                          <Ionicons name="close-circle" size={16} color={textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Category */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.filterLabel, { color: textSecondary }]}>Category</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {CATEGORIES.map(cat => (
+                        <TouchableOpacity
+                          key={cat.value}
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                            backgroundColor: categoryFilter === cat.value
+                              ? (isDark ? 'rgba(124,185,168,0.2)' : 'rgba(124,185,168,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                            borderWidth: 1,
+                            borderColor: categoryFilter === cat.value ? '#7CB9A8' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                          }}
+                          onPress={() => setCategoryFilter(cat.value)}
+                        >
+                          <Text style={{
+                            fontSize: 12, fontWeight: categoryFilter === cat.value ? '700' : '500',
+                            color: categoryFilter === cat.value ? '#7CB9A8' : textSecondary
+                          }}>
+                            {cat.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Sort By */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.filterLabel, { color: textSecondary }]}>Sort By</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {SORT_OPTIONS.map(opt => (
+                        <TouchableOpacity
+                          key={opt.value}
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                            backgroundColor: sortBy === opt.value
+                              ? (isDark ? 'rgba(59,130,246,0.2)' : 'rgba(59,130,246,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                            borderWidth: 1,
+                            borderColor: sortBy === opt.value ? '#3B82F6' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                          }}
+                          onPress={() => setSortBy(opt.value)}
+                        >
+                          <Text style={{
+                            fontSize: 12, fontWeight: sortBy === opt.value ? '700' : '500',
+                            color: sortBy === opt.value ? '#3B82F6' : textSecondary
+                          }}>
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Raised By */}
+                  {allUsers.length > 0 && (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={[styles.filterLabel, { color: textSecondary }]}>Raised By</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        <TouchableOpacity
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                            backgroundColor: raisedByFilter === 'all'
+                              ? (isDark ? 'rgba(124,185,168,0.2)' : 'rgba(124,185,168,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                            borderWidth: 1,
+                            borderColor: raisedByFilter === 'all' ? '#7CB9A8' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                          }}
+                          onPress={() => setRaisedByFilter('all')}
+                        >
+                          <Text style={{
+                            fontSize: 12, fontWeight: raisedByFilter === 'all' ? '700' : '500',
+                            color: raisedByFilter === 'all' ? '#7CB9A8' : textSecondary
+                          }}>All</Text>
+                        </TouchableOpacity>
+                        {allUsers.map(u => (
+                          <TouchableOpacity
+                            key={u.id}
+                            style={{
+                              paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                              backgroundColor: raisedByFilter === u.id
+                                ? (isDark ? 'rgba(124,185,168,0.2)' : 'rgba(124,185,168,0.1)')
+                                : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                              borderWidth: 1,
+                              borderColor: raisedByFilter === u.id ? '#7CB9A8' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                            }}
+                            onPress={() => setRaisedByFilter(u.id)}
+                          >
+                            <Text style={{
+                              fontSize: 12, fontWeight: raisedByFilter === u.id ? '700' : '500',
+                              color: raisedByFilter === u.id ? '#7CB9A8' : textSecondary
+                            }}>{u.full_name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+
+                  {/* Assigned To */}
+                  {allUsers.length > 0 && (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={[styles.filterLabel, { color: textSecondary }]}>Assigned To</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        <TouchableOpacity
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                            backgroundColor: assignedToFilter === 'all'
+                              ? (isDark ? 'rgba(124,185,168,0.2)' : 'rgba(124,185,168,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                            borderWidth: 1,
+                            borderColor: assignedToFilter === 'all' ? '#7CB9A8' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                          }}
+                          onPress={() => setAssignedToFilter('all')}
+                        >
+                          <Text style={{
+                            fontSize: 12, fontWeight: assignedToFilter === 'all' ? '700' : '500',
+                            color: assignedToFilter === 'all' ? '#7CB9A8' : textSecondary
+                          }}>All</Text>
+                        </TouchableOpacity>
+                        {allUsers.map(u => (
+                          <TouchableOpacity
+                            key={u.id}
+                            style={{
+                              paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                              backgroundColor: assignedToFilter === u.id
+                                ? (isDark ? 'rgba(124,185,168,0.2)' : 'rgba(124,185,168,0.1)')
+                                : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                              borderWidth: 1,
+                              borderColor: assignedToFilter === u.id ? '#7CB9A8' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                            }}
+                            onPress={() => setAssignedToFilter(u.id)}
+                          >
+                            <Text style={{
+                              fontSize: 12, fontWeight: assignedToFilter === u.id ? '700' : '500',
+                              color: assignedToFilter === u.id ? '#7CB9A8' : textSecondary
+                            }}>{u.full_name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </ScrollView>
+
+                {/* Action Buttons */}
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9' }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9', borderRadius: 12 }}
+                    onPress={() => {
+                      setSearchQuery('');
+                      setCategoryFilter('all');
+                      setSortBy('newest');
+                      setRaisedByFilter('all');
+                      setAssignedToFilter('all');
+                    }}
+                  >
+                    <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 14 }}>Clear All</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1.5, paddingVertical: 12, alignItems: 'center', backgroundColor: '#7CB9A8', borderRadius: 12 }}
+                    onPress={() => {
+                      setShowFilterModal(false);
+                      fetchTickets(true);
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 14 }}>Apply Filters</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
     </View>
   );
@@ -763,6 +1102,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 6,
+  },
+  filterModalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 34,
+    maxHeight: '85%',
+  },
+  filterLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
   },
   modalContainer: { flex: 1 },
   modalHeader: {
