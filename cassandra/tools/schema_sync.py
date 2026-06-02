@@ -288,7 +288,11 @@ def sync_schema() -> bool:
     py_path = os.path.join(root, "cassandra", "tools", "fms_schema.py")
 
     if not os.path.exists(ts_path):
-        logger.warning(f"[SCHEMA_SYNC] database.types.ts not found at {ts_path}")
+        logger.warning(f"[SCHEMA_SYNC] database.types.ts not found at {ts_path} — skipping sync (using bundled fms_schema.py)")
+        return False
+
+    if not os.path.exists(py_path):
+        logger.error(f"[SCHEMA_SYNC] fms_schema.py also missing at {py_path} — schema unavailable")
         return False
 
     try:
