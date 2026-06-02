@@ -27,7 +27,7 @@ import TicketCard from '../shared/TicketCard';
 import SignOutModal from '../ui/SignOutModal';
 import Skeleton from '../ui/Skeleton';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 // Types
 type Tab = 'overview' | 'requests' | 'users' | 'visitors' | 'diesel' | 'electricity' | 'settings' | 'profile';
@@ -105,19 +105,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
 
   // State
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [property, setProperty] = useState<Property | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const [showSignOutModal, setShowSignOutModal] = useState(false);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [stats, setStats] = useState<DashboardStats>({
-    total: 0,
-    open: 0,
-    in_progress: 0,
-    resolved: 0,
-    urgent: 0,
-  });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -138,18 +126,27 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
     [membership]
   );
 
-  const { refetch } = useDashboardFetch(queryKeys.property.propertyAdminLegacy(propertyId), async () => {
-    if (propertyId) {
-      await Promise.all([fetchPropertyDetails(), fetchTickets()]);
+  const fetchDashboardData = useCallback(async () => {
+    if (!propertyId) throw new Error('No propertyId');
+
+    const { data: propData, error: propError } = await supabase
+      .from('properties')
+      .select('*')
+      .eq('id', propertyId)
+      .maybeSingle();
+
+    if (propError || !propData) {
+      throw new Error(propError ? 'Network error. Please try again.' : 'Property not found.');
     }
-  }, {
-    staleTime: 1000 * 60 * 5,
-  });
 
-  const fetchTickets = async () => {
-    if (!propertyId) return;
+    const property = {
+      ...propData,
+      address: propData.address ?? '',
+      organization_id: propData.organization_id ?? '',
+      image_url: propData.image_url ?? undefined,
+    };
 
-    const { data, error } = await supabase
+    const { data: ticketData, error: ticketError } = await supabase
       .from('tickets')
       .select(`
         *,
@@ -158,60 +155,41 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
       .eq('property_id', propertyId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching tickets:', error);
-    } else {
-      const ticketData = (data || []).map((ticket: any) => ({
-        ...ticket,
-        ticket_number: ticket.ticket_number ?? '',
-      }));
-      setTickets(ticketData);
-      
-      // Calculate stats
-      setStats({
-        total: ticketData.length,
-        open: ticketData.filter((t: any) => t.status === 'open').length,
-        in_progress: ticketData.filter((t: any) => ['in_progress', 'assigned'].includes(t.status)).length,
-        resolved: ticketData.filter((t: any) => ['resolved', 'closed'].includes(t.status)).length,
-        urgent: ticketData.filter((t: any) => 
-          ['urgent', 'high'].includes(t.priority) && !['resolved', 'closed'].includes(t.status)
-        ).length,
-      });
-    }
-  };
+    if (ticketError) throw new Error('Failed to fetch tickets');
 
-  const fetchPropertyDetails = async () => {
-    setIsLoading(true);
-    setErrorMsg('');
+    const tickets = (ticketData || []).map((ticket: any) => ({
+      ...ticket,
+      ticket_number: ticket.ticket_number ?? '',
+    }));
 
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*')
-        .eq('id', propertyId)
-        .maybeSingle();
+    const stats = {
+      total: tickets.length,
+      open: tickets.filter((t: any) => t.status === 'open').length,
+      in_progress: tickets.filter((t: any) => ['in_progress', 'assigned'].includes(t.status)).length,
+      resolved: tickets.filter((t: any) => ['resolved', 'closed'].includes(t.status)).length,
+      urgent: tickets.filter((t: any) =>
+        ['urgent', 'high'].includes(t.priority) && !['resolved', 'closed'].includes(t.status)
+      ).length,
+    };
 
-      if (error || !data) {
-        setErrorMsg('Property not found.');
-      } else {
-        setProperty({
-          ...data,
-          address: data.address ?? '',
-          organization_id: data.organization_id ?? '',
-          image_url: data.image_url ?? undefined,
-        });
-      }
-    } catch (err) {
-      setErrorMsg('Network error. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    return { property, tickets, stats };
+  }, [propertyId, supabase]);
 
-  const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const { data, isLoading, isFetching, refetch, error } = useServerQuery<{
+    property: Property;
+    tickets: Ticket[];
+    stats: DashboardStats;
+  }>(queryKeys.property.propertyAdminLegacy(propertyId), fetchDashboardData, {
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const property = data?.property ?? null;
+  const tickets = data?.tickets ?? [];
+  const stats = data?.stats ?? { total: 0, open: 0, in_progress: 0, resolved: 0, urgent: 0 };
+  const errorMsg = error ? (error.message || 'Property not found.') : '';
+
+  const onRefresh = useCallback(() => {
+    refetch();
   }, [refetch]);
 
   const filteredTickets = useMemo(() => {
@@ -242,7 +220,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
   const renderOverviewTab = () => (
     <ScrollView 
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
     >
       {/* Property Header */}
@@ -357,7 +335,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
             assignedTo={ticket.assignee?.full_name}
             assigneePhotoUrl={ticket.assignee?.user_photo_url}
             photoUrl={ticket.photo_before_url}
-            onClick={() => router.push(`/tickets/${ticket.id}` as any)}
+            onClick={() => router.push(`/property/${propertyId}/tickets/${ticket.id}` as any)}
             tick={tick}
           />
         ))}
@@ -375,7 +353,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
   const renderRequestsTab = () => (
     <ScrollView 
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
     >
       {/* Search */}
@@ -442,7 +420,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
             assignedTo={ticket.assignee?.full_name}
             assigneePhotoUrl={ticket.assignee?.user_photo_url}
             photoUrl={ticket.photo_before_url}
-            onClick={() => router.push(`/tickets/${ticket.id}` as any)}
+            onClick={() => router.push(`/property/${propertyId}/tickets/${ticket.id}` as any)}
             tick={tick}
           />
         ))}
@@ -591,7 +569,7 @@ export default function PropertyAdminDashboard({ propertyId }: PropertyAdminDash
           <Ionicons name="alert-circle-outline" size={64} color="#708F96" />
           <Text style={styles.errorTitle}>Unable to Load Dashboard</Text>
           <Text style={styles.errorText}>{errorMsg || 'Property not found.'}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchPropertyDetails}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>

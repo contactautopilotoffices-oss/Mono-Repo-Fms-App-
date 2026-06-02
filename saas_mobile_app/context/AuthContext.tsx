@@ -14,6 +14,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { createClient } from '@/utils/supabase/client';
 import { UserMembership, PropertyInfo } from '@/types/membership';
 import { clearToken } from '@/services/cassandra/cassandraAuthService';
+import { queryClient } from '@/utils/queryClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // but we don't block the UI.
       }
 
-      setIsMembershipLoading(true);
+      setIsMembershipLoading(!cached);
 
       try {
         // Fetch organisation membership
@@ -173,19 +174,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('user_id', userId)
           .or('is_active.eq.true,is_active.is.null');
 
-        let builtProperties: PropertyInfo[] = (propData ?? [])
-          .map((p: any) => {
+        let builtProperties: PropertyInfo[] = (propData ?? []).reduce<PropertyInfo[]>(
+          (acc, p: any) => {
             const prop = p.property as any;
-            if (!prop?.id) return null;
-            return {
+            if (!prop?.id) return acc;
+
+            acc.push({
               id: prop.id as string,
               name: (prop.name as string) ?? '',
               code: (prop.code as string) ?? '',
               role: (p.role as string) ?? 'tenant',
               image_url: (prop.image_url as string) ?? '',
-            };
-          })
-          .filter((p: PropertyInfo | null): p is PropertyInfo => p !== null);
+            });
+            return acc;
+          },
+          []
+        );
 
         // Auto-inject all org properties if the user is an org admin
         const fetchedOrgId = ((orgData as any)?.organization)?.id;
@@ -402,6 +406,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await clearMembershipCache(user.id);
     }
     setMembership(null);
+    queryClient.clear(); // Clear React Query cache on sign-out
     await supabase.auth.signOut();
   }, [supabase, user?.id]);
 

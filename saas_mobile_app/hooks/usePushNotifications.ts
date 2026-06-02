@@ -6,13 +6,32 @@ import Constants from 'expo-constants';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from './useAuth';
 import { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
-let messagingInstance: any | null = null;
-function getMessaging(): any {
+let firebaseModules:
+  | {
+      AuthorizationStatus: any;
+      getApp: () => any;
+      getMessaging: (app?: any) => any;
+      getToken: (messaging: any) => Promise<string>;
+      onTokenRefresh: (messaging: any, listener: (token: string) => void) => () => void;
+      requestPermission: (messaging: any) => Promise<number>;
+    }
+  | null = null;
+
+function getFirebaseMessagingModules() {
   if (Platform.OS === 'web') return null;
-  if (!messagingInstance) {
-    messagingInstance = require('@react-native-firebase/messaging').default;
+  if (!firebaseModules) {
+    const messaging = require('@react-native-firebase/messaging');
+    const app = require('@react-native-firebase/app');
+    firebaseModules = {
+      AuthorizationStatus: messaging.AuthorizationStatus,
+      getApp: app.getApp,
+      getMessaging: messaging.getMessaging,
+      getToken: messaging.getToken,
+      onTokenRefresh: messaging.onTokenRefresh,
+      requestPermission: messaging.requestPermission,
+    };
   }
-  return messagingInstance;
+  return firebaseModules;
 }
 
 // ------------------------------------------------------------------
@@ -81,15 +100,16 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
 
   let token: string | null = null;
   try {
-    const messaging = getMessaging();
-    if (!messaging) return null;
-    const authStatus = await messaging().requestPermission();
+    const firebaseMessaging = getFirebaseMessagingModules();
+    if (!firebaseMessaging) return null;
+    const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
+    const authStatus = await firebaseMessaging.requestPermission(messagingInstance);
     const enabled =
-      authStatus === getMessaging().AuthorizationStatus.AUTHORIZED ||
-      authStatus === getMessaging().AuthorizationStatus.PROVISIONAL;
+      authStatus === firebaseMessaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === firebaseMessaging.AuthorizationStatus.PROVISIONAL;
 
     if (enabled) {
-      token = await getMessaging().getToken();
+      token = await firebaseMessaging.getToken(messagingInstance);
     } else {
       console.log('[Push] Firebase messaging not authorized');
       return null;
@@ -262,9 +282,10 @@ export function usePushNotifications() {
     // Listen to token refreshes from Firebase
     let unsubscribe = () => {};
     try {
-      const messaging = getMessaging();
-      if (messaging) {
-        unsubscribe = messaging.onTokenRefresh((newToken: string) => {
+      const firebaseMessaging = getFirebaseMessagingModules();
+      if (firebaseMessaging) {
+        const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
+        unsubscribe = firebaseMessaging.onTokenRefresh(messagingInstance, (newToken: string) => {
           console.log('[Push] Token refreshed via Firebase:', newToken);
           if (user?.id) {
             storePushToken(user.id, newToken);

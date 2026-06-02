@@ -14,7 +14,6 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type WeatherCondition = 'clear-night' | 'sunny' | 'cloudy' | 'rainy' | 'cosmic';
@@ -194,16 +193,10 @@ export function useWeather() {
         return;
       }
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        await computeWeather(null, null);
-        return;
-      }
-
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low,
-      });
-      await computeWeather(loc.coords.latitude, loc.coords.longitude);
+      // Location permission prompts are disabled in mobile dashboards to avoid
+      // blocking the dashboard load path. We fall back to the cached/static
+      // weather mode instead of asking for foreground location access.
+      await computeWeather(null, null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Location unavailable');
       await computeWeather(null, null);

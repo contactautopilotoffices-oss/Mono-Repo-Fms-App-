@@ -80,6 +80,8 @@ const property = {
   mstDashboard: (propertyId: string) => ['mst-dashboard', propertyId] as const,
   /** New MST dashboard for a property */
   mstDashboardNew: (propertyId: string) => ['mst-dashboard-new', propertyId] as const,
+  /** Lovable MST dashboard for a property */
+  mstDashboardLovable: (propertyId: string) => ['mst-dashboard-lovable', propertyId] as const,
   /** Premium MST dashboard for a property */
   mstDashboardPremium: (propertyId: string) => ['mst-dashboard-premium', propertyId] as const,
   /** Legacy MST dashboard for a property */

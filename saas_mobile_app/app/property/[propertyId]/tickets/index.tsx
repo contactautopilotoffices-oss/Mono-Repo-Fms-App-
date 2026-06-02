@@ -27,7 +27,7 @@ import SafeBlurView from '@/components/ui/SafeBlurView';
 import { RotatingBorder } from '@/components/shared/RotatingBorder';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 
@@ -88,38 +88,15 @@ export default function TicketsScreen() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [dateRange, setDateRange] = useState<DateRangeFilter>('all');
-  const [statusCounts, setStatusCounts] = useState<Record<StatusFilter, number>>({
-    all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
-  });
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const insets = useSafeAreaInsets();
   const orgId = membership?.org_id ?? '';
 
-  // Client-side filter for needs-attention mode
-  const displayedTickets = useMemo(() => {
-    if (!isNeedsAttentionMode) return tickets;
-    return tickets.filter((t) => {
-      // Critical priority
-      if (t.priority === 'critical') return true;
-      // High priority + active
-      if (t.priority === 'high' && !['resolved', 'closed'].includes(t.status)) return true;
-      // Tenant ticket + active
-      if (t.is_internal === false && !['resolved', 'closed'].includes(t.status)) return true;
-      // Stale ticket (>3 days open)
-      const daysOpen = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysOpen > 3 && ['open', 'assigned', 'in_progress'].includes(t.status)) return true;
-      return false;
-    });
-  }, [tickets, isNeedsAttentionMode]);
+
 
   const buildQuery = useCallback((offset: number, limit: number) => {
     if (!propertyId) return null;
@@ -184,164 +161,149 @@ export default function TicketsScreen() {
     return q;
   }, [propertyId, statusFilter, dateRange, supabase, isNeedsAttentionMode]);
 
-  const fetchTickets = useCallback(async (reset = false) => {
-    if (!propertyId) return;
-    if (reset) setLoading(true);
-    try {
-      const q = buildQuery(0, PAGE_SIZE + 1);
-      if (!q) return;
-      const { data, error } = await q;
-      let items: Ticket[] = (data ?? []) as Ticket[];
-      if (error && error.code === 'PGRST116') {
-        // No rows — not an error, just empty
-        items = [];
-      } else if (error) {
-        throw error;
+const defaultCounts: Record<StatusFilter, number> = {
+  all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
+};
+
+const getStatusCounts = useCallback(async () => {
+  if (!propertyId) return defaultCounts;
+  try {
+    const counts: Record<StatusFilter, number> = { ...defaultCounts };
+
+    const propIds = propertyId === 'all'
+      ? (membership?.properties?.map(p => p.id) ?? [])
+      : [propertyId];
+
+    if (propIds.length === 0) return counts;
+
+    const getDateRange = (range: DateRangeFilter) => {
+      const now = new Date();
+      const end = now.toISOString().split('T')[0] + 'T23:59:59';
+      if (range === 'today') return { start: now.toISOString().split('T')[0], end };
+      if (range === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); return { start: d.toISOString().split('T')[0], end }; }
+      if (range === 'month') { const d = new Date(now); d.setDate(d.getDate() - 30); return { start: d.toISOString().split('T')[0], end }; }
+      return { start: '1970-01-01', end };
+    };
+    const { start, end } = getDateRange(dateRange);
+
+    const applyDateFilter = (q: any) => {
+      if (dateRange !== 'all') {
+        return q.gte('created_at', start).lte('created_at', end);
       }
-      const hasMoreItems = items.length > PAGE_SIZE;
-      setTickets(items.slice(0, PAGE_SIZE));
-      setHasMore(hasMoreItems);
-    } catch (err) {
-      console.error('Error fetching tickets:', err);
-      setTickets([]);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [propertyId, buildQuery]);
+      return q;
+    };
 
-  const { refetch } = useDashboardFetch(queryKeys.property.tickets(propertyId), fetchTickets, {
-    staleTime: 1000 * 60 * 5,
-  });
-
-  useEffect(() => {
-    if (!isNeedsAttentionMode) fetchStatusCounts();
-  }, [statusFilter, dateRange, isNeedsAttentionMode]);
-
-  const loadMore = async () => {
-    if (loadingMore || !hasMore || !propertyId) return;
-    setLoadingMore(true);
-    try {
-      const q = buildQuery(tickets.length, PAGE_SIZE + 1);
-      if (!q) return;
-      const { data, error } = await q;
-      let items: Ticket[] = (data ?? []) as Ticket[];
-      if (error && error.code === 'PGRST116') items = [];
-      else if (error) throw error;
-      setTickets(prev => [...prev, ...items.slice(0, PAGE_SIZE)]);
-      setHasMore(items.length > PAGE_SIZE);
-    } catch (err) {
-      console.error('Error loading more:', err);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  const fetchStatusCounts = async () => {
-  // Reset counts to avoid stale values while loading new data
-  setStatusCounts({ all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0 });
-    if (!propertyId) return;
-    try {
-      const counts: Record<StatusFilter, number> = {
-        all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
-      };
-
-      const propIds = propertyId === 'all'
-        ? (membership?.properties?.map(p => p.id) ?? [])
-        : [propertyId];
-
-      if (propIds.length === 0) {
-        setStatusCounts(counts);
-        return;
+    const applyPropertyFilter = (q: any) => {
+      if (propertyId === 'all') {
+        return q.in('property_id', propIds);
       }
+      return q.eq('property_id', propertyId);
+    };
 
-      const getDateRange = (range: DateRangeFilter) => {
-        const now = new Date();
-        const end = now.toISOString().split('T')[0] + 'T23:59:59';
-        if (range === 'today') return { start: now.toISOString().split('T')[0], end };
-        if (range === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); return { start: d.toISOString().split('T')[0], end }; }
-        if (range === 'month') { const d = new Date(now); d.setDate(d.getDate() - 30); return { start: d.toISOString().split('T')[0], end }; }
-        return { start: '1970-01-01', end };
-      };
-      const { start, end } = getDateRange(dateRange);
+    const { count: allCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+      )
+    ) as any;
+    counts.all = allCount ?? 0;
 
-      const applyDateFilter = (q: any) => {
-        if (dateRange !== 'all') {
-          return q.gte('created_at', start).lte('created_at', end);
-        }
-        return q;
-      };
+    const { count: mineCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .eq('assigned_to', authUser?.id ?? '')
+      )
+    ) as any;
+    counts.mine = mineCount ?? 0;
 
-      const applyPropertyFilter = (q: any) => {
-        if (propertyId === 'all') {
-          return q.in('property_id', propIds);
-        }
-        return q.eq('property_id', propertyId);
-      };
+    const { count: openCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .in('status', ['open', 'assigned'])
+      )
+    ) as any;
+    counts.open = openCount ?? 0;
 
-      const { count: allCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-        )
-      ) as any;
-      counts.all = allCount ?? 0;
+    const { count: progressCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .in('status', ['in_progress'])
+      )
+    ) as any;
+    counts.in_progress = progressCount ?? 0;
 
-      const { count: mineCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-            .eq('assigned_to', authUser?.id ?? '')
-        )
-      ) as any;
-      counts.mine = mineCount ?? 0;
+    const { count: resolvedCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .eq('status', 'resolved')
+      )
+    ) as any;
+    counts.resolved = resolvedCount ?? 0;
 
-      const { count: openCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-            .in('status', ['open', 'assigned'])
-        )
-      ) as any;
-      counts.open = openCount ?? 0;
+    const { count: closedCount } = await applyDateFilter(
+      applyPropertyFilter(
+        supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .eq('status', 'closed')
+      )
+    ) as any;
+    counts.closed = closedCount ?? 0;
 
-      const { count: progressCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-            .in('status', ['in_progress'])
-        )
-      ) as any;
-      counts.in_progress = progressCount ?? 0;
+    return counts;
+  } catch (err) {
+    console.error('Error fetching status counts:', err);
+    return defaultCounts;
+  }
+}, [propertyId, dateRange, supabase, authUser?.id, membership?.properties]);
 
-      const { count: resolvedCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-            .eq('status', 'resolved')
-        )
-      ) as any;
-      counts.resolved = resolvedCount ?? 0;
-
-      const { count: closedCount } = await applyDateFilter(
-        applyPropertyFilter(
-          supabase
-            .from('tickets').select('id', { count: 'exact', head: true })
-            .eq('status', 'closed')
-        )
-      ) as any;
-      counts.closed = closedCount ?? 0;
-
-      setStatusCounts(counts);
-    } catch (err) {
-      console.error('Error fetching status counts:', err);
+const fetchTickets = useCallback(async () => {
+  if (!propertyId) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+  try {
+    const q = buildQuery(0, limit + 1);
+    if (!q) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+    const { data, error } = await q;
+    let items: Ticket[] = (data ?? []) as Ticket[];
+    if (error && error.code === 'PGRST116') {
+      items = [];
+    } else if (error) {
+      throw error;
     }
-  };
+    const hasMoreItems = items.length > limit;
+    const counts = await getStatusCounts();
+    return { tickets: items.slice(0, limit), hasMore: hasMoreItems, statusCounts: counts };
+  } catch (err) {
+    console.error('Error fetching tickets:', err);
+    return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+  }
+}, [propertyId, buildQuery, limit, getStatusCounts]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
+const { data, isLoading, isFetching, refetch } = useServerQuery(
+  [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, isNeedsAttentionMode, String(limit)],
+  fetchTickets,
+  { staleTime: 1000 * 60 * 5, placeholderData: (previousData: any) => previousData }
+);
+
+const tickets = data?.tickets ?? [];
+const displayedTickets = tickets;
+const hasMore = data?.hasMore ?? false;
+const statusCounts = data?.statusCounts ?? defaultCounts;
+
+const loadMore = () => {
+  if (!hasMore || !propertyId) return;
+  setLimit(prev => prev + PAGE_SIZE);
+};
+
+const onRefresh = () => {
+  if (limit !== PAGE_SIZE) {
+    setLimit(PAGE_SIZE);
+  } else {
     refetch();
-  };
+  }
+};
 
 
   // Override status filter to 'all' when entering needs-attention mode
@@ -513,7 +475,7 @@ export default function TicketsScreen() {
         )}
 
         {/* Ticket List */}
-        {loading ? (
+        {isLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color="#7CB9A8" />
           </View>
@@ -544,7 +506,7 @@ export default function TicketsScreen() {
             contentContainerStyle={styles.listContent}
             refreshControl={
               <RefreshControl
-                refreshing={refreshing}
+                refreshing={isFetching}
                 onRefresh={onRefresh}
                 tintColor="#7CB9A8"
                 colors={['#7CB9A8']}
@@ -553,7 +515,7 @@ export default function TicketsScreen() {
             onEndReached={loadMore}
             onEndReachedThreshold={0.3}
             ListFooterComponent={
-              loadingMore ? (
+              isFetching && limit > PAGE_SIZE ? (
                 <View style={styles.loadingMore}>
                   <ActivityIndicator size="small" color="#7CB9A8" />
                 </View>

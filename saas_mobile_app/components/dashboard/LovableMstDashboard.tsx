@@ -40,9 +40,10 @@ import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
-import { useAsyncStorageCache } from '@/hooks/useAsyncStorageCache';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { queryClient } from '@/utils/queryClient';
+import { invalidate } from '@/utils/queryInvalidation';
 
 // WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -58,10 +59,7 @@ import {
   type UserStats,
   type LeaderRow,
 } from '@/lib/gamification';
-import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
-import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
-import { ppmService } from '@/services/ppmService';
 
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
@@ -99,6 +97,18 @@ type Tab = 'dashboard' | 'daily' | 'flow' | 'profile';
 interface Props {
   propertyId: string;
 }
+
+type MstDashboardQueryData = {
+  property: { name: string } | null;
+  tickets: Ticket[];
+  isCheckedIn: boolean;
+};
+
+const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'month', label: 'This Month' },
+  { key: 'all_time', label: 'All Time' },
+];
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -239,6 +249,11 @@ const STACK_HEIGHT = 420;
 function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
   const [order, setOrder] = useState(initialTickets);
   const translateX = useSharedValue(0);
+
+  useEffect(() => {
+    setOrder(initialTickets);
+    translateX.value = 0;
+  }, [initialTickets, translateX]);
 
   const sendToBack = useCallback(() => {
     setOrder((prev) => {
@@ -454,7 +469,7 @@ const CountdownTimer = memo(function CountdownTimer() {
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
 type TimeFilter = 'today' | 'month' | 'all_time';
-type ScopeFilter = 'mine' | 'all';
+type ScopeFilter = 'property' | 'my_tasks';
 
 export default function LovableMstDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
@@ -464,33 +479,15 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const supabase = useMemo(() => createClient(), []);
 
-  // ── AsyncStorage cache for instant paint on app reopen ───────────────────
-  const { cachedData: mstCache, hasCache: hasMstCache, saveCache: saveMstCache } = useAsyncStorageCache<{
-    property: { name: string } | null;
-    tickets: Ticket[];
-    isCheckedIn: boolean;
-    ppmTotal: number; ppmDone: number; ppmPending: number; ppmOverdue: number; ppmPostponed: number;
-  }>({ key: 'mst-dashboard', propertyId, staleTime: 5 * 60 * 1000 });
-
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [isLoading, setIsLoading] = useState(!hasMstCache);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [property, setProperty] = useState<{ name: string } | null>(mstCache?.property ?? null);
-  const [tickets, setTickets] = useState<Ticket[]>(mstCache?.tickets ?? []);
-  const [isCheckedIn, setIsCheckedIn] = useState(mstCache?.isCheckedIn ?? false);
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
 
   // ── Time & scope filters (slice local cache — no extra network requests) ──
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
-  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('mine');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all_time');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('my_tasks');
 
-  // PPM stats (local)
-  const [ppmTotal, setPpmTotal]   = useState(mstCache?.ppmTotal ?? 0);
-  const [ppmDone, setPpmDone]     = useState(mstCache?.ppmDone ?? 0);
-  const [ppmPending, setPpmPending] = useState(mstCache?.ppmPending ?? 0);
-  const [ppmOverdue, setPpmOverdue] = useState(mstCache?.ppmOverdue ?? 0);
-  const [ppmPostponed, setPpmPostponed] = useState(mstCache?.ppmPostponed ?? 0);
+
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -503,10 +500,52 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   // Gamification
   const { leaderboard: gamifyLb, myStats, loading: gamifyLoading } = useGamification(propertyId);
 
-  // Filtered tickets — sliced locally from full cache, no extra network call
+  // ── Server Query ──
+  const {
+    data,
+    isLoading,
+    isFetching,
+    refetch,
+    error,
+  } = useServerQuery<{
+    property: { name: string } | null;
+    tickets: Ticket[];
+    isCheckedIn: boolean;
+  }>(
+    queryKeys.property.mstDashboardLovable(propertyId),
+    async () => {
+      const [{ data: propData }, { data: ticketData }, { data: shiftData }] = await Promise.all([
+        supabase.from('properties').select('name').eq('id', propertyId).maybeSingle(),
+        supabase.from('tickets')
+          .select(`*, assignee:users!assigned_to(id, full_name, email, user_photo_url), creator:users!raised_by(id, full_name)`)
+          .eq('property_id', propertyId)
+          .order('created_at', { ascending: false }),
+        supabase.from('resolver_stats').select('is_checked_in').eq('property_id', propertyId).eq('user_id', user?.id ?? '').maybeSingle(),
+      ]);
+      return {
+        property: propData ?? null,
+        tickets: (ticketData as Ticket[]) ?? [],
+        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+      };
+    },
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const hasValidDashboardData =
+    !!data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { tickets?: unknown }).tickets);
+
+  const property = hasValidDashboardData ? data.property ?? null : null;
+  const tickets = hasValidDashboardData ? data.tickets : [];
+  const isCheckedIn = hasValidDashboardData ? !!data.isCheckedIn : false;
+  const leaderboardData = Array.isArray(gamifyLb) ? gamifyLb : [];
+
+  // Filtered tickets — sliced locally from cached/server data, no extra network call
   const filteredTickets = useMemo(() => {
     let result = [...tickets];
-    if (scopeFilter === 'mine') {
+    if (scopeFilter === 'my_tasks') {
       result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
     }
     if (timeFilter === 'today') {
@@ -519,82 +558,14 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     return result;
   }, [tickets, timeFilter, scopeFilter, user?.id]);
 
-  // ── Data fetching ──
-  const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const { data: propData } = await supabase
-        .from('properties')
-        .select('name')
-        .eq('id', propertyId)
-        .maybeSingle();
-      if (propData) setProperty(propData);
-
-      const { data: ticketData } = await supabase
-        .from('tickets')
-        .select(`
-          *,
-          assignee:users!assigned_to(id, full_name, email, user_photo_url),
-          creator:users!raised_by(id, full_name)
-        `)
-        .eq('property_id', propertyId)
-        .order('created_at', { ascending: false });
-      if (ticketData) setTickets(ticketData as Ticket[]);
-
-      // Shift status
-      const { data: shiftData } = await supabase
-        .from('resolver_stats')
-        .select('is_checked_in')
-        .eq('property_id', propertyId)
-        .eq('user_id', user?.id as string)
-        .maybeSingle();
-      if (shiftData) setIsCheckedIn(!!(shiftData as any).is_checked_in);
-
-      // TODO: shift_logs does not exist in saas_one schema
-      // const { data: activeShift } = await supabase
-      //   .from('shift_logs')
-      //   .select('id')
-      //   .eq('user_id', user?.id as string)
-      //   .eq('property_id', propertyId)
-      //   .eq('status', 'active')
-      //   .order('check_in_at', { ascending: false })
-      //   .limit(1)
-      //   .maybeSingle();
-      // if (activeShift) {
-      //   setActiveShiftId((activeShift as any).id);
-      //   setIsCheckedIn(true);
-      // }
-
-      // PPM stats
-      try {
-        const ppmRes = await ppmService.fetchStats(propertyId);
-        if (ppmRes.success && ppmRes.data) {
-          setPpmTotal(ppmRes.data.total ?? 0);
-          setPpmDone(ppmRes.data.done ?? 0);
-          setPpmPending(ppmRes.data.pending ?? 0);
-          setPpmOverdue(ppmRes.data.overdue ?? 0);
-          setPpmPostponed(ppmRes.data.postponed ?? 0);
-        }
-      } catch (_e) { /* ignore */ }
-
-    } catch (err) {
-      console.warn('[LovableMstDashboard] fetch error:', err);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+  const shuffledTickets = useMemo(() => {
+    const next = [...filteredTickets];
+    for (let i = next.length - 1; i > 0; i -= 1) {
+      const swapIndex = Math.floor(Math.random() * (i + 1));
+      [next[i], next[swapIndex]] = [next[swapIndex], next[i]];
     }
-  }, [propertyId, user?.id, saveMstCache]);
-
-  // Save to cache after first successful fetch
-  useEffect(() => {
-    if (!isLoading && !isRefreshing && property) {
-      saveMstCache({ property, tickets, isCheckedIn, ppmTotal, ppmDone, ppmPending, ppmOverdue, ppmPostponed });
-    }
-  }, [isLoading, isRefreshing, property, tickets, isCheckedIn, ppmTotal, ppmDone, ppmPending, ppmOverdue, ppmPostponed]);
-
-  const { refetch } = useDashboardFetch(queryKeys.property.mstDashboard(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+    return next;
+  }, [filteredTickets]);
 
   useEffect(() => {
     hasRequestedPermissions().then(requested => {
@@ -602,8 +573,13 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     });
   }, []);
 
+  useEffect(() => {
+    if (propertyId && !hasValidDashboardData && !isFetching) {
+      refetch();
+    }
+  }, [propertyId, hasValidDashboardData, isFetching, refetch]);
+
   const onRefresh = () => {
-    setIsRefreshing(true);
     refetch();
   };
 
@@ -613,38 +589,20 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     setIsCheckingInOut(true);
     const newStatus = !isCheckedIn;
 
-    try {
-      // TODO: shift_logs does not exist in saas_one schema
-      // if (newStatus) {
-      //   const { data: newShift, error: shiftErr }: any = await (supabase
-      //     .from('shift_logs') as any)
-      //     .insert({
-      //       user_id: user.id,
-      //       property_id: propertyId,
-      //       status: 'active',
-      //       check_in_at: new Date().toISOString(),
-      //     })
-      //     .select()
-      //     .single();
-      //   if (shiftErr) throw shiftErr;
-      //   setActiveShiftId(newShift.id);
-      // } else {
-      //   if (activeShiftId) {
-      //     await (supabase.from('shift_logs') as any)
-      //       .update({ status: 'completed', check_out_at: new Date().toISOString() })
-      //       .eq('id', activeShiftId);
-      //   }
-      //   setActiveShiftId(null);
-      // }
+    // Optimistically update React Query cache
+    queryClient.setQueryData(
+      queryKeys.property.mstDashboardLovable(propertyId),
+      (old: MstDashboardQueryData | undefined) =>
+        old ? { ...old, isCheckedIn: newStatus } : old
+    );
 
+    try {
       await serverApi.query({
         table: 'resolver_stats',
         action: 'upsert',
         values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
         mutationOptions: { onConflict: 'user_id,property_id' },
       });
-
-      setIsCheckedIn(newStatus);
       
       try {
         const { sound } = await Audio.Sound.createAsync({
@@ -661,29 +619,33 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         type: 'success'
       });
     } catch (error: any) {
+      // Revert on error
+      queryClient.setQueryData(
+        queryKeys.property.mstDashboardLovable(propertyId),
+        (old: MstDashboardQueryData | undefined) =>
+          old ? { ...old, isCheckedIn: !newStatus } : old
+      );
       setToastConfig({
         visible: true,
         message: error.message || 'Failed to update shift',
         type: 'error'
       });
-      setIsCheckedIn(!newStatus);
     } finally {
       setIsCheckingInOut(false);
     }
-  }, [isCheckedIn, propertyId, user?.id, activeShiftId, isCheckingInOut]);
+  }, [isCheckedIn, propertyId, user?.id, isCheckingInOut]);
 
   // ── Stats ──
   const stats = useMemo(() => {
-    const total = tickets.length;
-    const active = tickets.filter((t) =>
-      ['open', 'in_progress', 'blocked', 'client_raised'].includes(t.status)
+    const total = filteredTickets.length;
+    const open = filteredTickets.filter((t) =>
+      ['open', 'in_progress', 'assigned'].includes(t.status)
     ).length;
-    const completed = tickets.filter((t) =>
-      ['resolved', 'closed'].includes(t.status)
+    const closed = filteredTickets.filter((t) =>
+      ['resolved', 'closed', 'pending_validation'].includes(t.status)
     ).length;
-    const assignedToMe = tickets.filter(t => t.assigned_to === user?.id).length;
-    return { total, active, completed, assignedToMe };
-  }, [tickets, user]);
+    return { total, open, closed };
+  }, [filteredTickets]);
 
   // ── Gamification user ──
   const mstUser: UserStats = useMemo(() => {
@@ -709,8 +671,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   // ── Leaderboard rows ──
   const leaderboardRows: LeaderRow[] = useMemo(() => {
-    if (gamifyLb.length === 0) return demoLeaderboard;
-    return gamifyLb.map((entry, i) => ({
+    if (leaderboardData.length === 0) return demoLeaderboard;
+    return leaderboardData.map((entry, i) => ({
       rank: i + 1,
       name: entry.name || 'Staff',
       initials: (entry.name || 'S').charAt(0).toUpperCase(),
@@ -721,7 +683,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       isMe: entry.user_id === user?.id,
       user_id: entry.user_id,
     }));
-  }, [gamifyLb, property, user?.id]);
+  }, [leaderboardData, property, user?.id]);
 
   const champion: LeaderRow | undefined = leaderboardRows[0];
 
@@ -751,50 +713,63 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         </View>
       </Animated.View>
 
+      {/* Scope filter */}
+      <Animated.View entering={FadeInUp.delay(150).duration(500)} style={styles.timeToggleRow}>
+        <TouchableOpacity
+          style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+          onPress={() => setScopeFilter('property')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+          onPress={() => setScopeFilter('my_tasks')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Time filter */}
+      <Animated.View entering={FadeInUp.delay(170).duration(500)} style={styles.timeToggleRow}>
+        {TICKET_TIME_FILTER_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.key}
+            style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
+            onPress={() => setTimeFilter(option.key)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </Animated.View>
+
       {/* Stats card */}
       <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.statsCardInner}>
-          <View style={styles.statsCardHeader}>
-            <TouchableOpacity style={styles.customizeBtn}>
-              <Ionicons name="options-outline" size={14} color="rgba(255,255,255,0.80)" />
-              <Text style={styles.customizeBtnText}>Customize</Text>
-            </TouchableOpacity>
-          </View>
           <View style={styles.statsGrid}>
             <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-            <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
+            <StatTile value={String(stats.open)} label="OPEN" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=open`)} />
+            <StatTile value={String(stats.closed)} label="CLOSED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=closed`)} />
           </View>
-          <View style={[styles.statsGrid, { marginTop: 12 }]}>
-            <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
-            <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
+          <View style={styles.ticketStackSection}>
+            <Text style={styles.ticketStackTitle}>Tickets</Text>
+            {shuffledTickets.length > 0 ? (
+              <TicketStack tickets={shuffledTickets.slice(0, 5)} />
+            ) : (
+              <View style={styles.ticketStackEmpty}>
+                <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+              </View>
+            )}
           </View>
         </View>
       </Animated.View>
 
-      <ChecklistProgressCard completed={stats.completed} total={stats.total} delay={280} />
-
-      <PPMProgressCard
-        propertyId={propertyId}
-        organizationId={orgId}
-        done={ppmDone}
-        total={ppmTotal}
-        pending={ppmPending}
-        overdue={ppmOverdue}
-        postponed={ppmPostponed}
-        delay={320}
-        onPress={() => router.push(`/property/${propertyId}/ppm`)}
-      />
-
-      <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={380} />
-
-      {/* Property Requests */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionHeaderTitle}>Property Requests</Text>
-        <Text style={styles.sectionHeaderHint}>Tap top card to cycle</Text>
-      </View>
-
-      <TicketStack tickets={tickets.slice(0, 5)} />
+      <ChecklistProgressCard completed={stats.closed} total={stats.total} delay={280} />
     </>
   );
 
@@ -943,7 +918,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading) {
+  if (isLoading || (isFetching && !hasValidDashboardData)) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
@@ -967,7 +942,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
@@ -1456,6 +1431,64 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+  // Filter chips
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(99,102,241,0.35)',
+    borderColor: 'rgba(99,102,241,0.50)',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.70)',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  timeToggleRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 10,
+    padding: 4,
+    width: '100%',
+  },
+  timeToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  timeToggleBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  timeToggleText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  timeToggleTextActive: {
+    color: '#FFF',
+    fontWeight: '700',
+  },
+
   // Stats card
   statsCard: {
     marginTop: 20,
@@ -1466,6 +1499,35 @@ const styles = StyleSheet.create({
   },
   statsCardInner: {
     padding: 16,
+  },
+  ticketStackSection: {
+    marginTop: 18,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  ticketStackTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.72)',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 14,
+  },
+  ticketStackEmpty: {
+    minHeight: 120,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  ticketStackEmptyText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.58)',
+    textAlign: 'center',
   },
   statsCardHeader: {
     flexDirection: 'row',
