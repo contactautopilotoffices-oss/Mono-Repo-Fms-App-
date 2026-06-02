@@ -65,7 +65,45 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch catalog" }, { status: 500 });
     }
 
-    return NextResponse.json({ items: data ?? [] });
+    // ── Fallback to stock_items if procurement_catalog is empty ───────────
+    let items = data ?? [];
+    if (items.length === 0) {
+      let sq = admin
+        .from("stock_items")
+        .select("id, name, description, category, unit, per_unit_cost, quantity, property_id, organization_id, created_at, updated_at")
+        .eq("organization_id", orgId)
+        .order("name", { ascending: true });
+
+      if (propertyId) {
+        sq = sq.eq("property_id", propertyId);
+      }
+      if (search) {
+        sq = sq.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+      }
+      if (category && category !== "all") {
+        sq = sq.eq("category", category);
+      }
+
+      const { data: stockData, error: stockError } = await sq;
+      if (!stockError && stockData && stockData.length > 0) {
+        items = stockData.map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          description: item.description,
+          photo_url: null,
+          category: item.category,
+          estimated_price: item.per_unit_cost ?? 0,
+          unit: item.unit ?? 'pcs',
+          is_active: true,
+          organization_id: item.organization_id,
+          created_at: item.created_at,
+          updated_at: item.updated_at,
+          _source: 'stock_items',
+        }));
+      }
+    }
+
+    return NextResponse.json({ items });
   } catch (error) {
     console.error("[saas-mobile-server] procurement catalog GET error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
