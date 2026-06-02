@@ -201,8 +201,10 @@ async def validate_membership(user_id: str, property_id: str) -> Optional[dict]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, headers=headers, params=params)
+        logger.info("[AUTH] Membership query status=%s user=%s property=%s", resp.status_code, user_id, property_id)
         if resp.status_code == 200:
             data = resp.json()
+            logger.info("[AUTH] Membership query returned %d rows", len(data))
             if data and len(data) > 0:
                 return data[0]
         else:
