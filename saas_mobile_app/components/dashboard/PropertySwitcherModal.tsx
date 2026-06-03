@@ -18,6 +18,7 @@ interface Props {
   onClose: () => void;
   currentPropertyId: string;
   orgId: string;
+  onSelect?: (propertyId: string) => void;
 }
 
 export default function PropertySwitcherModal({
@@ -25,6 +26,7 @@ export default function PropertySwitcherModal({
   onClose,
   currentPropertyId,
   orgId,
+  onSelect,
 }: Props) {
   const router = useRouter();
   const { membership } = useAuth();
@@ -53,13 +55,21 @@ export default function PropertySwitcherModal({
   const handleSelectProperty = (id: string) => {
     onClose();
     if (id === currentPropertyId) return;
-    router.replace(`/property/${id}/dashboard` as never);
+    if (onSelect) {
+      onSelect(id);
+    } else {
+      router.replace(`/property/${id}/dashboard` as never);
+    }
   };
 
   const handleSelectAll = () => {
     onClose();
     if ('all' === currentPropertyId) return;
-    router.replace(`/property/all/dashboard` as never);
+    if (onSelect) {
+      onSelect('all');
+    } else {
+      router.replace(`/property/all/dashboard` as never);
+    }
   };
 
   return (

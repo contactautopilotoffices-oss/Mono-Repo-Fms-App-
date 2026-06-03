@@ -822,6 +822,11 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           onClose={() => setShowPropertySwitcher(false)}
           currentPropertyId={propertyId}
           orgId={orgId}
+          onSelect={(newPropertyId) => {
+            setShowPropertySwitcher(false);
+            clearCache();
+            router.replace(`/property/${newPropertyId}/dashboard` as never);
+          }}
         />
       )}
       

@@ -157,9 +157,10 @@ function timeAgo(dateStr: string): string {
 export default function TicketDetailScreen() {
   const { propertyId, id } = useLocalSearchParams<{ propertyId: string; id: string }>();
   const router = useRouter();
-  const supabase = createClient();
   const { theme } = useTheme();
   const { user: authUser, session } = useAuth();
+  // Authenticated client — uses session token so auth works on mobile
+  const supabase = session?.access_token ? createClientFromToken(session.access_token) : createClient();
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
 
@@ -182,6 +183,7 @@ export default function TicketDetailScreen() {
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
   const [availableMSTs, setAvailableMSTs] = useState<{ id: string; full_name: string }[]>([]);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [validationEnabled, setValidationEnabled] = useState(false);
   const [userNameMap, setUserNameMap] = useState<Record<string, string>>({});
   const [showLoggersMenu, setShowLoggersMenu] = useState(false);
   // Share & Edit state
@@ -380,7 +382,7 @@ export default function TicketDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [propertyId, id, supabase, authUser]);
+  }, [propertyId, id, session]);
 
   const { refetch } = useDashboardFetch(queryKeys.property.ticketDetail(id), fetchTicket, {
     staleTime: 1000 * 60 * 5,

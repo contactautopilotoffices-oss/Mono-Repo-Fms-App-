@@ -326,9 +326,8 @@ const { data, isLoading, isFetching, refetch } = useServerQuery(
   { staleTime: 1000 * 60 * 5, placeholderData: (previousData: any) => previousData }
 );
 
-const tickets = data?.tickets ?? [];
 const displayedTickets = useMemo(() => {
-    let source = tickets;
+    let source: Ticket[] = data?.tickets ?? [];
     if (isNeedsAttentionMode) {
       source = source.filter((t: Ticket) => {
         if (t.priority === 'critical') return true;
@@ -346,7 +345,7 @@ const displayedTickets = useMemo(() => {
       (t.ticket_number ?? '').toLowerCase().includes(q) ||
       (t.description ?? '').toLowerCase().includes(q)
     );
-  }, [tickets, isNeedsAttentionMode, searchQuery]);
+  }, [data, isNeedsAttentionMode, searchQuery]);
 const hasMore = data?.hasMore ?? false;
 const statusCounts = data?.statusCounts ?? defaultCounts;
 

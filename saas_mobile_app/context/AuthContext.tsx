@@ -141,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         // Fetch organisation membership
-        const { data: orgData } = await supabase
+        const { data: orgData, error: orgError } = await supabase
           .from('organization_memberships')
           .select(
             `
@@ -156,6 +156,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .or('is_active.eq.true,is_active.is.null')
           .limit(1)
           .maybeSingle();
+
+        if (orgError) {
+          console.error('[AuthContext] org membership fetch error:', orgError);
+        }
+
+        // Safely extract org from join result — guard against null/undefined join
+        const orgFromJoin = (orgData as any)?.organization;
+        const fetchedOrgId = typeof orgFromJoin?.id === 'string' ? orgFromJoin.id : null;
 
         // Fetch all property memberships for this user
         const { data: propData } = await supabase
@@ -191,11 +199,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           []
         );
 
-        // Auto-inject all org properties if the user is an org admin
-        const fetchedOrgId = ((orgData as any)?.organization)?.id;
         const fetchedOrgRole = (orgData as any)?.role;
         const ORG_ADMIN_ROLES = ['org_super_admin', 'org_admin', 'owner'];
-        
+
         if (fetchedOrgId && fetchedOrgRole && ORG_ADMIN_ROLES.includes(fetchedOrgRole)) {
           const { data: orgPropsData } = await supabase
             .from('properties')
@@ -223,7 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // PERMANENT FIX: Derive org_id from properties if no org membership exists.
         // This handles property-only users who lack an organization_memberships row.
-        let resolvedOrgId = ((orgData as any)?.organization)?.id ?? null;
+        let resolvedOrgId = fetchedOrgId;
         if (!resolvedOrgId && builtProperties.length > 0) {
           // Look up the organization_id from the first property's parent org
           const firstPropId = builtProperties[0].id;

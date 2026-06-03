@@ -28,14 +28,18 @@ export async function GET(request: NextRequest) {
 
     // Resolve organization_id from property if needed
     let orgId = organizationId;
-    if (propertyId && !orgId) {
+    // Resolve organization_id — allow any authenticated user with property access (not just org admins)
+    if (propertyId) {
       const access = await getPropertyAccess(auth.user.id, propertyId);
       if (!access.authorized) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      const { data: prop } = await admin.from("properties").select("organization_id").eq("id", propertyId).maybeSingle();
-      orgId = prop?.organization_id;
+      if (!orgId) {
+        const { data: prop } = await admin.from("properties").select("organization_id").eq("id", propertyId).maybeSingle();
+        orgId = prop?.organization_id;
+      }
     } else if (organizationId) {
+      // No propertyId: require org-level admin
       if (!(await canManageOrganization(auth.user.id, organizationId))) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
