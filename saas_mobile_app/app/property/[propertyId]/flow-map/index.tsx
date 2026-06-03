@@ -10,7 +10,7 @@ import {
   Dimensions,
   Platform
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { serverApi } from '@/lib/serverApi';
@@ -70,7 +70,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 export default function LiveFlowMap() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();

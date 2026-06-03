@@ -13,7 +13,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useGlobalSearchParams } from "expo-router";
 import { useAuth } from "@/hooks/useAuth";
 import { useWeather } from "@/hooks/useWeather";
 import { useTenantTickets } from "@/hooks/tenant/useTenantTickets";
@@ -40,7 +40,7 @@ type FilterStatus = "all" | "open" | "in_progress" | "resolved";
 
 export default function TenantRequestsPage() {
   const router = useRouter();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const insets = useSafeAreaInsets();
   const { user, membership } = useAuth();
   const { weather } = useWeather();

@@ -14,7 +14,7 @@ import {
   Platform,
   Dimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/context";
 import { useAuth } from "@/hooks/useAuth";
@@ -145,7 +145,7 @@ function getStockStatus(item: StockItem): StatusType {
 // ─── Main Screen ───────────────────────────────────────────────────────────────
 
 export default function StockScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const { user } = useAuth();

@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
 import { useServerQuery } from '@/hooks/useServerQuery';
@@ -73,7 +73,7 @@ interface UserProfile {
 }
 
 export default function SettingsScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const { user, membership, signOut } = useAuth();

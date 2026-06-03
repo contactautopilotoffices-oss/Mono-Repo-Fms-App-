@@ -8,7 +8,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { stockService } from '@/services/stockService';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,7 +41,7 @@ interface StockItem {
 type ScreenState = 'scanning' | 'found' | 'success' | 'notfound';
 
 export default function StockScanScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();

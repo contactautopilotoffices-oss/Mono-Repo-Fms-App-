@@ -17,7 +17,7 @@ import {
   Linking,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
-import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/context";
 import { useAuth } from "@/hooks/useAuth";
@@ -544,7 +544,7 @@ function MonthCalendar({
 type PPMTab = "calendar" | "schedules" | "amc";
 
 export default function PPMScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === "dark";

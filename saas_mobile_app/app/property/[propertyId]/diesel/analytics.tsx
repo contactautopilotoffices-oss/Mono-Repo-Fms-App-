@@ -10,7 +10,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
@@ -268,7 +268,7 @@ function MetricTile({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DieselAnalyticsScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const colors = Colors[theme];

@@ -14,7 +14,7 @@ import {
   Platform,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
-import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/context";
@@ -1214,7 +1214,7 @@ function formatRelative(dateStr: string): string {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DieselScreen() {
-  const { propertyId, mode } = useLocalSearchParams<{
+  const { propertyId, mode } = useGlobalSearchParams<{
     propertyId: string;
     mode?: string;
   }>();

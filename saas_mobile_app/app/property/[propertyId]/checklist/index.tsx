@@ -24,7 +24,7 @@ import {
   Linking,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
-import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -954,7 +954,7 @@ const HistoryListCard = ({
 }
 
 export default function ChecklistScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const { theme } = useTheme();
   const { user, membership } = useAuth();
   const router = useRouter();

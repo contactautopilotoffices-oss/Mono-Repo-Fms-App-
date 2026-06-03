@@ -13,7 +13,7 @@ import {
   ScrollView,
   Image,
 } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
@@ -1023,7 +1023,7 @@ function InviteMemberSheet({
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function UsersScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const colors = Colors[theme];

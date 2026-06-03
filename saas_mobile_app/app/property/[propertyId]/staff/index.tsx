@@ -1,8 +1,8 @@
 import StaffDashboard from '@/components/dashboard/StaffDashboard';
-import { useLocalSearchParams } from 'expo-router';
+import { useGlobalSearchParams } from 'expo-router';
 
 export default function StaffPage() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   if (!propertyId) return null;
   return <StaffDashboard propertyId={propertyId} />;
 }

@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import TenantDashboard from '@/components/tenant/TenantDashboard';
 
 export default function TenantPage() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const { user, membership, isLoading } = useAuth();
   const router = useRouter();
 

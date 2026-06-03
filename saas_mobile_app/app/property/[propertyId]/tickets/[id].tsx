@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Video, ResizeMode } from 'expo-av';
@@ -155,7 +155,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function TicketDetailScreen() {
-  const { propertyId, id } = useLocalSearchParams<{ propertyId: string; id: string }>();
+  const { propertyId, id } = useGlobalSearchParams<{ propertyId: string; id: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const { user: authUser, session } = useAuth();

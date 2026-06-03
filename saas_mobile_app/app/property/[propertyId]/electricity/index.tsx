@@ -17,7 +17,7 @@ import {
 import { FlashList } from "@shopify/flash-list";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme, useAuth } from "@/context";
@@ -1863,7 +1863,7 @@ function formatRelative(dateStr: string): string {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ElectricityScreen() {
-  const { propertyId, mode } = useLocalSearchParams<{
+  const { propertyId, mode } = useGlobalSearchParams<{
     propertyId: string;
     mode?: string;
   }>();

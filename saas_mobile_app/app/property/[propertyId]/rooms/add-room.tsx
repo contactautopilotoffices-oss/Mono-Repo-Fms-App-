@@ -12,7 +12,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,7 +48,7 @@ const AMENITY_OPTIONS = [
 ];
 
 export default function AddRoomScreen() {
-  const { propertyId, roomId } = useLocalSearchParams<{ propertyId: string; roomId?: string }>();
+  const { propertyId, roomId } = useGlobalSearchParams<{ propertyId: string; roomId?: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();

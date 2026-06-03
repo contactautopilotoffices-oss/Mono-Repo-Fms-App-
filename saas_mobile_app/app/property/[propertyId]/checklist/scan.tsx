@@ -8,7 +8,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { checklistService } from '@/services/checklistService';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,7 +39,7 @@ interface SOPTemplate {
 type ScreenState = 'scanning' | 'found' | 'notfound';
 
 export default function ChecklistScanScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 

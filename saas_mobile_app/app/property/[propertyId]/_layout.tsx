@@ -93,7 +93,6 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Flow Map',          route: 'flow-map',     icon: ArrowUpCircle,   domain: 'tickets' },
   { label: 'User Directory',    route: 'users',        icon: Users,           domain: 'users' },
   { label: 'Visitors',          route: 'visitors',     icon: UserCheck,       domain: 'visitors' },
-  { label: 'Security',          route: 'security',     icon: Shield,          domain: 'security' },
   { label: 'Meeting Rooms',     route: 'rooms',        icon: DoorOpen,        domain: 'properties' },
   { label: 'Diesel Manager',    route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
@@ -105,7 +104,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const NAV_SECTIONS: { label: string; routes: string[] }[] = [
-  { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'security', 'rooms'] },
+  { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'rooms'] },
   { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'checklist', 'ppm', 'reports'] },
 ];
 

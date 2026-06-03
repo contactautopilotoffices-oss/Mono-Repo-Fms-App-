@@ -956,7 +956,6 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
                 { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
                 { label: 'Visitors', route: 'visitors', icon: 'people-outline' },
                 { label: 'PPM', route: 'ppm', icon: 'calendar-outline' },
-                { label: 'Security', route: 'security', icon: 'shield-checkmark-outline' },
                 { label: 'Inventory', route: 'inventory', icon: 'cube-outline' },
               ].map((item) => (
                 <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { 

@@ -1,11 +1,11 @@
 import React from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
-import { Redirect, useLocalSearchParams } from 'expo-router';
+import { Redirect, useGlobalSearchParams } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 
 // All roles now use the unified sidebar dashboard with capability-based module filtering.
 export default function PropertyIndex() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const { user, membership, isLoading, isMembershipLoading } = useAuth();
 
   // CRITICAL: Wait for BOTH auth and membership loading to finish before

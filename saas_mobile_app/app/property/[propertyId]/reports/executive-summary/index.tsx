@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
@@ -38,7 +38,7 @@ function StatusRow({ label, count, color }: { label: string; count: number; colo
 }
 
 export default function ExecutiveSummaryScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const colors = Colors[theme];

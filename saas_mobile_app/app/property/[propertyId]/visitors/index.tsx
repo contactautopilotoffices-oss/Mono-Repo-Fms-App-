@@ -17,7 +17,7 @@ import {
   RefreshControl,
   Pressable,
 } from 'react-native';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useRouter, useGlobalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
@@ -1017,7 +1017,7 @@ function KioskMode({ propertyId, onExit }: { propertyId: string; onExit: () => v
 // ---------------------------------------------------------------------------
 
 export default function VisitorsScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === 'dark';

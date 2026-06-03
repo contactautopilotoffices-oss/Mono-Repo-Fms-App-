@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/utils/supabase/client';
 import { Colors } from '@/constants/Colors';
 import { useDashboardStore } from '@/stores/dashboardStore';
+import { queryClient } from '@/utils/queryClient';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
 
 interface PropertyItem {
@@ -63,6 +64,7 @@ export default function PropertySelectionScreen() {
           setSelectedId(parsed[0].id);
           const { clearCache } = useDashboardStore.getState();
           clearCache();
+          queryClient.clear();
           router.push(`/property/${parsed[0].id}`);
         } else if (parsed.length > 0) {
           setSelectedId(parsed[0].id);
@@ -86,6 +88,7 @@ export default function PropertySelectionScreen() {
               setSelectedId(orgProps[0].id);
               const { clearCache } = useDashboardStore.getState();
               clearCache();
+              queryClient.clear();
               router.push(`/property/${orgProps[0].id}`);
             } else if (orgProps.length > 0) {
               setSelectedId(orgProps[0].id);
@@ -133,11 +136,9 @@ export default function PropertySelectionScreen() {
 
     try {
       const prop = properties.find((p) => p.id === selectedId);
-      if (!prop) return;
-
-      // Clear any cached dashboard data for the previous property
-      const { clearCache } = useDashboardStore.getState();
-      clearCache();
+      // Switch property in store to utilize cache
+      const { switchProperty } = useDashboardStore.getState();
+      switchProperty(selectedId);
 
       // Redirect to property root — role-based dashboard selection happens there
       router.push(`/property/${selectedId}`);

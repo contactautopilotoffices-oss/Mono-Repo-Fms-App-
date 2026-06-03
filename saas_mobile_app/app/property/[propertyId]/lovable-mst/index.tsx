@@ -1,8 +1,8 @@
 import React from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useGlobalSearchParams } from 'expo-router';
 import LovableMstDashboard from '@/components/dashboard/LovableMstDashboard';
 
 export default function LovableMstRoute() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   return <LovableMstDashboard propertyId={propertyId} />;
 }
