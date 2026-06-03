@@ -428,6 +428,16 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const supabase = useMemo(() => createClient(), []);
 
+  // Use property role to determine dashboard features (matching Web App logic)
+  const propRole = useMemo(() => {
+    const prop = membership?.properties?.find(p => p.id === propertyId);
+    return (prop?.role || membership?.org_role || 'staff').toLowerCase().replace(/\s+/g, '_');
+  }, [membership, propertyId]);
+
+  const STAFF_TECHNICAL_ROLES = ['mst', 'technician', 'fe', 'se', 'bms_operator'];
+  const isTechnical = STAFF_TECHNICAL_ROLES.includes(propRole) || propRole.includes('technical');
+  const isSoftServices = propRole.includes('soft_service') || propRole.includes('housekeeping');
+
   // AsyncStorage cache for instant dashboard load on app reopen
   const { cachedData: staffCache, hasCache: hasStaffCache, saveCache: saveStaffCache } = useAsyncStorageCache<{
     property: { name: string } | null;
@@ -465,8 +475,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const [ppmOverdue, setPpmOverdue] = useState(staffCache?.ppmOverdue ?? 0);
   const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
 
-  const isTechnical = userSkills.includes('technical');
-  const isSoftServices = userSkills.includes('soft_services') || userSkills.includes('housekeeping');
+
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);

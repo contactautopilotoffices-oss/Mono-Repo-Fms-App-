@@ -24,6 +24,12 @@ export default function ProcurementDashboard() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { membership } = useAuth();
+
+  const isProcurementRole = useMemo(() => {
+    const prop = membership?.properties?.find(p => p.id === propertyId);
+    return prop?.role === 'procurement' || membership?.org_role === 'procurement';
+  }, [membership, propertyId]);
 
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [requests, setRequests] = useState<MaterialRequest[]>([]);

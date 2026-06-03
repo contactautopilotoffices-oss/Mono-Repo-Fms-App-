@@ -28,9 +28,17 @@ import DashboardBackground from '@/components/dashboard/DashboardBackground';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { TicketCreateModal } from '../tickets/TicketCreateModal';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
-import { createClient } from '@/utils/supabase/client';
 import { getMeetingRoomCredits } from '@/services/meetingRoomService';
 import { GlassModuleCard } from './GlassModuleCard';
+import {
+  Building2,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Users,
+  Calendar,
+  ChevronRight,
+} from 'lucide-react-native';
 
 const FONT_DISPLAY = Platform.select({
   web: 'Poppins, -apple-system, BlinkMacSystemFont, sans-serif',
@@ -193,6 +201,35 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          </Animated.View>
+        )}
+
+        {/* Super Tenant Quick Stats */}
+        {isSuperTenant && (
+          <Animated.View entering={FadeInUp.delay(150).duration(500)} style={styles.superTenantStats}>
+            <View style={styles.statsRow}>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(59,130,246,0.2)' }]}>
+                  <CheckCircle2 size={20} color="#3B82F6" />
+                </View>
+                <Text style={styles.statValue}>{ticketStats.open}</Text>
+                <Text style={styles.statLabel}>Active</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => router.push(`/property/${propertyId}/tenant/visitors` as any)}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(16,185,129,0.2)' }]}>
+                  <Users size={20} color="#10B981" />
+                </View>
+                <Text style={styles.statValue}>{superTenantProperties.length}</Text>
+                <Text style={styles.statLabel}>Properties</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => router.push(`/property/${propertyId}/rooms` as any)}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(139,92,246,0.2)' }]}>
+                  <Calendar size={20} color="#8B5CF6" />
+                </View>
+                <Text style={styles.statValue}>{remainingHours !== null ? remainingHours : '--'}</Text>
+                <Text style={styles.statLabel}>Hrs Left</Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         )}
 
