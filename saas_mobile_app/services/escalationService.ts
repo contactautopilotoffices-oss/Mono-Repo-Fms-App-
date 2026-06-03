@@ -148,7 +148,8 @@ export async function createEscalationHierarchy(payload: {
       if (lErr) console.warn('[escalationService] level insert warning:', lErr);
     }
 
-    return { hierarchy: { ...hierarchy, levels: payload.levels.map((l, idx) => ({ level_number: idx + 1, ...l })) };
+    const mappedLevels = payload.levels.map((l: any, idx: number) => ({ level_number: idx + 1, employee_id: l.employee_id, escalation_time_minutes: l.escalation_time_minutes, notification_channels: l.notification_channels }));
+    return { hierarchy: { ...hierarchy, levels: mappedLevels } };
   } catch (err: any) {
     console.error('[escalationService] createEscalationHierarchy:', err);
     return { error: err.message };
