@@ -104,13 +104,18 @@ class CreateTicketTool(Tool):
                 error="MISSING_TITLE: 'title' argument is required",
             )
 
-        property_id: str = arguments.get("property_id", "")
+        # Use argument property_id first; fall back to context.property_id
+        # (LLM sometimes omits it even when it's available from session context)
+        property_id: str = (
+            arguments.get("property_id", "")
+            or getattr(context, "property_id", "")
+        )
         if not property_id:
             return ToolResult(
                 call_id=call_id,
                 tool_name=self.name,
                 success=False,
-                error="MISSING_PROPERTY_ID: 'property_id' argument is required",
+                error="MISSING_PROPERTY_ID: Cannot create ticket — no property selected in this session",
             )
 
         # Validate priority

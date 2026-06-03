@@ -198,26 +198,7 @@ async def validate_membership(user_id: str, property_id: str) -> Optional[dict]:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Step 1: Check if user is a master admin
-            users_url = f"{FMS_SUPABASE_URL}/rest/v1/users"
-            users_params = {
-                "select": "id,is_master_admin",
-                "id": f"eq.{user_id}",
-                "limit": "1",
-            }
-            resp = await client.get(users_url, headers=headers, params=users_params)
-            if resp.status_code == 200:
-                users_data = resp.json()
-                if users_data and users_data[0].get("is_master_admin"):
-                    logger.info("[AUTH] User is MASTER ADMIN → allow all properties. user=%s", user_id)
-                    return {
-                        "organization_id": "",  # Master admin doesn't need org constraint
-                        "property_id": property_id,
-                        "role": "master_admin",
-                        "is_active": True,
-                    }
-
-            # Step 2: Get the organization for this property, then check org super admin
+            # Step 1: Get the organization for this property (needed by all paths below)
             properties_url = f"{FMS_SUPABASE_URL}/rest/v1/properties"
             properties_params = {
                 "select": "organization_id",
@@ -230,6 +211,25 @@ async def validate_membership(user_id: str, property_id: str) -> Optional[dict]:
                 prop_data = resp.json()
                 if prop_data:
                     organization_id = prop_data[0].get("organization_id")
+
+            # Step 2: Check if user is a master admin
+            users_url = f"{FMS_SUPABASE_URL}/rest/v1/users"
+            users_params = {
+                "select": "id,is_master_admin",
+                "id": f"eq.{user_id}",
+                "limit": "1",
+            }
+            resp = await client.get(users_url, headers=headers, params=users_params)
+            if resp.status_code == 200:
+                users_data = resp.json()
+                if users_data and users_data[0].get("is_master_admin"):
+                    logger.info("[AUTH] User is MASTER ADMIN → allow all properties. user=%s", user_id)
+                    return {
+                        "organization_id": organization_id or "",  # org_id from property (needed for SQL scope)
+                        "property_id": property_id,
+                        "role": "master_admin",
+                        "is_active": True,
+                    }
 
             if organization_id:
                 # Check if user is org super admin
@@ -438,7 +438,7 @@ async def create_session_token(req: SimpleSessionRequest):
     org_name = None
     property_name = None
 
-    if not org_id:
+    if not org_id and role != "master_admin":
         raise HTTPException(status_code=500, detail="Membership has no organization_id")
 
     ttl = int(os.environ.get("SESSION_TTL_SECONDS", "21600"))
