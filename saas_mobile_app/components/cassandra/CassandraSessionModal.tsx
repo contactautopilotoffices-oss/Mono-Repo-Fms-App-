@@ -679,19 +679,14 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       abortRef.current.signal,
       chatOptions,
       (step) => {
-        // onReasoning callback — map verbose CoT text to concise action labels
-        const clean = step
-          .replace(/^Step\s*\d+:\s*/i, '')           // Remove "Step 1: "
-          .replace(/^(Understanding|Checking|Planning|Synthesizing|Executing|Validating)\s+(the\s+)?(request|prerequisites|actions|results?)[.:]*\s*/i, '')
-          .replace(/\.$/, '')                          // Remove trailing period
-          .trim();
-
-        // Map to short action labels matching OpenAI style
-        const label = clean.length > 60 ? clean.substring(0, 57) + '…' : clean;
+        // Trim and deduplicate reasoning steps.
+        // System prompt now emits short action labels so no heavy cleanup needed.
+        const label = step
+          .replace(/^Step\s*\d+[:\s]*/i, '')  // safety: strip any stray "Step 1:" prefix
+          .trim()
+          .substring(0, 60);
         if (!label) return;
-
         setReasoningSteps((prev) => {
-          // Avoid duplicate consecutive steps
           if (prev.length > 0 && prev[prev.length - 1] === label) return prev;
           return [...prev, label];
         });

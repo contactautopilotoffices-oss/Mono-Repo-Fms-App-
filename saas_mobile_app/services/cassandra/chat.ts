@@ -143,14 +143,29 @@ export function streamChat(
             }
             case 'tool_start': {
               const tool = (ev.data.tool as string) || '';
-              if (tool) onReasoning?.(`Running ${tool}...`);
+              const toolLabels: Record<string, string> = {
+                create_ticket: 'Creating ticket…',
+                sql_query: 'Running query…',
+                query_tickets: 'Searching tickets…',
+                fetch_context: 'Loading context…',
+                calculate_date: 'Calculating date…',
+                enroll_voice: 'Enrolling voice…',
+              };
+              if (tool) onReasoning?.(toolLabels[tool] ?? `Running ${tool}…`);
               break;
             }
             case 'tool_result': {
               const success = ev.data.success as boolean;
               const tool = (ev.data.tool as string) || '';
+              const doneLabels: Record<string, string> = {
+                create_ticket: 'Ticket created',
+                sql_query: 'Query complete',
+                query_tickets: 'Tickets loaded',
+                fetch_context: 'Context loaded',
+                calculate_date: 'Date calculated',
+              };
               if (onReasoning) {
-                onReasoning(success ? `${tool} completed` : `${tool} failed`);
+                onReasoning(success ? (doneLabels[tool] ?? 'Done') : 'Retrying…');
               }
               break;
             }
