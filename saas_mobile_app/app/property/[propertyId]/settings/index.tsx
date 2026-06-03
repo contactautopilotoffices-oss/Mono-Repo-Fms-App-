@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors, DASHBOARD_BACKGROUNDS, type DashboardBgKey } from '@/constants/Colors';
 import { createClient } from '@/utils/supabase/client';
@@ -81,10 +81,6 @@ export default function SettingsScreen() {
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
 
-  const [property, setProperty] = useState<Property | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const [dashboardBg, setDashboardBg] = useState<DashboardBgKey>('night');
   const [showBgPicker, setShowBgPicker] = useState(false);
@@ -101,22 +97,32 @@ export default function SettingsScreen() {
 
   // ─── Fetch data ────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
-    if (!propertyId || !user) return;
+    if (!propertyId || !user) return { property: null as Property | null, userProfile: null as UserProfile | null };
     try {
-      const { data: propData } = await (supabase as any)
-        .from('properties')
-        .select('id, name, code, address')
-        .eq('id', propertyId)
-        .maybeSingle();
-      if (propData) setProperty(propData as Property);
+      const [{ data: propData }, { data: userData }] = await Promise.all([
+        (supabase as any)
+          .from('properties')
+          .select('id, name, code, address')
+          .eq('id', propertyId)
+          .maybeSingle(),
+        (supabase as any)
+          .from('users')
+          .select('id, full_name, email, user_photo_url, role, designation')
+          .eq('id', user.id)
+          .maybeSingle(),
+      ]);
+      return {
+        property: (propData as Property) || null,
+        userProfile: (userData as UserProfile) || null,
+      };
+    } catch (error) {
+      console.error('Error fetching settings data:', error);
+      return { property: null as Property | null, userProfile: null as UserProfile | null };
+    }
+  }, [propertyId, user, supabase]);
 
-      const { data: userData } = await (supabase as any)
-        .from('users')
-        .select('id, full_name, email, user_photo_url, role, designation')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (userData) setUserProfile(userData as UserProfile);
-
+  useEffect(() => {
+    (async () => {
       const locSetting = await AsyncStorage.getItem('fms_weather_location_enabled');
       setLocationEnabled(locSetting !== 'false');
 
@@ -124,12 +130,8 @@ export default function SettingsScreen() {
       if (bgSetting && bgSetting in DASHBOARD_BACKGROUNDS) {
         setDashboardBg(bgSetting as DashboardBgKey);
       }
-    } catch (error) {
-      console.error('Error fetching settings data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [propertyId, user, supabase]);
+    })();
+  }, []);
 
   // ─── Permissions ───────────────────────────────────────────────────────────
   const refreshPermissions = useCallback(async () => {
@@ -150,9 +152,14 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.settings(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ property: Property | null; userProfile: UserProfile | null }>(
+    queryKeys.property.settings(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const property = data?.property ?? null;
+  const userProfile = data?.userProfile ?? null;
 
   useEffect(() => {
     refreshPermissions();
@@ -231,11 +238,9 @@ export default function SettingsScreen() {
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
   const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await fetchData();
+    await refetch();
     await refreshPermissions();
-    setIsRefreshing(false);
-  }, [fetchData, refreshPermissions]);
+  }, [refetch, refreshPermissions]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -365,7 +370,7 @@ export default function SettingsScreen() {
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#708F96" />}
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
       >
         {/* ── Property ── */}
         {property && (

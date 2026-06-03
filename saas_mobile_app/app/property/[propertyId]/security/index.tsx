@@ -35,7 +35,7 @@ import {
   MapPin,
   Phone,
 } from 'lucide-react-native';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -179,15 +179,7 @@ export default function SecurityDashboardScreen() {
   const { user, membership } = useAuth();
   const { theme: _theme } = useTheme();
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [stats, setStats] = useState<KpiStats>({
-    activeVisitors: 0,
-    incidentsToday: 0,
-    securityAlerts: 0,
-    openTickets: 0,
-  });
-  const [visitors, setVisitors] = useState<VisitorLog[]>([]);
+
   const [propertyName, setPropertyName] = useState('');
 
   // Fetch property name
@@ -198,7 +190,7 @@ export default function SecurityDashboardScreen() {
   }, [propertyId, membership]);
 
   const fetchDashboardData = useCallback(async () => {
-    if (!propertyId) return;
+    if (!propertyId) return { stats: { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 }, visitors: [] as VisitorLog[] };
     try {
       // 1. Fetch visitors (today, all statuses)
       const visitorsRes = await vmsService.fetchVisitors(propertyId, {
@@ -211,7 +203,6 @@ export default function SecurityDashboardScreen() {
       if (visitorsRes.success && visitorsRes.data) {
         visitorList = visitorsRes.data.visitors as VisitorLog[];
         activeVisitors = visitorList.filter((v) => v.status === 'checked_in').length;
-        setVisitors(visitorList.slice(0, 10)); // Show top 10 recent
       }
 
       // 2. Fetch security alerts (tickets with category = security_incident)
@@ -244,37 +235,26 @@ export default function SecurityDashboardScreen() {
       // For now, approximate with securityAlerts
       const incidentsToday = securityAlerts;
 
-      setStats({
-        activeVisitors,
-        incidentsToday,
-        securityAlerts,
-        openTickets,
-      });
+      return {
+        stats: { activeVisitors, incidentsToday, securityAlerts, openTickets },
+        visitors: visitorList.slice(0, 10), // Show top 10 recent
+      };
     } catch (err) {
       console.error('[SecurityDashboard] Error fetching data:', err);
+      return { stats: { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 }, visitors: [] as VisitorLog[] };
     }
   }, [propertyId]);
 
-  const load = useCallback(
-    async (refresh = false) => {
-      if (refresh) setIsRefreshing(true);
-      else setIsLoading(true);
-      await fetchDashboardData();
-      setIsLoading(false);
-      setIsRefreshing(false);
-    },
-    [fetchDashboardData]
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ stats: KpiStats; visitors: VisitorLog[] }>(
+    queryKeys.property.security(propertyId),
+    fetchDashboardData,
+    { staleTime: 1000 * 60 * 5 }
   );
 
-  const { refetch } = useDashboardFetch(queryKeys.property.security(propertyId), load, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const stats = data?.stats ?? { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 };
+  const visitors = data?.visitors ?? [];
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
-  };
+  const handleRefresh = () => refetch();
 
   const handleSOS = () => {
     Alert.alert(
@@ -293,7 +273,7 @@ export default function SecurityDashboardScreen() {
     );
   };
 
-  if (isLoading && !isRefreshing) {
+  if (isLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
         <LinearGradient colors={['#0B1B2A', '#0F2D3D', '#113B4D']} style={StyleSheet.absoluteFillObject} />
@@ -312,7 +292,7 @@ export default function SecurityDashboardScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#708F96" />}
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor="#708F96" />}
       >
         {/* ── Header ── */}
         <Animated.View entering={FadeInUp.duration(400)} style={styles.header}>

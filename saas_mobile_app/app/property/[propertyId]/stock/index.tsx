@@ -48,7 +48,7 @@ import {
   RefreshCw,
   Download,
 } from "lucide-react-native";
-import { useDashboardFetch } from "@/hooks/useDashboardFetch";
+import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from '@/utils/queryKeys';
 
 const { width: SCREEN_W } = Dimensions.get("window");
@@ -153,11 +153,7 @@ export default function StockScreen() {
   const insets = useSafeAreaInsets();
 
   // ── State ────────────────────────────────────────────────────────────────────
-  const [items, setItems] = useState<StockItem[]>([]);
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
@@ -224,63 +220,49 @@ export default function StockScreen() {
   }, [items]);
 
   // ── Fetch ───────────────────────────────────────────────────────────────────
-  const fetchItems = useCallback(async () => {
-    if (!propertyId) return;
+  const fetchAll = useCallback(async () => {
+    if (!propertyId) return { items: [] as StockItem[], movements: [] as StockMovement[], categories: [] as string[] };
     try {
-      const res = await stockService.getStockItems(propertyId, {
-        search: searchQuery || undefined,
-        category: selectedCategory || undefined,
-      });
-      if (res.success && res.data) {
-        setItems(res.data as StockItem[]);
-        const cats = [...new Set(res.data.map((i: any) => i.category).filter(Boolean))];
-        setCategories(cats as string[]);
+      const [itemsRes, movementsRes] = await Promise.all([
+        stockService.getStockItems(propertyId, {
+          search: searchQuery || undefined,
+          category: selectedCategory || undefined,
+        }),
+        stockService.getMovements(propertyId),
+      ]);
+      let itemsData: StockItem[] = [];
+      let categoriesData: string[] = [];
+      let movementsData: StockMovement[] = [];
+      if (itemsRes.success && itemsRes.data) {
+        itemsData = itemsRes.data as StockItem[];
+        categoriesData = [...new Set(itemsRes.data.map((i: any) => i.category).filter(Boolean))] as string[];
       } else {
-        console.error("[Stock] getStockItems error:", res.error);
+        console.error("[Stock] getStockItems error:", itemsRes.error);
       }
-    } catch (err) {
-      console.error("Error fetching stock items:", err);
-    }
-  }, [propertyId]);
-
-  const fetchMovements = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const res = await stockService.getMovements(propertyId);
-      if (res.success && res.data) {
-        setMovements(res.data as StockMovement[]);
+      if (movementsRes.success && movementsRes.data) {
+        movementsData = movementsRes.data as StockMovement[];
       } else {
-        console.error("[Stock] getMovements error:", res.error);
+        console.error("[Stock] getMovements error:", movementsRes.error);
       }
+      return { items: itemsData, movements: movementsData, categories: categoriesData };
     } catch (err) {
-      console.error("Error fetching movements:", err);
+      console.error("Error fetching stock:", err);
+      return { items: [] as StockItem[], movements: [] as StockMovement[], categories: [] as string[] };
     }
-  }, [propertyId]);
+  }, [propertyId, searchQuery, selectedCategory]);
 
-  const fetchAll = useCallback(
-    async (refresh = false) => {
-      if (refresh) setIsRefreshing(true);
-      else setIsLoading(true);
-      try {
-        await Promise.all([fetchItems(), fetchMovements()]);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [fetchItems, fetchMovements],
+  const { data, isLoading, isFetching, refetch } = useServerQuery(
+    queryKeys.property.stock(propertyId),
+    fetchAll,
+    { staleTime: 1000 * 60 * 5 }
   );
 
-  const { refetch } = useDashboardFetch(queryKeys.property.stock(propertyId), fetchAll, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const items = data?.items ?? [];
+  const movements = data?.movements ?? [];
+  const categories = data?.categories ?? [];
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
-  };
+  const handleRefresh = () => refetch();
 
   const handleItemPress = (item: StockItem) => {
     setSelectedItem(item);
@@ -307,7 +289,7 @@ export default function StockScreen() {
       if (!res.success) throw new Error(res.error || "Failed to add item");
       setShowAddModal(false);
       resetForm();
-      await fetchItems();
+      await refetch();
       Alert.alert("Success", "Asset added successfully");
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to add item");
@@ -348,18 +330,13 @@ export default function StockScreen() {
 
       if (!res.success) throw new Error(res.error || "Failed to record movement");
 
-      setItems((prev) =>
-        prev.map((i) =>
-          i.id === selectedItem.id ? { ...i, quantity: qtyAfter } : i,
-        ),
-      );
       setSelectedItem((prev) =>
         prev ? { ...prev, quantity: qtyAfter } : null,
       );
       setShowMovementModal(false);
       setMoveQty("");
       setMoveNotes("");
-      await fetchMovements();
+      await refetch();
       Alert.alert("Success", "Stock movement recorded");
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to record movement");
@@ -411,15 +388,8 @@ export default function StockScreen() {
       const res = await stockService.regenerateBarcode(selectedItem.id);
       if (res.success && res.data) {
         setBarcodeInfo(res.data);
-        // Update the item in the list with new barcode
-        setItems((prev) =>
-          prev.map((i) =>
-            i.id === selectedItem.id
-              ? { ...i, barcode: res.data?.barcode, qr_code_data: res.data?.qr_code_data }
-              : i,
-          ),
-        );
         Alert.alert("Success", "Barcode regenerated");
+        await refetch();
       } else {
         throw new Error(res.error || "Failed to regenerate barcode");
       }
@@ -659,7 +629,7 @@ export default function StockScreen() {
         keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
+            refreshing={isFetching}
             onRefresh={handleRefresh}
             tintColor="#3B82F6"
           />

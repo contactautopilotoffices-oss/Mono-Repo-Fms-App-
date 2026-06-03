@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   ActivityIndicator,
@@ -64,22 +64,18 @@ export default function SnagReportDetailScreen() {
   const insets = useSafeAreaInsets();
   const isDark = theme === 'dark';
 
-  const [data, setData] = useState<SnagReportResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
   const load = async () => {
     const result = await getSnagReport(importId);
-    setData(result as SnagReportResponse);
-    setLoading(false);
-    setRefreshing(false);
+    return result as SnagReportResponse;
   };
 
-  const { refetch } = useDashboardFetch(queryKeys.reports.reportsSnagDetail(importId), load, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: reportData, isLoading, isFetching, refetch } = useServerQuery<SnagReportResponse>(
+    queryKeys.reports.reportsSnagDetail(importId),
+    load,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const onRefresh = () => { setRefreshing(true); refetch().then(() => setRefreshing(false)); };
+  const onRefresh = () => refetch();
 
   const bg = isDark ? '#151B2B' : '#F8FAFC';
   const cardBg = isDark ? '#1E2535' : '#FFFFFF';
@@ -90,7 +86,7 @@ export default function SnagReportDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}
@@ -108,24 +104,24 @@ export default function SnagReportDetailScreen() {
           </View>
         </View>
 
-        {loading ? (
+        {isLoading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color="#708F96" />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading report…</Text>
           </View>
-        ) : data?.error ? (
+        ) : reportData?.error ? (
           <View style={styles.loadingWrap}>
-            <Text style={styles.errorText}>{data.error}</Text>
+            <Text style={styles.errorText}>{reportData.error}</Text>
           </View>
-        ) : data ? (
+        ) : reportData ? (
           <>
             {/* Import info */}
             <View style={styles.importBanner}>
-              <Text style={styles.importFilename}>{data.import.filename}</Text>
+              <Text style={styles.importFilename}>{reportData.import.filename}</Text>
               <Text style={styles.importMeta}>
-                {data.import.totalRows} rows imported · {data.import.validRows} valid ·{' '}
-                {data.import.completedAt
-                  ? `Completed ${new Date(data.import.completedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                {reportData.import.totalRows} rows imported · {reportData.import.validRows} valid ·{' '}
+                {reportData.import.completedAt
+                  ? `Completed ${new Date(reportData.import.completedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
                   : 'Processing'}
               </Text>
             </View>
@@ -134,50 +130,50 @@ export default function SnagReportDetailScreen() {
             <View style={styles.kpiGrid}>
               <KPICard
                 label="Total Snags"
-                value={data.kpis.totalSnags}
+                value={reportData.kpis.totalSnags}
                 sub="imported"
                 color="#1A2332"
               />
               <KPICard
                 label="Closed"
-                value={data.kpis.closedSnags}
-                sub={`${data.kpis.closureRate}% closure`}
+                value={reportData.kpis.closedSnags}
+                sub={`${reportData.kpis.closureRate}% closure`}
                 color="#22C55E"
               />
             </View>
             <View style={styles.kpiGrid}>
               <KPICard
                 label="Open"
-                value={data.kpis.openSnags}
+                value={reportData.kpis.openSnags}
                 sub="pending"
                 color="#F97316"
               />
             </View>
 
             {/* Floor Chart */}
-            {data.charts.floor.labels.length > 0 && (
+            {reportData.charts.floor.labels.length > 0 && (
               <View style={[styles.card, { backgroundColor: cardBg }]}>
                 <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
                   By Floor
                 </Text>
                 <BarChart data={{
-                  labels: data.charts.floor.labels,
-                  series: [{ label: 'Snags', data: data.charts.floor.data, color: '#F97316' }],
+                  labels: reportData.charts.floor.labels,
+                  series: [{ label: 'Snags', data: reportData.charts.floor.data, color: '#F97316' }],
                 }} />
               </View>
             )}
 
             {/* Department Chart */}
-            {data.charts.department.labels.length > 0 && (
+            {reportData.charts.department.labels.length > 0 && (
               <View style={[styles.card, { backgroundColor: cardBg }]}>
                 <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
                   By Category
                 </Text>
                 <BarChart data={{
-                  labels: data.charts.department.labels.map(l => l.length > 10 ? l.slice(0, 9) + '…' : l),
+                  labels: reportData.charts.department.labels.map(l => l.length > 10 ? l.slice(0, 9) + '…' : l),
                   series: [
-                    { label: 'Open', data: data.charts.department.open || [], color: '#F97316' },
-                    { label: 'Closed', data: data.charts.department.closed || [], color: '#22C55E' },
+                    { label: 'Open', data: reportData.charts.department.open || [], color: '#F97316' },
+                    { label: 'Closed', data: reportData.charts.department.closed || [], color: '#22C55E' },
                   ],
                 }} />
               </View>
@@ -186,14 +182,14 @@ export default function SnagReportDetailScreen() {
             {/* Ticket List */}
             <View style={[styles.card, { backgroundColor: cardBg }]}>
               <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
-                Snags ({data.tickets.length})
+                Snags ({reportData.tickets.length})
               </Text>
-              {data.tickets.length === 0 ? (
+              {reportData.tickets.length === 0 ? (
                 <Text style={[styles.emptyText, { color: isDark ? '#708F96' : '#708F96' }]}>
                   No snags in this import.
                 </Text>
               ) : (
-                data.tickets.map((ticket) => (
+                reportData.tickets.map((ticket) => (
                   <TicketRow key={ticket.id} ticket={ticket} />
                 ))
               )}

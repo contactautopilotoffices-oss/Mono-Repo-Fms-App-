@@ -20,7 +20,7 @@ import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { useWeather } from '@/hooks/useWeather';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import TenantBottomNav from '@/components/tenant/TenantBottomNav';
@@ -80,9 +80,6 @@ export default function TenantRoomsPage() {
   const weatherHook = useWeather();
 
   const [activeTab, setActiveTab] = useState<TabType>('rooms');
-  const [rooms, setRooms] = useState<MeetingRoom[]>([]);
-  const [bookings, setBookings] = useState<MeetingRoomBooking[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<MeetingRoom | null>(null);
 
@@ -94,25 +91,30 @@ export default function TenantRoomsPage() {
   const [bookingAttendees, setBookingAttendees] = useState('');
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[] };
     try {
       const [roomsRes, bookingsRes] = await Promise.all([
         getMeetingRooms(propertyId as string),
         getMeetingRoomBookings(propertyId as string),
       ]);
-      if (roomsRes.rooms) setRooms(roomsRes.rooms);
-      if (bookingsRes.bookings) setBookings(bookingsRes.bookings);
+      return {
+        rooms: roomsRes.rooms || [],
+        bookings: bookingsRes.bookings || [],
+      };
     } catch (err) {
       console.error('[TenantRooms] Fetch error:', err);
-    } finally {
-      setIsLoading(false);
+      return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[] };
     }
   }, [propertyId, user?.id]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.tenantRooms(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ rooms: MeetingRoom[]; bookings: MeetingRoomBooking[] }>(
+    queryKeys.property.tenantRooms(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const rooms = data?.rooms ?? [];
+  const bookings = data?.bookings ?? [];
 
   const handleBookRoom = async () => {
     if (!selectedRoom || !bookingTitle || !bookingDate || !bookingStartTime || !bookingEndTime) {
@@ -135,7 +137,7 @@ export default function TenantRoomsPage() {
         Alert.alert('Success', 'Room booked successfully!');
         setShowBookingModal(false);
         resetBookingForm();
-        fetchData();
+        refetch();
       } else {
         Alert.alert('Error', res.error || 'Could not book room. Please try again.');
       }
@@ -151,7 +153,7 @@ export default function TenantRoomsPage() {
         text: 'Yes',
         onPress: async () => {
           await cancelMeetingRoomBookingApi(bookingId);
-          fetchData();
+          refetch();
         },
       },
     ]);
@@ -325,7 +327,7 @@ export default function TenantRoomsPage() {
         <FlatList
           data={rooms}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
+          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
           contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
           showsVerticalScrollIndicator={false}
           renderItem={renderRoomCard}
@@ -340,7 +342,7 @@ export default function TenantRoomsPage() {
         <FlatList
           data={bookings}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
+          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
           contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
           showsVerticalScrollIndicator={false}
           renderItem={renderBookingCard}

@@ -51,7 +51,7 @@ import {
   Wrench,
   Star,
 } from 'lucide-react-native';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1030,10 +1030,7 @@ export default function UsersScreen() {
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
 
-  const [users, setUsers] = useState<UserWithMembership[]>([]);
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState('all');
   const [selectedUser, setSelectedUser] = useState<UserWithMembership | null>(null);
@@ -1095,13 +1092,8 @@ export default function UsersScreen() {
     }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.users(propertyId), fetchUsers, {
-    staleTime: 1000 * 60 * 5,
-  });
-
   async function fetchUsers() {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return [] as UserWithMembership[];
 
     try {
       const { data, error } = await supabase
@@ -1132,20 +1124,20 @@ export default function UsersScreen() {
         joined_at: m.created_at || new Date().toISOString(),
       }));
 
-      setUsers(mapped);
+      return mapped;
     } catch (err) {
       console.error('[Users] fetchUsers error:', err);
-      setUsers([]);
-    } finally {
-      setIsLoading(false);
+      return [] as UserWithMembership[];
     }
   }
 
-  async function handleRefresh() {
-    setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
-  }
+  const { data: users = [], isLoading, isFetching, refetch } = useServerQuery<UserWithMembership[]>(
+    queryKeys.property.users(propertyId),
+    fetchUsers,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const handleRefresh = () => refetch();
 
   function handleUserPress(user: UserWithMembership) {
     setSelectedUser(user);
@@ -1283,7 +1275,7 @@ export default function UsersScreen() {
           ListEmptyComponent={<EmptyState colors={colors} />}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
+              refreshing={isFetching}
               onRefresh={handleRefresh}
               tintColor="#7CB9A8"
               colors={['#7CB9A8']}
@@ -1300,7 +1292,7 @@ export default function UsersScreen() {
           propertyId={propertyId || ''}
           bottomSheetRef={userDetailSheetRef}
           colors={colors}
-          onUpdate={fetchUsers}
+          onUpdate={refetch}
         />
       )}
 
@@ -1311,7 +1303,7 @@ export default function UsersScreen() {
           propertyId={propertyId}
           organizationId={organizationId || ''}
           colors={colors}
-          onSuccess={fetchUsers}
+          onSuccess={refetch}
         />
       )}
 

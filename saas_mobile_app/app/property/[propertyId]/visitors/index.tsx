@@ -50,7 +50,7 @@ import {
   ChevronDown,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ---------------------------------------------------------------------------
@@ -1024,13 +1024,9 @@ export default function VisitorsScreen() {
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('all');
-  const [visitors, setVisitors] = useState<VisitorLog[]>([]);
-  const [stats, setStats] = useState({ total: 0, checked_in: 0, checked_out: 0 });
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [selectedVisitor, setSelectedVisitor] = useState<VisitorLog | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<boolean>(false);
@@ -1041,8 +1037,7 @@ export default function VisitorsScreen() {
 
   // Fetch visitors via API layer
   const fetchVisitors = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { visitors: [] as VisitorLog[], stats: { total: 0, checked_in: 0, checked_out: 0 } };
     try {
       const res = await vmsService.fetchVisitors(propertyId, {
         dateFilter,
@@ -1051,29 +1046,32 @@ export default function VisitorsScreen() {
       });
 
       if (res.success && res.data) {
-        setVisitors(res.data.visitors);
-        setStats({
-          total: res.data.stats.total_today,
-          checked_in: res.data.stats.checked_in,
-          checked_out: res.data.stats.checked_out,
-        });
+        return {
+          visitors: res.data.visitors,
+          stats: {
+            total: res.data.stats.total_today,
+            checked_in: res.data.stats.checked_in,
+            checked_out: res.data.stats.checked_out,
+          },
+        };
       }
+      return { visitors: [] as VisitorLog[], stats: { total: 0, checked_in: 0, checked_out: 0 } };
     } catch (err) {
       console.error('Error fetching visitors:', err);
-    } finally {
-      setIsLoading(false);
+      return { visitors: [] as VisitorLog[], stats: { total: 0, checked_in: 0, checked_out: 0 } };
     }
   }, [propertyId, statusFilter, searchQuery, dateFilter]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.visitors(propertyId), fetchVisitors, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, isFetching, refetch } = useServerQuery(
+    [...queryKeys.property.visitors(propertyId), statusFilter, dateFilter],
+    fetchVisitors,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
-  };
+  const visitors = data?.visitors ?? [];
+  const stats = data?.stats ?? { total: 0, checked_in: 0, checked_out: 0 };
+
+  const handleRefresh = () => refetch();
 
   const handleCheckout = async () => {
     if (!selectedVisitor) return;
@@ -1084,7 +1082,7 @@ export default function VisitorsScreen() {
         toast.success(`${selectedVisitor.name} checked out`);
         setIsVisitorDetailVisible(false);
         setSelectedVisitor(null);
-        fetchVisitors();
+        refetch();
       } else {
         toast.error(String(res.error || 'Checkout failed'));
       }
@@ -1281,13 +1279,13 @@ export default function VisitorsScreen() {
               showsVerticalScrollIndicator={false}
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               refreshControl={
-                <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={colors.primary} />
               }
             />
           )}
         </>
       ) : (
-        <CheckInForm propertyId={propertyId!} onSuccess={fetchVisitors} />
+        <CheckInForm propertyId={propertyId!} onSuccess={refetch} />
       )}
 
       {/* Visitor Detail Modal */}

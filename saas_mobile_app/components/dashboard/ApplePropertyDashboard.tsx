@@ -35,7 +35,7 @@ import { useWeather } from '@/hooks/useWeather';
 import { useTheme } from '@/context';
 import { AuroraBackground } from '@/components/shared/AuroraBackground';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
@@ -329,22 +329,10 @@ export default function ApplePropertyDashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [propertyName, setPropertyName] = useState('Property');
-  const [propertyCode, setPropertyCode] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const [openTickets, setOpenTickets] = useState(0);
-  const [inProgressTickets, setInProgressTickets] = useState(0);
-  const [resolvedTickets, setResolvedTickets] = useState(0);
-  const [checklistDone, setChecklistDone] = useState(7);
-  const [checklistTotal] = useState(100);
-  const [energyKwh, setEnergyKwh] = useState(1240);
-
   const [ticketDetailOpen, setTicketDetailOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
+    if (!propertyId) throw new Error('No propertyId');
     const supabase = createClient();
 
     const { data: propertyData } = await supabase
@@ -354,10 +342,6 @@ export default function ApplePropertyDashboard() {
       .single();
 
     const property = propertyData as { name: string; code: string } | null;
-    if (property) {
-      setPropertyName(property.name);
-      setPropertyCode(property.code);
-    }
 
     const { count: openCount } = await supabase
       .from('tickets')
@@ -375,23 +359,40 @@ export default function ApplePropertyDashboard() {
     const resolved = Math.max(0, Math.floor(total * 0.82));
     const inProgress = Math.max(0, total - open - resolved);
 
-    setOpenTickets(open);
-    setInProgressTickets(inProgress);
-    setResolvedTickets(resolved);
-    setChecklistDone(Math.floor(50 + Math.random() * 40));
-    setEnergyKwh(Math.floor(800 + Math.random() * 800));
-
-    setIsLoading(false);
-    setIsRefreshing(false);
+    return {
+      propertyName: property?.name || 'Property',
+      propertyCode: property?.code || '',
+      openTickets: open,
+      inProgressTickets: inProgress,
+      resolvedTickets: resolved,
+      checklistDone: Math.floor(50 + Math.random() * 40),
+      energyKwh: Math.floor(800 + Math.random() * 800),
+    };
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.appleDashboard(propertyId), fetchData, {
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{
+    propertyName: string;
+    propertyCode: string;
+    openTickets: number;
+    inProgressTickets: number;
+    resolvedTickets: number;
+    checklistDone: number;
+    energyKwh: number;
+  }>(queryKeys.property.appleDashboard(propertyId), fetchData, {
     staleTime: 1000 * 60 * 5,
   });
 
-  const onRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
+  const propertyName = data?.propertyName ?? 'Property';
+  const propertyCode = data?.propertyCode ?? '';
+  const openTickets = data?.openTickets ?? 0;
+  const inProgressTickets = data?.inProgressTickets ?? 0;
+  const resolvedTickets = data?.resolvedTickets ?? 0;
+  const checklistDone = data?.checklistDone ?? 7;
+  const energyKwh = data?.energyKwh ?? 1240;
+  const CHECKLIST_TOTAL = 100;
+
+  const onRefresh = () => {
+    refetch();
   };
 
   const now = new Date();
@@ -408,7 +409,7 @@ export default function ApplePropertyDashboard() {
   }
 
   const totalTickets = openTickets + inProgressTickets + resolvedTickets;
-  const checklistPct = Math.round((checklistDone / checklistTotal) * 100);
+  const checklistPct = Math.round((checklistDone / CHECKLIST_TOTAL) * 100);
   const healthStatus: 'good' | 'warning' | 'critical' = openTickets > 20 ? 'critical' : openTickets > 10 ? 'warning' : 'good';
 
   return (
@@ -434,7 +435,7 @@ export default function ApplePropertyDashboard() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 110 }]}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
+            refreshing={isFetching}
             onRefresh={onRefresh}
             tintColor="rgba(255,255,255,0.6)"
             progressBackgroundColor="rgba(255,255,255,0.08)"

@@ -36,7 +36,7 @@ import {
   type MaterialRequest,
 } from '@/utils/api/mobileApi';
 import MobileRequestList from '@/components/procurement/MobileRequestList';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -138,11 +138,6 @@ export default function ProcurementScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>(canApprove ? 'approvals' : 'all');
 
   // ── Data ─────────────────────────────────────────────────────────────────────
-  const [pendingRequests, setPendingRequests] = useState<MaterialRequest[]>([]);
-  const [allRequests, setAllRequests]         = useState<MaterialRequest[]>([]);
-  const [catalogItems, setCatalogItems]       = useState<any[]>([]);
-  const [loading, setLoading]                 = useState(true);
-  const [refreshing, setRefreshing]           = useState(false);
   const [searchQuery, setSearchQuery]         = useState('');
 
   // ── Stats ────────────────────────────────────────────────────────────────────
@@ -154,70 +149,59 @@ export default function ProcurementScreen() {
   }, [allRequests]);
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
-  const fetchApprovals = useCallback(async () => {
-    if (!user?.id || !canApprove) return;
+  const fetchProcurementData = useCallback(async () => {
+    let pendingRequests: MaterialRequest[] = [];
+    let allRequests: MaterialRequest[] = [];
+    let catalogItems: any[] = [];
+
     const orgId = membership?.org_id ?? undefined;
-    try {
-      const data = await listPendingApprovals(user.id, propertyId, orgId);
-      setPendingRequests(
-        data.filter(r => ['pending_approval', 'pending', 'pending_quotation'].includes(r.status))
-      );
-    } catch (err) {
-      console.error('[Procurement] approvals fetch:', err);
+    if (user?.id && canApprove) {
+      try {
+        const data = await listPendingApprovals(user.id, propertyId, orgId);
+        pendingRequests = data.filter(r => ['pending_approval', 'pending', 'pending_quotation'].includes(r.status));
+      } catch (err) {
+        console.error('[Procurement] approvals fetch:', err);
+      }
     }
-  }, [user?.id, propertyId, membership?.org_id, canApprove]);
 
-  const fetchAllRequests = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const data = await listMaterialRequests({
-        propertyId,
-        organizationId: membership?.org_id ?? undefined,
-      });
-      setAllRequests(data);
-    } catch (err) {
-      console.error('[Procurement] all requests fetch:', err);
+    if (propertyId) {
+      try {
+        allRequests = await listMaterialRequests({
+          propertyId,
+          organizationId: orgId,
+        });
+      } catch (err) {
+        console.error('[Procurement] all requests fetch:', err);
+      }
+      try {
+        catalogItems = await getProcurementCatalogItems({
+          propertyId,
+          organizationId: orgId,
+        });
+      } catch (err) {
+        console.error('[Procurement] catalog fetch:', err);
+      }
     }
-  }, [propertyId, membership?.org_id]);
 
-  const fetchCatalog = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const data = await getProcurementCatalogItems({
-        propertyId,
-        organizationId: membership?.org_id ?? undefined,
-      });
-      setCatalogItems(data);
-    } catch (err) {
-      console.error('[Procurement] catalog fetch:', err);
-    }
-  }, [propertyId, membership?.org_id]);
+    return { pendingRequests, allRequests, catalogItems };
+  }, [propertyId, membership?.org_id, canApprove, user?.id]);
 
-  const fetchAll = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    await Promise.all([fetchApprovals(), fetchAllRequests(), fetchCatalog()]);
-    setLoading(false);
-    setRefreshing(false);
-  }, [fetchApprovals, fetchAllRequests, fetchCatalog]);
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ pendingRequests: MaterialRequest[]; allRequests: MaterialRequest[]; catalogItems: any[] }>(
+    queryKeys.property.procurement(propertyId),
+    fetchProcurementData,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const { refetch } = useDashboardFetch(queryKeys.property.procurement(propertyId), fetchAll, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const pendingRequests = data?.pendingRequests ?? [];
+  const allRequests = data?.allRequests ?? [];
+  const catalogItems = data?.catalogItems ?? [];
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refetch();
-    setRefreshing(false);
-  };
+  const handleRefresh = () => refetch();
 
   // ── Handle request updated (remove from pending) ──────────────────────────
-  const handleRequestUpdated = useCallback((id: string) => {
-    setPendingRequests(prev => prev.filter(r => r.id !== id));
-    setAllRequests(prev =>
-      prev.map(r => r.id === id ? { ...r, status: 'processing' } : r)
-    );
-  }, []);
+  const handleRequestUpdated = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
   // ── Filtered data ─────────────────────────────────────────────────────────
   const filteredAll = useMemo(() => {
@@ -352,7 +336,7 @@ export default function ProcurementScreen() {
       )}
 
       {/* ── Content ── */}
-      {loading && !refreshing ? (
+      {isLoading ? (
         <View style={sMain.loadingWrap}>
           <ActivityIndicator size="large" color={T.accent} />
           <Text style={sMain.loadingText}>Loading procurement data…</Text>
@@ -365,7 +349,7 @@ export default function ProcurementScreen() {
               contentContainerStyle={sMain.listContent}
               showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={T.accent} />
+                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
               }
             >
               {pendingRequests.length === 0 ? (
@@ -392,7 +376,7 @@ export default function ProcurementScreen() {
               contentContainerStyle={sMain.listContent}
               showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={T.accent} />
+                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
               }
             >
               <MobileRequestList
@@ -411,7 +395,7 @@ export default function ProcurementScreen() {
               contentContainerStyle={sMain.listContent}
               showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={T.accent} />
+                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
               }
             >
               {filteredCatalog.length === 0 ? (

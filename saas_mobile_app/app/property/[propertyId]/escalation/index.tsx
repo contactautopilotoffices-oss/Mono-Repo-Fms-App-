@@ -40,7 +40,7 @@ import {
   Timer,
   User,
 } from 'lucide-react-native';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,10 +99,7 @@ export default function EscalationScreen() {
   const insets = useSafeAreaInsets();
   const isDark = theme === 'dark';
 
-  const [hierarchies, setHierarchies] = useState<EscalationHierarchy[]>([]);
-  const [users, setUsers] = useState<UserOption[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedHierarchy, setSelectedHierarchy] = useState<EscalationHierarchy | null>(null);
@@ -129,10 +126,9 @@ export default function EscalationScreen() {
     { label: 'Vendor', value: 'vendor' },
   ];
 
-  const fetchAll = useCallback(async (refresh = false) => {
-    if (refresh) setIsRefreshing(true); else setIsLoading(true);
+  const fetchAll = useCallback(async () => {
     try {
-      if (!propertyId) return;
+      if (!propertyId) return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
       const supabase = createClient();
 
       const [{ data: hierarchyRows, error: hErr }, { data: memberRows, error: mErr }] = await Promise.all([
@@ -150,21 +146,26 @@ export default function EscalationScreen() {
       if (hErr) throw new Error(hErr.message);
       if (mErr) throw new Error(mErr.message);
 
-      setHierarchies((hierarchyRows || []) as EscalationHierarchy[]);
-      setUsers(
-        ((memberRows || [])
+      return {
+        hierarchies: (hierarchyRows || []) as EscalationHierarchy[],
+        users: ((memberRows || [])
           .map((m: any) => m.users)
-          .filter(Boolean) as UserOption[])
-      );
+          .filter(Boolean) as UserOption[]),
+      };
     } catch (err) {
       console.error('Error fetching data:', err);
+      return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
     }
-    finally { setIsLoading(false); setIsRefreshing(false); }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.escalation(propertyId), fetchAll, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ hierarchies: EscalationHierarchy[]; users: UserOption[] }>(
+    queryKeys.property.escalation(propertyId),
+    fetchAll,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const hierarchies = data?.hierarchies ?? [];
+  const users = data?.users ?? [];
 
   const handleHierarchyPress = (hierarchy: EscalationHierarchy) => {
     setSelectedHierarchy(hierarchy);
@@ -198,7 +199,7 @@ export default function EscalationScreen() {
         });
       if (insertErr) throw new Error(insertErr.message || 'Failed to create hierarchy');
       
-      setShowCreateModal(false); resetForm(); await fetchAll();
+      setShowCreateModal(false); resetForm(); await refetch();
       Alert.alert('✅ Created', 'Escalation hierarchy created successfully');
     } catch (err: any) { Alert.alert('Error', err.message || 'Failed to create hierarchy'); }
     finally { setIsSaving(false); }
@@ -226,7 +227,7 @@ export default function EscalationScreen() {
         .eq('property_id', propertyId);
       if (updateErr) throw new Error(updateErr.message || 'Failed to update hierarchy');
       
-      setShowEditModal(false); resetForm(); setSelectedHierarchy(null); await fetchAll();
+      setShowEditModal(false); resetForm(); setSelectedHierarchy(null); await refetch();
       Alert.alert('✅ Updated', 'Escalation hierarchy updated');
     } catch (err: any) { Alert.alert('Error', err.message || 'Failed to update hierarchy'); }
     finally { setIsSaving(false); }
@@ -504,7 +505,7 @@ export default function EscalationScreen() {
       <FlatList
         data={hierarchies}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => refetch()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={

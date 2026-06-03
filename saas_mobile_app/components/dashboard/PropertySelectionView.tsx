@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { createClient } from '@/utils/supabase/client';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import Loader from '../ui/Loader';
 
 interface Property {
@@ -26,40 +26,32 @@ interface PropertySelectionViewProps {
 }
 
 export default function PropertySelectionView({ propertyIds, onSelect }: PropertySelectionViewProps) {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const supabase = useMemo(() => createClient(), []);
 
   const fetchProperties = useCallback(async () => {
     if (propertyIds.length === 0) {
-      setIsLoading(false);
-      return;
+      return [];
     }
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*')
-        .in('id', propertyIds);
+    const { data, error } = await supabase
+      .from('properties')
+      .select('*')
+      .in('id', propertyIds);
 
-      if (error) throw error;
-      setProperties(
-        (data || []).map((property: any) => ({
-          ...property,
-          address: property.address ?? undefined,
-        }))
-      );
-    } catch (err) {
-      console.error('Error fetching properties:', err);
-    } finally {
-      setIsLoading(false);
-    }
+    if (error) throw error;
+    return (data || []).map((property: any) => ({
+      ...property,
+      address: property.address ?? undefined,
+    })) as Property[];
   }, [propertyIds, supabase]);
 
-  useDashboardFetch(queryKeys.property.propertySelection(...propertyIds), fetchProperties, {
-    staleTime: 1000 * 60 * 5,
-    enabled: propertyIds.length > 0,
-  });
+  const { data: properties = [], isLoading } = useServerQuery<Property[]>(
+    queryKeys.property.propertySelection(...propertyIds),
+    fetchProperties,
+    {
+      staleTime: 1000 * 60 * 5,
+      enabled: propertyIds.length > 0,
+    }
+  );
 
   if (isLoading) {
     return (

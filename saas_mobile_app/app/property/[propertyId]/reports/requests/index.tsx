@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   TouchableOpacity, ActivityIndicator,
@@ -87,24 +87,21 @@ export default function RequestsReportScreen() {
   const isDark = theme === 'dark';
 
   const [monthIdx, setMonthIdx] = useState(0);
-  const [data, setData] = useState<RequestsReportResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   const selectedMonth = MONTHS[monthIdx];
 
   const load = useCallback(async (month: string) => {
     const result = await getRequestsReport(propertyId, month);
-    setData(result as RequestsReportResponse);
-    setLoading(false);
-    setRefreshing(false);
+    return result as RequestsReportResponse;
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.reportsRequests(propertyId, selectedMonth), () => load(selectedMonth), {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: reportData, isLoading, isFetching, refetch } = useServerQuery<RequestsReportResponse>(
+    queryKeys.property.reportsRequests(propertyId, selectedMonth),
+    () => load(selectedMonth),
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const onRefresh = () => { setRefreshing(true); refetch().then(() => setRefreshing(false)); };
+  const onRefresh = () => refetch();
 
   const prevMonth = () => { if (monthIdx < MONTHS.length - 1) setMonthIdx(m => m + 1); };
   const nextMonth = () => { if (monthIdx > 0) setMonthIdx(m => m - 1); };
@@ -118,7 +115,7 @@ export default function RequestsReportScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}
@@ -149,76 +146,76 @@ export default function RequestsReportScreen() {
           </TouchableOpacity>
         </View>
 
-        {loading ? (
+        {isLoading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color="#708F96" />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading report…</Text>
           </View>
-        ) : data?.error ? (
+        ) : reportData?.error ? (
           <View style={styles.loadingWrap}>
-            <Text style={styles.errorText}>{data.error}</Text>
+            <Text style={styles.errorText}>{reportData.error}</Text>
           </View>
-        ) : data ? (
+        ) : reportData ? (
           <>
             {/* Property */}
             <Text style={[styles.propertyName, { color: isDark ? '#708F96' : '#708F96' }]}>
-              {data.property?.name} · {data.property?.code}
+              {reportData.property?.name} · {reportData.property?.code}
             </Text>
 
             {/* KPIs */}
             <View style={styles.kpiGrid}>
               <KPICard
                 label="Total"
-                value={data.kpis.totalSnags}
+                value={reportData.kpis.totalSnags}
                 sub="requests"
                 color="#1A2332"
               />
               <KPICard
                 label="Closed"
-                value={data.kpis.closedSnags}
-                sub={`${data.kpis.closureRate}% closure`}
+                value={reportData.kpis.closedSnags}
+                sub={`${reportData.kpis.closureRate}% closure`}
                 color="#22C55E"
               />
             </View>
             <View style={styles.kpiGrid}>
               <KPICard
                 label="Open"
-                value={data.kpis.openSnags}
+                value={reportData.kpis.openSnags}
                 sub="in progress"
                 color="#F97316"
               />
               <KPICard
                 label="Closure Rate"
-                value={`${data.kpis.closureRate}%`}
+                value={`${reportData.kpis.closureRate}%`}
                 sub="completion"
                 color="#22C55E"
               />
             </View>
 
             {/* Floor Chart */}
-            {data.charts.floor.labels.length > 0 && (
+            {reportData.charts.floor.labels.length > 0 && (
               <View style={[styles.card, { backgroundColor: cardBg }]}>
                 <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
                   By Floor
                 </Text>
                 <BarChart data={{
-                  labels: data.charts.floor.labels,
-                  series: [{ label: 'Requests', data: data.charts.floor.data, color: '#708F96' }],
+                  labels: reportData.charts.floor.labels,
+                  series: [{ label: 'Requests', data: reportData.charts.floor.data, color: '#708F96' }],
                 }} />
               </View>
             )}
 
             {/* Department Chart */}
-            {data.charts.department.labels.length > 0 && (
+            {reportData.charts.department.labels.length > 0 && (
               <View style={[styles.card, { backgroundColor: cardBg }]}>
                 <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
                   By Category
                 </Text>
                 <BarChart data={{
-                  labels: data.charts.department.labels.map(l => l.length > 10 ? l.slice(0, 9) + '…' : l),
+                  labels: reportData.charts.department.labels.map(l => l.length > 10 ? l.slice(0, 9) + '…' : l),
                   series: [
-                    { label: 'Open', data: data.charts.department.open || [], color: '#F97316' },
-                    { label: 'Closed', data: data.charts.department.closed || [], color: '#22C55E' },
+                    { label: 'Open', data: reportData.charts.department.open || [], color: '#F97316' },
+                    { label: 'Closed', data: reportData.charts.department.closed || [], color: '#22C55E' },
                   ],
                 }} />
               </View>
@@ -227,20 +224,20 @@ export default function RequestsReportScreen() {
             {/* Ticket List */}
             <View style={[styles.card, { backgroundColor: cardBg }]}>
               <Text style={[styles.cardTitle, { color: isDark ? '#F8FAFC' : '#1A2332' }]}>
-                Tickets ({data.tickets.length})
+                Tickets ({reportData.tickets.length})
               </Text>
-              {data.tickets.length === 0 ? (
+              {reportData.tickets.length === 0 ? (
                 <Text style={[styles.emptyText, { color: isDark ? '#708F96' : '#708F96' }]}>
                   No tickets found for this period.
                 </Text>
               ) : (
-                data.tickets.slice(0, 30).map((ticket) => (
+                reportData.tickets.slice(0, 30).map((ticket) => (
                   <TicketRow key={ticket.id} ticket={ticket} />
                 ))
               )}
-              {data.tickets.length > 30 && (
+              {reportData.tickets.length > 30 && (
                 <Text style={[styles.moreText, { color: '#708F96' }]}>
-                  +{data.tickets.length - 30} more tickets — view full report on web
+                  +{reportData.tickets.length - 30} more tickets — view full report on web
                 </Text>
               )}
             </View>

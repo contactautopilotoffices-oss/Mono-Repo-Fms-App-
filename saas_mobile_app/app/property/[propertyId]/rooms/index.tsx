@@ -49,7 +49,7 @@ import {
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import { format, addDays, isSameDay, parseISO } from 'date-fns';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -433,8 +433,7 @@ export default function RoomsScreen() {
   const insets = useSafeAreaInsets();
   const { membership, user } = useAuth();
 
-  const { rooms, bookings, credit, hasLoadedInitialData, setRooms, setBookings, setCredit, setHasLoadedInitialData } = useMeetingRoomStore();
-  const [loading, setLoading] = useState(!hasLoadedInitialData);
+  const { setRooms, setBookings, setCredit, setHasLoadedInitialData } = useMeetingRoomStore();
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<MeetingRoom | null>(null);
   const [activeTab, setActiveTab] = useState<'rooms' | 'bookings'>('rooms');
@@ -451,8 +450,7 @@ export default function RoomsScreen() {
 
   // Fetch data
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    if (!hasLoadedInitialData) setLoading(true);
+    if (!propertyId) return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[], credit: null as MeetingRoomCredit | null };
     try {
       const [roomsRes, bookingsRes, creditsRes] = await Promise.all([
         getMeetingRooms(propertyId),
@@ -460,23 +458,33 @@ export default function RoomsScreen() {
         isAdmin ? Promise.resolve({ credit: null }) : getMeetingRoomCredits(propertyId),
       ]);
 
-      if (roomsRes.rooms) setRooms(roomsRes.rooms);
-      if (bookingsRes.bookings) setBookings(bookingsRes.bookings);
-      if (!isAdmin && creditsRes.credit !== undefined) {
-        setCredit(creditsRes.credit);
-      }
+      const rooms = roomsRes.rooms || [];
+      const bookings = bookingsRes.bookings || [];
+      const credit = !isAdmin && creditsRes.credit !== undefined ? creditsRes.credit : null;
+
+      // Keep store in sync for other consumers
+      setRooms(rooms);
+      setBookings(bookings);
+      setCredit(credit);
       setHasLoadedInitialData(true);
+
+      return { rooms, bookings, credit };
     } catch (e) {
       console.error('[Rooms] fetch error:', e);
       Alert.alert('Error', 'Failed to load meeting rooms.');
-    } finally {
-      setLoading(false);
+      return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[], credit: null as MeetingRoomCredit | null };
     }
-  }, [propertyId, isAdmin, hasLoadedInitialData, setRooms, setBookings, setCredit, setHasLoadedInitialData]);
+  }, [propertyId, isAdmin, setRooms, setBookings, setCredit, setHasLoadedInitialData]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.rooms(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery<{ rooms: MeetingRoom[]; bookings: MeetingRoomBooking[]; credit: MeetingRoomCredit | null }>(
+    queryKeys.property.rooms(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const rooms = data?.rooms ?? [];
+  const bookings = data?.bookings ?? [];
+  const credit = data?.credit ?? null;
 
   function handleRoomPress(room: MeetingRoom) {
     setSelectedRoom(room);
@@ -488,7 +496,7 @@ export default function RoomsScreen() {
       const res = await cancelMeetingRoomBookingApi(bookingId);
       if (res.error) throw new Error(res.error);
       // Refresh data immediately after success
-      fetchData();
+      refetch();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Could not cancel booking.');
     }
@@ -564,7 +572,7 @@ export default function RoomsScreen() {
       )}
 
       {/* Content List */}
-      {loading ? (
+      {isLoading ? (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color="#708F96" />
           <Text style={styles.loadingText}>Loading...</Text>
@@ -647,7 +655,7 @@ export default function RoomsScreen() {
         isAdmin={isAdmin}
         bottomSheetRef={roomSheetRef}
         onBook={(success, msg) => {
-          fetchData();
+          refetch();
           if (msg) {
             setToastConfig({ message: msg, type: success ? 'success' : 'error' });
           }
@@ -673,7 +681,7 @@ export default function RoomsScreen() {
                     const res = await deleteMeetingRoomApi(selectedRoom.id);
                     if (res.error) throw new Error(res.error);
                     roomSheetRef.current?.dismiss();
-                    fetchData();
+                    refetch();
                     Alert.alert('Success', 'Room deactivated successfully.');
                   } catch (err: any) {
                     Alert.alert('Error', err.message || 'Failed to deactivate room.');

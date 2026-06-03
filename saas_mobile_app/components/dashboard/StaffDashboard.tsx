@@ -39,7 +39,7 @@ import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onbo
 import Svg, { Circle, Defs, Pattern, Rect } from 'react-native-svg';
 import { serverApi } from '@/lib/serverApi';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 const DRAWER_WIDTH = 280;
 
@@ -115,17 +115,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
   const { colors, isDark } = useTheme();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'requests' | 'profile'>('overview');
-  const [property, setProperty] = useState<Property | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
   const [showSignOutModal, setShowSignOutModal] = useState(false);
-  const [incomingTickets, setIncomingTickets] = useState<Ticket[]>([]);
-  const [completedTickets, setCompletedTickets] = useState<Ticket[]>([]);
-  const [isFetching, setIsFetching] = useState(false);
-  const [userRole, setUserRole] = useState('Staff');
-  const [specialization, setSpecialization] = useState<string | null>(null);
-  const [userSkills, setUserSkills] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [requestFilter, setRequestFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [showLoggersMenu, setShowLoggersMenu] = useState(false);
@@ -143,25 +133,136 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
 
   const supabase = useMemo(() => createClient(), []);
 
-  // Determines if this staff is a "technical" or "soft_services" specialist
-  const isTechnical = userSkills.includes('technical');
-  const isSoftServices = userSkills.includes('soft_services') || userSkills.includes('housekeeping');
+  const fetchData = useCallback(async () => {
+    if (!propertyId) throw new Error('No propertyId');
 
-  // Skill-group color for the dashboard accent
-  const skillColor = isTechnical ? '#3B82F6' : isSoftServices ? '#8B5CF6' : '#708F96';
+    // Property details
+    const { data: propData, error: propError } = await (supabase
+      .from('properties')
+      .select('*')
+      .eq('id', propertyId)
+      .maybeSingle() as any);
+    if (propError || !propData) throw new Error(propError ? 'Network error. Please try again.' : 'Property not found');
 
-  const { refetch } = useDashboardFetch(queryKeys.property.staffLegacy(propertyId), async () => {
-    if (propertyId) {
-      await Promise.all([
-        fetchPropertyDetails(),
-        fetchTickets(),
-        fetchUserRoleAndSkills(),
-        fetchShiftStatus(),
-      ]);
+    // Tickets
+    const { data: ticketData, error: ticketError } = await (supabase
+      .from('tickets')
+      .select(`
+        *,
+        assignee:users!assigned_to(id, full_name, email, user_photo_url),
+        creator:users!raised_by(id, full_name),
+        ticket_escalation_logs(from_level, to_level, escalated_at, from_employee:users!from_employee_id(full_name, user_photo_url), to_employee:users!to_employee_id(full_name, user_photo_url))
+      `)
+      .eq('property_id', propertyId)
+      .order('created_at', { ascending: false }) as any);
+    if (ticketError) throw new Error('Failed to fetch tickets');
+
+    const tickets = (ticketData || []) as Ticket[];
+    const incomingTickets = tickets.filter((t) => !['resolved', 'closed'].includes(t.status));
+    const completedTickets = tickets.filter((t) => ['resolved', 'closed'].includes(t.status));
+
+    // User role and skills
+    let userRole = 'Staff';
+    let specialization: string | null = null;
+    let userSkills: string[] = [];
+
+    if (user) {
+      const { data: member } = await (supabase
+        .from('property_memberships')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single() as any);
+      if (member) {
+        userRole = member.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+
+      const { data: skills } = await ((supabase
+        .from('mst_skills') as any)
+        .select('skill_group_code')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single() as any);
+
+      if (skills?.skill_group_code) {
+        userSkills = [skills.skill_group_code];
+        specialization = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+
+      const { data: resolverStats } = await (supabase
+        .from('resolver_stats')
+        .select('skills, specialization')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single() as any);
+
+      if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
+        userSkills = resolverStats.skills;
+        if (!specialization && resolverStats.skills.length > 0) {
+          specialization = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+        }
+      } else if (resolverStats?.specialization) {
+        specialization = resolverStats.specialization.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
     }
-  }, {
+
+    // Shift status
+    let isCheckedIn = false;
+    let activeShiftId: string | null = null;
+    if (user?.id && propertyId) {
+      const { data: rsData }: any = await supabase
+        .from('resolver_stats')
+        .select('is_checked_in')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single();
+      if (rsData) isCheckedIn = rsData.is_checked_in;
+    }
+
+    return {
+      property: propData as Property,
+      incomingTickets,
+      completedTickets,
+      userRole,
+      specialization,
+      userSkills,
+      isCheckedIn,
+      activeShiftId,
+    };
+  }, [propertyId, user?.id, supabase]);
+
+  const { data, isLoading, isFetching, refetch, error } = useServerQuery<{
+    property: Property;
+    incomingTickets: Ticket[];
+    completedTickets: Ticket[];
+    userRole: string;
+    specialization: string | null;
+    userSkills: string[];
+    isCheckedIn: boolean;
+    activeShiftId: string | null;
+  }>(queryKeys.property.staffLegacy(propertyId), fetchData, {
     staleTime: 1000 * 60 * 5,
   });
+
+  // Sync mutable shift state from query data
+  useEffect(() => {
+    if (data) {
+      setIsCheckedIn(data.isCheckedIn);
+      setActiveShiftId(data.activeShiftId);
+    }
+  }, [data]);
+
+  // Derived values from query data
+  const userSkills = data?.userSkills ?? [];
+  const isTechnical = userSkills.includes('technical');
+  const isSoftServices = userSkills.includes('soft_services') || userSkills.includes('housekeeping');
+  const skillColor = isTechnical ? '#3B82F6' : isSoftServices ? '#8B5CF6' : '#708F96';
+  const property = data?.property ?? null;
+  const incomingTickets = data?.incomingTickets ?? [];
+  const completedTickets = data?.completedTickets ?? [];
+  const userRole = data?.userRole ?? 'Staff';
+  const specialization = data?.specialization ?? null;
+  const errorMsg = error ? (error.message || 'Property not found') : '';
 
   useEffect(() => {
     hasRequestedPermissions().then(requested => {
@@ -174,38 +275,6 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
     if (tab === 'requests') setActiveTab('requests');
     else if (tab === 'overview') setActiveTab('overview');
   }, [tab]);
-
-  // ─── Shift / Check-in ───────────────────────────────────────────────────
-  const fetchShiftStatus = async () => {
-    if (!user?.id || !propertyId) return;
-    try {
-      const { data: rsData }: any = await supabase
-        .from('resolver_stats')
-        .select('is_checked_in')
-        .eq('user_id', user.id)
-        .eq('property_id', propertyId)
-        .single();
-
-      if (rsData) setIsCheckedIn(rsData.is_checked_in);
-
-      // TODO: shift_logs does not exist in saas_one schema
-      // const { data: shiftData }: any = await supabase
-      //   .from('shift_logs')
-      //   .select('id')
-      //   .eq('user_id', user.id)
-      //   .eq('property_id', propertyId)
-      //   .eq('status', 'active')
-      //   .order('check_in_at', { ascending: false })
-      //   .limit(1)
-      //   .maybeSingle();
-      // if (shiftData) {
-      //   setActiveShiftId(shiftData.id);
-      //   setIsCheckedIn(true);
-      // }
-    } catch (error) {
-      console.error('Error fetching shift status:', error);
-    }
-  };
 
   const toggleShift = async () => {
     if (!user?.id || !propertyId || isCheckingInOut) return;
@@ -254,93 +323,8 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
     }
   };
 
-  const fetchUserRoleAndSkills = async () => {
-    if (!user) return;
-    const { data: member } = await (supabase
-      .from('property_memberships')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .single() as any);
-    if (member) {
-      setUserRole(member.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-    }
-
-    // Fetch specialization from mst_skills (stores skill groups per user per property)
-    const { data: skills } = await ((supabase
-      .from('mst_skills') as any)
-      .select('skill_group_code')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .single() as any);
-
-    if (skills?.skill_group_code) {
-      setUserSkills([skills.skill_group_code]);
-      setSpecialization(skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-    }
-
-    // Also try resolver_stats for skills array (newer schema)
-    const { data: resolverStats } = await (supabase
-      .from('resolver_stats')
-      .select('skills, specialization')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .single() as any);
-
-    if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
-      setUserSkills(resolverStats.skills);
-      if (!specialization && resolverStats.skills.length > 0) {
-        setSpecialization(resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-      }
-    } else if (resolverStats?.specialization) {
-      setSpecialization(resolverStats.specialization.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-    }
-  };
-
-  const fetchTickets = async () => {
-    if (!user || !propertyId) return;
-    setIsFetching(true);
-
-    // Fetch tickets with skill_group_code so we can filter
-    const { data, error } = await (supabase
-      .from('tickets')
-      .select(`
-        *,
-        assignee:users!assigned_to(id, full_name, email, user_photo_url),
-        creator:users!raised_by(id, full_name),
-        ticket_escalation_logs(from_level, to_level, escalated_at, from_employee:users!from_employee_id(full_name, user_photo_url), to_employee:users!to_employee_id(full_name, user_photo_url))
-      `)
-      .eq('property_id', propertyId)
-      .order('created_at', { ascending: false }) as any);
-    if (error) {
-      console.error('Error fetching tickets:', error);
-    } else {
-      const tickets = data || [];
-      setIncomingTickets(tickets.filter((t: Ticket) => !['resolved', 'closed'].includes(t.status)));
-      setCompletedTickets(tickets.filter((t: Ticket) => ['resolved', 'closed'].includes(t.status)));
-    }
-    setIsFetching(false);
-  };
-
-  const fetchPropertyDetails = async () => {
-    setIsLoading(true);
-    const { data, error } = await (supabase
-      .from('properties')
-      .select('*')
-      .eq('id', propertyId)
-      .maybeSingle() as any);
-    if (error || !data) {
-      setErrorMsg('Property not found');
-    } else {
-      setProperty(data);
-    }
-    setIsLoading(false);
-  };
-
-  const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const onRefresh = useCallback(() => {
+    refetch();
   }, [refetch]);
 
   const handleUpdateTicket = async () => {
@@ -355,7 +339,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
       });
       if (error) throw error;
       setEditingTicket(null);
-      fetchTickets();
+      refetch();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update');
     } finally {
@@ -420,7 +404,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
   const renderOverviewTab = () => (
     <LinearGradient colors={isDark ? ['#0F172A', '#1E293B'] : ['#FFFFFF', '#F9FBFF']} style={styles.tabContent}>
       <DottedBackground isDark={isDark} />
-      <ScrollView style={{ flex: 1 }} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={colors.primary} />} contentContainerStyle={{ paddingBottom: 100 }}>
+      <ScrollView style={{ flex: 1 }} refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor={colors.primary} />} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.premiumHeader}>
           <Text style={[styles.headerContext, { color: colors.textSecondary }]}>
             {(property?.name || 'HEAD OFFICE').toUpperCase()}
@@ -549,7 +533,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
 
   // ─── Requests Tab ──────────────────────────────────────────────────────────
   const renderRequestsTab = () => (
-    <ScrollView style={styles.tabContent} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}>
+    <ScrollView style={styles.tabContent} refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} />}>
       <View style={[styles.filterContainer, { backgroundColor: colors.background }]}>
         {([
           { key: 'all' as const, label: 'All', count: totalTickets },
@@ -661,7 +645,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
           <Ionicons name="alert-circle-outline" size={64} color="#EF4444" />
           <Text style={styles.errorTitle}>Error Loading Dashboard</Text>
           <Text style={styles.errorText}>{errorMsg || 'Property not found.'}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchPropertyDetails}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -737,7 +721,7 @@ export default function StaffDashboard({ propertyId }: { propertyId: string }) {
         propertyId={propertyId}
         organizationId={property?.organization_id ?? ''}
         role="staff"
-        onSuccess={() => fetchTickets()}
+        onSuccess={() => refetch()}
       />
 
       <Modal visible={!!editingTicket} transparent animationType="slide" onRequestClose={() => setEditingTicket(null)}>

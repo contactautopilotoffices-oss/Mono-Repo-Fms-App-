@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { createClient } from '@/utils/supabase/client';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 interface OrgUser {
   id: string;
@@ -24,39 +24,33 @@ interface OrgUser {
 }
 
 export default function UserManagement({ orgId }: { orgId: string }) {
-  const [users, setUsers] = useState<OrgUser[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const supabase = useMemo(() => createClient(), []);
 
-  const fetchOrgUsersWrapper = useCallback(async () => {
-    await fetchOrgUsers();
-  }, [orgId]);
-
-  const { refetch } = useDashboardFetch(queryKeys.org.orgUsers(orgId), fetchOrgUsersWrapper, {
-    staleTime: 1000 * 60 * 5,
-  });
-
-  const fetchOrgUsers = async () => {
-    setIsLoading(true);
+  const fetchOrgUsers = useCallback(async () => {
     const { data, error } = await (supabase
       .from('organization_memberships')
       .select('role, is_active, created_at, users(id, full_name, email)')
       .eq('organization_id', orgId) as any);
 
-    if (!error && data) {
-      const formatted: OrgUser[] = data.map((item: any) => ({
-        id: item.users.id,
-        full_name: item.users.full_name,
-        email: item.users.email,
-        role: item.role,
-        is_active: item.is_active,
-        joined_at: item.created_at,
-      })).sort((a: any, b: any) => a.full_name.localeCompare(b.full_name));
-      setUsers(formatted);
+    if (error) throw error;
+    return (data || []).map((item: any) => ({
+      id: item.users.id,
+      full_name: item.users.full_name,
+      email: item.users.email,
+      role: item.role,
+      is_active: item.is_active,
+      joined_at: item.created_at,
+    })).sort((a: any, b: any) => a.full_name.localeCompare(b.full_name)) as OrgUser[];
+  }, [orgId, supabase]);
+
+  const { data: users = [], isLoading, refetch } = useServerQuery<OrgUser[]>(
+    queryKeys.org.orgUsers(orgId),
+    fetchOrgUsers,
+    {
+      staleTime: 1000 * 60 * 5,
     }
-    setIsLoading(false);
-  };
+  );
 
   const handleToggleStatus = async (userId: string, currentStatus: boolean) => {
     Alert.alert(
@@ -73,7 +67,7 @@ export default function UserManagement({ orgId }: { orgId: string }) {
               .update({ is_active: !currentStatus })
               .eq('user_id', userId)
               .eq('organization_id', orgId);
-            fetchOrgUsers();
+            refetch();
           },
         },
       ]

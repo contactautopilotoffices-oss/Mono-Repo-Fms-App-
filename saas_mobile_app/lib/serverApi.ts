@@ -82,6 +82,40 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
   return response.json();
 }
 
+async function serverGet(
+  endpoint: string,
+  query?: Record<string, string | number | boolean | null | undefined>
+): Promise<unknown> {
+  const token = await getSupabaseToken();
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new ServerApiError(
+      `Server error ${response.status}: ${text || response.statusText}`,
+      response.status
+    );
+  }
+
+  return response.json();
+}
+
 // ---------------------------------------------------------------------------
 // Upload helpers
 // ---------------------------------------------------------------------------
@@ -141,6 +175,24 @@ export const serverApi = {
   },
 
   // ── RPC (8 callers) ───────────────────────────────────────────────────────
+  async get<T = unknown>(
+    endpoint: string,
+    query?: Record<string, string | number | boolean | null | undefined>
+  ): Promise<ServerApiResponse<T>> {
+    try {
+      const result = (await serverGet(endpoint, query)) as { success?: boolean; data?: T } | T;
+      if (result && typeof result === 'object' && 'data' in result) {
+        return { data: (result as { data: T }).data ?? null, error: null };
+      }
+      return { data: result as T, error: null };
+    } catch (err) {
+      if (err instanceof ServerApiError) {
+        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
+      }
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+    }
+  },
+
   async rpc<T = unknown>(functionName: string, params?: Record<string, unknown>): Promise<ServerApiResponse<T>> {
     try {
       const result = (await serverFetch('/api/rpc', { functionName, params })) as ServerApiResponse<T>;

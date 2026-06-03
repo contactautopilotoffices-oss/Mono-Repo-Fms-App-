@@ -12,7 +12,7 @@ import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { SPACING, CARD_SURFACES } from '@/constants/designSystem';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 interface AnalyticsUser {
   user_id: string;
@@ -86,25 +86,21 @@ const kpiStyles = StyleSheet.create({
 });
 
 export default function AnalyticsTab() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   const fetchData = useCallback(async () => {
-    try {
-      const res = await serverApi.rpc('get_usage_metrics');
-      if (res.error) throw new Error(res.error.message);
-      setData(res.data as AnalyticsData);
-    } catch (err) {
-      console.error('Error fetching analytics:', err);
-    } finally {
-      setIsLoading(false);
-    }
+    const res = await serverApi.rpc('get_usage_metrics');
+    if (res.error) throw new Error(res.error.message);
+    return res.data as AnalyticsData;
   }, []);
 
-  const { refetch } = useDashboardFetch(queryKeys.analytics.analyticsTab(), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery<AnalyticsData | null>(
+    queryKeys.analytics.analyticsTab(),
+    fetchData,
+    {
+      staleTime: 1000 * 60 * 5,
+    }
+  );
 
   const formatDuration = (mins: number) => {
     if (mins < 60) return `${mins}m`;

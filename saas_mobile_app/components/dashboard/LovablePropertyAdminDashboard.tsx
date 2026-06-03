@@ -308,15 +308,25 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         perPropQueries
       ]);
 
-      const currentState = useDashboardStore.getState();
-
       // Aggregate bulk results
-      let newPropName = propRes?.data ? (propRes.data as any).name : currentState.propertyName;
-      let newTickets = ticketRes?.data ? (ticketRes.data as any[]) : currentState.tickets;
-      let newSopTotal = sopTemplatesRes?.data ? (sopTemplatesRes.data as any[]).length : currentState.sopTotal;
-      let newSopCount = sopCompletionsRes?.data ? (sopCompletionsRes.data as any[]).filter((s: any) => s.status === 'completed').length : currentState.sopCount;
-
-      let newVmsStats = currentState.vmsStats;
+      let newPropName = isAll ? 'All Properties Overview' : 'Property';
+      let newTickets: any[] = [];
+      let newSopTotal = 0;
+      let newSopCount = 0;
+      let newVmsStats = { total: 0, in: 0, out: 0 };
+      if (propRes?.data) {
+        newPropName = (propRes.data as any).name;
+      }
+      if (ticketRes?.data) {
+        newTickets = ticketRes.data as any[];
+      }
+      if (sopTemplatesRes?.data) {
+        newSopTotal = (sopTemplatesRes.data as any[]).length;
+      }
+      if (sopCompletionsRes?.data) {
+        newSopCount = (sopCompletionsRes.data as any[])
+          .filter((s: any) => s.status === 'completed').length;
+      }
       if (vmsRes?.data) {
         const total = (vmsRes.data as any[]).length;
         const checkedIn = (vmsRes.data as any[]).filter((v: any) => v.status === 'checked_in').length;
@@ -324,7 +334,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         newVmsStats = { total, in: checkedIn, out: checkedOut };
       }
 
-      let newVendorStats = currentState.vendorStats;
+      let newVendorStats = { revenue: 0, commission: 0 };
       if (revRes?.data) {
         const totalRev = (revRes.data as any[]).reduce((acc: number, row: any) => acc + (row.revenue_amount || 0), 0);
         newVendorStats = { revenue: totalRev, commission: totalRev * 0.1 };
@@ -608,7 +618,9 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     },
   };
 
-  if (isLoading) {
+  const shouldShowLoading = isLoading || (hasLoadedInitialData && loadedPropertyId !== propertyId);
+
+  if (shouldShowLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, backgroundColor: '#121212' }]}>
         <StatusBar barStyle="light-content" />

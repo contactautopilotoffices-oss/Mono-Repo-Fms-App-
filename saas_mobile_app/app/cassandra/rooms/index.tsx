@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { listRooms } from '@/services/cassandra/cassandraRoomService';
 import { CassandraRoomListItem } from '@/types/cassandra-room';
@@ -174,46 +174,51 @@ function RoomsListContent() {
 
   const orgId = membership?.org_id ?? '';
   const [rooms, setRooms] = useState<CassandraRoomListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  const fetchRooms = useCallback(async (pageNum: number = 1, refresh: boolean = false) => {
-    if (!propertyId) return;
-    if (refresh) setIsRefreshing(true);
-    else if (pageNum === 1) setIsLoading(true);
-    else setIsLoadingMore(true);
-
+  const fetchRooms = useCallback(async () => {
+    if (!propertyId) return [] as CassandraRoomListItem[];
     try {
-      const res = await listRooms(propertyId, { page: pageNum, page_size: 20 });
-      if (refresh || pageNum === 1) {
-        setRooms(res.rooms);
-      } else {
-        setRooms((prev) => [...prev, ...res.rooms]);
-      }
-      setHasMore(res.rooms.length === res.page_size);
-      setPage(pageNum);
+      const res = await listRooms(propertyId, { page: 1, page_size: 20 });
+      return res.rooms;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load sessions.';
       toast.error(msg);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-      setIsLoadingMore(false);
+      return [] as CassandraRoomListItem[];
     }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.cassandra.cassandraRooms(propertyId), () => fetchRooms(1), {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: fetchedRooms = [], isLoading, isFetching, refetch } = useServerQuery<CassandraRoomListItem[]>(
+    queryKeys.cassandra.cassandraRooms(propertyId),
+    fetchRooms,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  useEffect(() => {
+    if (fetchedRooms) {
+      setRooms(fetchedRooms);
+      setPage(1);
+    }
+  }, [fetchedRooms]);
 
   const handleRefresh = () => refetch();
 
-  const handleLoadMore = () => {
-    if (!isLoadingMore && hasMore) {
-      fetchRooms(page + 1);
+  const handleLoadMore = async () => {
+    if (!isLoadingMore && hasMore && propertyId) {
+      setIsLoadingMore(true);
+      try {
+        const res = await listRooms(propertyId, { page: page + 1, page_size: 20 });
+        setRooms((prev) => [...prev, ...res.rooms]);
+        setHasMore(res.rooms.length === res.page_size);
+        setPage((p) => p + 1);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to load sessions.';
+        toast.error(msg);
+      } finally {
+        setIsLoadingMore(false);
+      }
     }
   };
 
@@ -266,7 +271,7 @@ function RoomsListContent() {
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 20 }]}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshing}
+              refreshing={isFetching}
               onRefresh={handleRefresh}
               tintColor={Colors.violet}
               colors={[Colors.violet]}

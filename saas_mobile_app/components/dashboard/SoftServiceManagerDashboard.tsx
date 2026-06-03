@@ -28,7 +28,7 @@ import FloatingMenu from '@/components/ui/FloatingMenu';
 import NotificationBell from '@/components/dashboard/NotificationBell';
 import { serverApi } from '@/lib/serverApi';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 
 const DRAWER_WIDTH = 280;
 
@@ -41,19 +41,11 @@ export default function SoftServiceManagerDashboard({ propertyId }: { propertyId
   const { colors, isDark } = useTheme();
 
   const [activeTab, setActiveTab] = useState<SSMTab>('overview');
-  const [userRole, setUserRole] = useState('');
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [stockStats, setStockStats] = useState({ total: 0, lowStock: 0, outOfStock: 0 });
-  const [checklistStats, setChecklistStats] = useState({ total: 0, pending: 0, completed: 0 });
-  const [userSkills, setUserSkills] = useState<string[]>([]);
-  const [specialization, setSpecialization] = useState<string | null>(null);
-  // Shift / Check-in state
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
-  const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
+  // Shift / Check-in state — kept local for optimistic UI updates
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
 
   const supabase = useMemo(() => createClient(), []);
 
@@ -64,68 +56,94 @@ export default function SoftServiceManagerDashboard({ propertyId }: { propertyId
     }
   }, [tab]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.softServiceLegacy(propertyId), async () => {
-    await Promise.all([fetchUserRole(), fetchData(), fetchShiftStatus()]);
-  }, {
+  const fetchDashboardData = useCallback(async () => {
+    let userRole = '';
+    let userSkills: string[] = [];
+    let specialization: string | null = null;
+    let isCheckedIn = false;
+
+    if (user) {
+      const { data: member } = await (supabase
+        .from('property_memberships')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single() as any);
+      if (member) {
+        userRole = member.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+
+      const { data: resolverStats } = await (supabase
+        .from('resolver_stats')
+        .select('skills, specialization')
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
+        .single() as any);
+
+      if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
+        userSkills = resolverStats.skills;
+        if (resolverStats.skills.length > 0) {
+          specialization = resolverStats.skills.map((s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())).join(', ');
+        }
+      } else if (resolverStats?.specialization) {
+        specialization = resolverStats.specialization.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      }
+    }
+
+    let stockStats = { total: 0, lowStock: 0, outOfStock: 0 };
+    const { data: stockItems } = await (supabase
+      .from('stock_items')
+      .select('id, quantity, min_threshold')
+      .eq('property_id', propertyId) as any);
+    if (stockItems) {
+      const total = stockItems.length;
+      const lowStock = stockItems.filter((s: any) => s.quantity > 0 && s.quantity <= (s.min_threshold ?? 10)).length;
+      const outOfStock = stockItems.filter((s: any) => s.quantity === 0).length;
+      stockStats = { total, lowStock, outOfStock };
+    }
+
+    if (user?.id && propertyId) {
+      try {
+        const { data: rsData }: any = await supabase
+          .from('resolver_stats')
+          .select('is_checked_in')
+          .eq('user_id', user.id)
+          .eq('property_id', propertyId)
+          .single();
+        if (rsData) isCheckedIn = rsData.is_checked_in;
+      } catch (error) {
+        console.error('Error fetching shift status:', error);
+      }
+    }
+
+    return { userRole, userSkills, specialization, stockStats, isCheckedIn };
+  }, [propertyId, user?.id, supabase]);
+
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{
+    userRole: string;
+    userSkills: string[];
+    specialization: string | null;
+    stockStats: { total: number; lowStock: number; outOfStock: number };
+    isCheckedIn: boolean;
+  }>(queryKeys.property.softServiceLegacy(propertyId), fetchDashboardData, {
     staleTime: 1000 * 60 * 5,
   });
 
-  // ─── Shift / Check-in ───────────────────────────────────────────────────
-  const fetchShiftStatus = async () => {
-    if (!user?.id || !propertyId) return;
-    try {
-      const { data: rsData }: any = await supabase
-        .from('resolver_stats')
-        .select('is_checked_in')
-        .eq('user_id', user.id)
-        .eq('property_id', propertyId)
-        .single();
+  useEffect(() => {
+    if (data) setIsCheckedIn(data.isCheckedIn);
+  }, [data]);
 
-      if (rsData) setIsCheckedIn(rsData.is_checked_in);
-
-      // TODO: shift_logs does not exist in saas_one schema
-      // const { data: shiftData }: any = await supabase
-      //   .from('shift_logs')
-      //   .select('id')
-      //   .eq('user_id', user.id)
-      //   .eq('property_id', propertyId)
-      //   .eq('status', 'active')
-      //   .order('check_in_at', { ascending: false })
-      //   .limit(1)
-      //   .maybeSingle();
-      // if (shiftData) {
-      //   setActiveShiftId(shiftData.id);
-      //   setIsCheckedIn(true);
-      // }
-    } catch (error) {
-      console.error('Error fetching shift status:', error);
-    }
-  };
+  const userRole = data?.userRole ?? '';
+  const userSkills = data?.userSkills ?? [];
+  const specialization = data?.specialization ?? null;
+  const stockStats = data?.stockStats ?? { total: 0, lowStock: 0, outOfStock: 0 };
+  const checklistStats = { total: 0, pending: 0, completed: 0 };
 
   const toggleShift = async () => {
     if (!user?.id || !propertyId || isCheckingInOut) return;
     setIsCheckingInOut(true);
     const newStatus = !isCheckedIn;
     try {
-      // TODO: shift_logs does not exist in saas_one schema
-      // if (newStatus) {
-      //   const { data: newShift, error: shiftErr }: any = await (supabase
-      //     .from('shift_logs') as any)
-      //     .insert({ user_id: user.id, property_id: propertyId, status: 'active', check_in_at: new Date().toISOString() })
-      //     .select()
-      //     .single();
-      //   if (shiftErr) throw shiftErr;
-      //   setActiveShiftId(newShift.id);
-      // } else {
-      //   if (activeShiftId) {
-      //     const { error: shiftErr } = await (supabase.from('shift_logs') as any)
-      //       .update({ status: 'completed', check_out_at: new Date().toISOString() })
-      //       .eq('id', activeShiftId);
-      //     if (shiftErr) throw shiftErr;
-      //   }
-      //   setActiveShiftId(null);
-      // }
-
       const { error: rsErr } = await serverApi.query({
         table: 'resolver_stats',
         action: 'update',
@@ -144,74 +162,8 @@ export default function SoftServiceManagerDashboard({ propertyId }: { propertyId
     }
   };
 
-  const fetchUserRole = async () => {
-    if (!user) return;
-    const { data: member } = await (supabase
-      .from('property_memberships')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .single() as any);
-    if (member) {
-      const role = member.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-      setUserRole(role);
-    }
-
-    // Fetch skills from resolver_stats
-    const { data: resolverStats } = await (supabase
-      .from('resolver_stats')
-      .select('skills, specialization')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .single() as any);
-
-    if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
-      setUserSkills(resolverStats.skills);
-      if (resolverStats.skills.length > 0) {
-        setSpecialization(resolverStats.skills.map((s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())).join(', '));
-      }
-    } else if (resolverStats?.specialization) {
-      setSpecialization(resolverStats.specialization.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-    }
-  };
-
-  const fetchData = async () => {
-    setIsLoading(true);
-    try {
-      // Stock stats
-      const { data: stockItems } = await (supabase
-        .from('stock_items')
-        .select('id, quantity, min_threshold')
-        .eq('property_id', propertyId) as any);
-
-      if (stockItems) {
-        const total = stockItems.length;
-        const lowStock = stockItems.filter((s: any) => s.quantity > 0 && s.quantity <= (s.min_threshold ?? 10)).length;
-        const outOfStock = stockItems.filter((s: any) => s.quantity === 0).length;
-        setStockStats({ total, lowStock, outOfStock });
-      }
-
-      // TODO: sop_checklists does not exist in saas_one schema
-      // Checklist stats
-      // const { data: checklists } = await (supabase
-      //   .from('sop_checklists')
-      //   .select('id, status')
-      //   .eq('property_id', propertyId) as any);
-      // if (checklists) {
-      //   const total = checklists.length;
-      //   const completed = checklists.filter((c: any) => c.status === 'completed' || c.status === 'submitted').length;
-      //   setChecklistStats({ total, pending: total - completed, completed });
-      // }
-    } catch (e) {
-      console.error('Error fetching data:', e);
-    }
-    setIsLoading(false);
-  };
-
-  const onRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const onRefresh = () => {
+    refetch();
   };
 
   function getInitials(name: string): string {
@@ -224,7 +176,7 @@ export default function SoftServiceManagerDashboard({ propertyId }: { propertyId
   // ─── Overview Tab ───────────────────────────────────────────────────────────
   const renderOverviewTab = () => (
     <LinearGradient colors={isDark ? ['#0F172A', '#1E293B'] : ['#F8FAFC', '#E2E8F0']} style={styles.tabContent}>
-      <ScrollView style={{ flex: 1 }} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      <ScrollView style={{ flex: 1 }} refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor={colors.primary} />}
           showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.ssmHeader}>
           <View style={{ flex: 1 }}>

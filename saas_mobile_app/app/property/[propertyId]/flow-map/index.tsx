@@ -18,7 +18,7 @@ import { createClient } from '@/utils/supabase/client';
 import { useTheme } from '@/context';
 import TicketCard from '@/components/shared/TicketCard';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 
@@ -75,28 +75,23 @@ export default function LiveFlowMap() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [propertyName, setPropertyName] = useState('Property');
   const [isDragging, setIsDragging] = useState(false);
-  const [validationEnabled, setValidationEnabled] = useState(false);
   
   // Layout tracking for drop zones
   const sectionLayouts = useSharedValue<Record<string, { y: number, height: number }>>({});
   const [activeDropZone, setActiveDropZone] = useState<string | null>(null);
 
   const fetchFlowData = async () => {
-    if (!propertyId) return;
+    if (!propertyId) return { tickets: [] as Ticket[], propertyName: 'Property', validationEnabled: false };
 
     // Fetch Property Name
+    let propertyName = 'Property';
     const propRes = await serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], single: true });
-    if (propRes.data) setPropertyName((propRes.data as { name: string }).name);
+    if (propRes.data) propertyName = (propRes.data as { name: string }).name;
 
     // Fetch Validation Feature Status
     const featRes = await serverApi.query({ table: 'property_features', action: 'select', select: 'is_enabled', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'feature_key', value: 'ticket_validation' }], maybeSingle: true });
-    setValidationEnabled((featRes.data as { is_enabled: boolean } | null)?.is_enabled === true);
+    const validationEnabled = (featRes.data as { is_enabled: boolean } | null)?.is_enabled === true;
 
     const { data, error } = await (supabase
       .from('tickets')
@@ -109,22 +104,25 @@ export default function LiveFlowMap() {
       .eq('property_id', propertyId)
       .order('created_at', { ascending: false }) as any);
 
-    if (!error) setTickets(data || []);
-    setIsLoading(false);
+    return { tickets: (!error ? data || [] : []) as Ticket[], propertyName, validationEnabled };
   };
 
-  const { refetch } = useDashboardFetch(queryKeys.property.flowMap(propertyId), fetchFlowData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{ tickets: Ticket[]; propertyName: string; validationEnabled: boolean }>(
+    queryKeys.property.flowMap(propertyId),
+    fetchFlowData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const tickets = data?.tickets ?? [];
+  const propertyName = data?.propertyName ?? 'Property';
+  const validationEnabled = data?.validationEnabled ?? false;
 
   const activeStages = useMemo(() => {
     return STAGES.filter(s => s.key !== 'resolved' || validationEnabled);
   }, [validationEnabled]);
 
-  const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const onRefresh = useCallback(() => {
+    refetch();
   }, [refetch]);
 
   const groupedTickets = useMemo(() => {
@@ -158,7 +156,7 @@ export default function LiveFlowMap() {
 
     const { error } = await ((supabase as any).from('tickets').update(updatePayload).eq('id', ticketId));
     if (!error) {
-        setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, ...updatePayload } : t));
+        refetch();
     }
   };
 
@@ -417,7 +415,7 @@ export default function LiveFlowMap() {
           style={styles.content}
           scrollEnabled={!isDragging}
           contentContainerStyle={{ paddingBottom: 100 }}
-          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} />}
         >
           {activeStages.map((stage) => {
             const stageTickets = groupedTickets[stage.key] || [];

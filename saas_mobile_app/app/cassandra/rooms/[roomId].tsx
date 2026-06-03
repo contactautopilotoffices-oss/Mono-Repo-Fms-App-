@@ -21,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { getRoomFull, endRoom } from '@/services/cassandra/cassandraRoomService';
 import {
@@ -246,38 +246,31 @@ function RoomDetailContent() {
     orgId: string;
   }>();
 
-  const [room, setRoom] = useState<CassandraRoomFull | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
 
-  const fetchRoom = useCallback(async (refresh: boolean = false) => {
-    if (!roomId) return;
-    if (refresh) setIsRefreshing(true);
-    else setIsLoading(true);
-
+  const fetchRoom = useCallback(async () => {
+    if (!roomId) return null;
     try {
-      const data = await getRoomFull(roomId);
-      setRoom(data);
+      return await getRoomFull(roomId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load session.';
       toast.error(msg);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      return null;
     }
   }, [roomId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.cassandra.cassandraRoom(roomId), fetchRoom, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: room, isLoading, isFetching, refetch } = useServerQuery<CassandraRoomFull | null>(
+    queryKeys.cassandra.cassandraRoom(roomId),
+    fetchRoom,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
   const handleEndSession = async () => {
     if (!propertyId || !roomId) return;
     setIsEnding(true);
     try {
       const { room: updated } = await endRoom(propertyId, roomId);
-      setRoom(updated);
+      refetch();
       toast.success('Session ended');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to end session.';
@@ -287,11 +280,7 @@ function RoomDetailContent() {
     }
   };
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
-  };
+  const handleRefresh = () => refetch();
 
   const isLive = room?.status === 'active' || room?.status === 'waiting';
   const isEnded = room?.status === 'ended';
@@ -339,7 +328,7 @@ function RoomDetailContent() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
+            refreshing={isFetching}
             onRefresh={handleRefresh}
             tintColor={Colors.violet}
             colors={[Colors.violet]}

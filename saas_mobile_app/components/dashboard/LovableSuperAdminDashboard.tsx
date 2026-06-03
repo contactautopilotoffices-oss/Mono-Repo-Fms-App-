@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { serverApi } from '@/lib/serverApi';
 import {
@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated from 'react-native-reanimated';
-import { createClient } from '@/utils/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useWeather } from '@/hooks/useWeather';
 import { queryKeys } from '@/utils/queryKeys';
@@ -135,155 +134,30 @@ export default function LovableSuperAdminDashboard() {
   // ── Background fetch — same logic as before, writes to Zustand store ──────────
   const fetchAll = useCallback(async () => {
     if (!user) return;
-    const supabase = createClient();
     setFetchError(null);
 
     try {
-      let resolvedOrgId = membership?.org_id ?? '';
-      if (!resolvedOrgId) {
-        const { data: orgMembership } = await supabase
-          .from('organization_memberships')
-          .select('organization_id, role')
-          .eq('user_id', user.id)
-          .eq('is_active', true)
-          .in('role', ['org_super_admin', 'org_admin', 'owner', 'super_tenant'] as any)
-          .limit(1)
-          .maybeSingle();
-        resolvedOrgId = (orgMembership as { organization_id: string } | null)?.organization_id ?? '';
+      const dashboardResponse = await serverApi.get<{
+        organizations: Org[];
+        properties: SuperAdminProperty[];
+        users: SystemUser[];
+      }>('/api/dashboard/super-admin', orgId ? { orgId } : undefined);
+
+      if (dashboardResponse.error) {
+        throw new Error(dashboardResponse.error.message);
       }
 
-      if (!resolvedOrgId) {
-        setFetchError('No organization found. Please ensure your account has org access.');
-        setSuperAdminData({ properties: [], organizations: [] });
-        setIsRefreshing(false);
-        return;
+      const dashboardData = dashboardResponse.data;
+      if (!dashboardData) {
+        throw new Error('No dashboard data returned');
       }
-
-      const { data: allOrgs } = await supabase
-        .from('organizations')
-        .select('*, properties(count)')
-        .order('created_at', { ascending: false });
-
-      const { data: propData } = await supabase
-        .from('properties')
-        .select('id, name, code, address, image_url, organization_id')
-        .eq('organization_id', resolvedOrgId);
-
-      if (!propData || propData.length === 0) {
-        setSuperAdminData({ properties: [], loadedOrgId: resolvedOrgId, hasLoadedInitialData: true, lastUpdatedAt: Date.now() });
-        setIsRefreshing(false);
-        return;
-      }
-
-      const propIds = propData.map((p: any) => p.id);
-
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      const [
-        { data: ticketData },
-        { data: sopData },
-        { data: dieselData },
-        { data: electricData },
-        { data: historicalElectricData }
-      ] = await Promise.all([
-        serverApi.query({ table: 'tickets', action: 'select', select: 'property_id, status, created_at, priority', filters: [{ op: 'in', column: 'property_id', values: propIds }] }),
-        serverApi.query({ table: 'sop_completions', action: 'select', select: 'property_id, status', filters: [{ op: 'in', column: 'property_id', values: propIds }] }),
-        serverApi.query({ table: 'diesel_readings', action: 'select', select: 'property_id, computed_consumed_litres', filters: [{ op: 'in', column: 'property_id', values: propIds }] }),
-        serverApi.query({ table: 'electricity_readings', action: 'select', select: 'property_id, final_units', filters: [{ op: 'in', column: 'property_id', values: propIds }] }),
-        serverApi.query({ table: 'electricity_readings', action: 'select', select: 'property_id, final_units, created_at', filters: [{ op: 'in', column: 'property_id', values: propIds }, { op: 'gte', column: 'created_at', value: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }] })
-      ]);
-
-      const ticketMap = new Map<string, { open: number; resolved: number; total: number; urgent: number; history: Map<string, number> }>();
-      const sopMap = new Map<string, { completed: number; total: number }>();
-      const energyMap = new Map<string, { diesel: number; electricity: number }>();
-      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-      propIds.forEach((id: string) => {
-        ticketMap.set(id, { open: 0, resolved: 0, total: 0, urgent: 0, history: new Map() });
-        sopMap.set(id, { completed: 0, total: 0 });
-        energyMap.set(id, { diesel: 0, electricity: 0 });
-      });
-
-      (ticketData as any[])?.forEach((t: any) => {
-        const c = ticketMap.get(t.property_id);
-        if (!c) return;
-        c.total++;
-        if (['open', 'blocked', 'client_raised'].includes(t.status)) c.open++;
-        else if (['resolved', 'closed'].includes(t.status)) c.resolved++;
-        if (t.priority === 'urgent' || t.priority === 'high') c.urgent++;
-        const date = new Date(t.created_at);
-        if (date >= sevenDaysAgo) {
-          const dayKey = dayNames[date.getDay()];
-          c.history.set(dayKey, (c.history.get(dayKey) || 0) + 1);
-        }
-      });
-
-      (sopData as any[])?.forEach((s: any) => {
-        const c = sopMap.get(s.property_id);
-        if (!c) return;
-        c.total++;
-        if (s.status === 'completed') c.completed++;
-      });
-
-      (dieselData as any[])?.forEach((d: any) => {
-        const c = energyMap.get(d.property_id);
-        if (c) c.diesel += (d.computed_consumed_litres || 0);
-      });
-      (electricData as any[])?.forEach((e: any) => {
-        const c = energyMap.get(e.property_id);
-        if (c) c.electricity += (e.final_units || 0);
-      });
-
-      const energyTrendMap = new Map<string, number>();
-      propIds.forEach((id: string) => {
-        const propReadings = ((historicalElectricData as any[]) ?? [])
-          .filter((r: any) => r.property_id === id)
-          .map((r: any) => r.final_units || 0);
-        const avg = propReadings.length > 0 ? propReadings.reduce((a: number, b: number) => a + b, 0) / propReadings.length : 0;
-        const latest = propReadings.length > 0 ? propReadings[propReadings.length - 1] : 0;
-        const trend = avg > 0 ? Math.round(((latest - avg) / avg) * 100) : 0;
-        energyTrendMap.set(id, trend);
-      });
-
-      const mapped: SuperAdminProperty[] = propData.map((p: any) => {
-        const t = ticketMap.get(p.id)!;
-        const s = sopMap.get(p.id)!;
-        const e = energyMap.get(p.id)!;
-        const ticketScore = Math.max(0, 40 - (t.urgent * 5) - (t.open * 2));
-        const sopScore = s.total > 0 ? (s.completed / s.total) * 30 : 30;
-        const energyScore = e.diesel > 500 ? 20 : 30;
-        const totalScore = Math.min(100, ticketScore + sopScore + energyScore);
-        const healthStatus = totalScore > 80 ? 'optimal' : totalScore > 40 ? 'warning' : 'critical';
-        return {
-          id: p.id,
-          name: p.name,
-          code: p.code,
-          address: p.address,
-          image_url: p.image_url,
-          openTickets: t.open,
-          resolvedTickets: t.resolved,
-          totalTickets: t.total,
-          healthScore: Math.round(totalScore),
-          healthStatus,
-          checklist: { completed: s.completed, total: Math.max(s.total, 1), percent: s.total > 0 ? Math.round((s.completed / s.total) * 100) : 100 },
-          energy: { diesel: Math.round(e.diesel), electricity: Math.round(e.electricity), trend: energyTrendMap.get(p.id) ?? 0 },
-          tickets: dayNames.map(d => ({ day: d, count: t.history.get(d) || 0 })),
-          status: healthStatus,
-        };
-      });
-
-      const { data: userData } = await supabase
-        .from('users')
-        .select('id, full_name, email, phone')
-        .limit(100);
 
       // Save to Zustand store for next instant load
       setSuperAdminData({
-        properties: mapped,
-        organizations: (allOrgs ?? []) as any,
-        users: (userData ?? []) as any,
-        loadedOrgId: resolvedOrgId,
+        properties: (dashboardData.properties ?? []) as any,
+        organizations: (dashboardData.organizations ?? []) as any,
+        users: (dashboardData.users ?? []) as any,
+        loadedOrgId: orgId || membership?.org_id || null,
         hasLoadedInitialData: true,
         lastUpdatedAt: Date.now(),
       });
@@ -293,7 +167,7 @@ export default function LovableSuperAdminDashboard() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [user, membership, setSuperAdminData]);
+  }, [user, membership, orgId, setSuperAdminData]);
 
   // React Query: staleTime 5 min, only fetch if membership is loaded
   const { refetch } = useDashboardFetch(
@@ -390,12 +264,7 @@ export default function LovableSuperAdminDashboard() {
   };
 
   const handlePropertyPress = (p: SuperAdminProperty) => {
-    const propForDetail: Property = {
-      ...p,
-      healthStatus: p.healthStatus === 'optimal' ? 'good' : p.healthStatus,
-    };
-    setActiveProperty(propForDetail);
-    setScreen('property-detail');
+    router.replace(`/property/${p.id}/dashboard` as never);
   };
 
   return (

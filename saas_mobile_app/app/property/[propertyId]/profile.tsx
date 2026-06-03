@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors } from '@/constants/Colors';
 import { createClient } from '@/utils/supabase/client';
@@ -57,9 +57,6 @@ export default function ProfileScreen() {
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
 
@@ -71,7 +68,7 @@ export default function ProfileScreen() {
 
   // ─── Fetch profile ─────────────────────────────────────────────────────────
   const fetchProfile = useCallback(async () => {
-    if (!user) return;
+    if (!user) return null;
     try {
       const { data, error } = await (supabase as any)
         .from('users')
@@ -80,26 +77,28 @@ export default function ProfileScreen() {
         .maybeSingle();
 
       if (error) throw error;
-      if (data) {
-        setProfile(data as UserProfile);
-        setEditName(data.full_name || '');
-        setEditPhone(data.phone || '');
-      }
+      return (data as UserProfile) || null;
     } catch (error) {
       console.error('Error fetching profile:', error);
-    } finally {
-      setIsLoading(false);
+      return null;
     }
   }, [user, supabase]);
 
-  const { refetch } = useDashboardFetch(queryKeys.user.profile(user?.id ?? 'none'), fetchProfile, {
-    staleTime: 1000 * 60 * 5,
-  });
+  useEffect(() => {
+    if (profile) {
+      setEditName(profile.full_name || '');
+      setEditPhone(profile.phone || '');
+    }
+  }, [profile]);
 
-  const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const { data: profile, isLoading, isFetching, refetch } = useServerQuery<UserProfile | null>(
+    queryKeys.user.profile(user?.id ?? 'none'),
+    fetchProfile,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const onRefresh = useCallback(() => {
+    refetch();
   }, [refetch]);
 
   // ─── Save profile ──────────────────────────────────────────────────────────
@@ -122,8 +121,8 @@ export default function ProfileScreen() {
 
       if (error) throw error;
 
-      setProfile(prev => (prev ? { ...prev, full_name: editName.trim(), phone: editPhone.trim() || undefined } : prev));
       Alert.alert('Success', 'Profile updated successfully');
+      refetch();
     } catch (error) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to update profile');
@@ -183,7 +182,7 @@ export default function ProfileScreen() {
       const publicUrl = urlData.publicUrl + '?t=' + Date.now();
       await (supabase as any).from('users').update({ user_photo_url: publicUrl }).eq('id', profile?.id);
 
-      setProfile(prev => (prev ? { ...prev, user_photo_url: publicUrl } : prev));
+      refetch();
     } catch (error) {
       console.error('Error uploading photo:', error);
       Alert.alert('Error', 'Failed to upload photo');
@@ -264,7 +263,7 @@ export default function ProfileScreen() {
       <ScrollView
         style={s.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#708F96" />}
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
       >
         {/* ── Avatar Section ── */}
         <View style={s.avatarSection}>

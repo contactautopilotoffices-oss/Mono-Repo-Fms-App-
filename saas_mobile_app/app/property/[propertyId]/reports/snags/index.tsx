@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,10 +27,6 @@ export default function SnagsReportScreen() {
   const insets = useSafeAreaInsets();
   const isDark = theme === 'dark';
 
-  const [imports, setImports] = useState<SnagImport[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
   const load = async () => {
     const supabase = createClient();
     const { data } = await supabase
@@ -39,16 +35,16 @@ export default function SnagsReportScreen() {
       .eq('property_id', propertyId)
       .order('created_at', { ascending: false })
       .limit(20);
-    setImports((data || []) as SnagImport[]);
-    setLoading(false);
-    setRefreshing(false);
+    return (data || []) as SnagImport[];
   };
 
-  const { refetch } = useDashboardFetch(queryKeys.property.reportsSnags(propertyId), load, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: imports, isLoading, isFetching, refetch } = useServerQuery<SnagImport[]>(
+    queryKeys.property.reportsSnags(propertyId),
+    load,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const onRefresh = () => { setRefreshing(true); refetch().then(() => setRefreshing(false)); };
+  const onRefresh = () => refetch();
 
   const bg = isDark ? '#151B2B' : '#F8FAFC';
   const cardBg = isDark ? '#1E2535' : '#FFFFFF';
@@ -60,7 +56,7 @@ export default function SnagsReportScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}
@@ -81,7 +77,7 @@ export default function SnagsReportScreen() {
           </Text>
         </View>
 
-        {loading ? (
+        {isLoading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color="#708F96" />
           </View>

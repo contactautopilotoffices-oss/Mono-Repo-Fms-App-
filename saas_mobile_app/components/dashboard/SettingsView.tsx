@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { createClient } from '@/utils/supabase/client';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { readFileAsArrayBuffer } from '@/utils/mediaUtils';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from '../ui/Toast';
@@ -32,7 +32,6 @@ interface SettingsViewProps {
 export default function SettingsView({ onUpdate }: SettingsViewProps) {
   const { user } = useAuth();
   const supabase = useMemo(() => createClient(), []);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -59,31 +58,48 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
         .select('role, property:properties(name)')
         .eq('user_id', user?.id ?? '').eq('is_active', true);
 
-      setProfile(userData);
-      if (userData.user_photo_url) setAvatarPreview(userData.user_photo_url);
-
       const roles: RoleInfo[] = [];
       orgMembers?.forEach((m: any) => roles.push({ role: m.role, entityName: m.organization?.name || 'Unknown Org', type: 'organization' }));
       propMembers?.forEach((m: any) => roles.push({ role: m.role, entityName: m.property?.name || 'Unknown Property', type: 'property' }));
-      setUserRoles(roles);
 
       // Vendor check
       const { data: vendorData } = await (supabase as any)
         .from('vendors').select('id, shop_name').eq('user_id', user?.id ?? '').maybeSingle();
-      if (vendorData) setVendorInfo(vendorData);
+
+      return {
+        profile: userData,
+        roles,
+        vendorInfo: vendorData || null,
+      };
     } catch (err) {
       if (user) {
-        setProfile({ full_name: user.user_metadata?.full_name || '', email: user.email, phone: user.user_metadata?.phone || '' });
+        return {
+          profile: { full_name: user.user_metadata?.full_name || '', email: user.email, phone: user.user_metadata?.phone || '' },
+          roles: [],
+          vendorInfo: null,
+        };
       }
-    } finally {
-      setIsLoading(false);
+      throw err;
     }
   }, [user, supabase]);
 
-  const { refetch } = useDashboardFetch(queryKeys.user.settingsView(user?.id ?? 'none'), fetchProfile, {
+  const { data: profileData, isLoading } = useServerQuery<{
+    profile: any;
+    roles: RoleInfo[];
+    vendorInfo: { id: string; shop_name: string } | null;
+  } | null>(queryKeys.user.settingsView(user?.id ?? 'none'), fetchProfile, {
     staleTime: 1000 * 60 * 5,
     enabled: !!user,
   });
+
+  useEffect(() => {
+    if (profileData) {
+      setProfile(profileData.profile);
+      if (profileData.profile?.user_photo_url) setAvatarPreview(profileData.profile.user_photo_url);
+      setUserRoles(profileData.roles);
+      setVendorInfo(profileData.vendorInfo);
+    }
+  }, [profileData]);
 
   const handlePickAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({

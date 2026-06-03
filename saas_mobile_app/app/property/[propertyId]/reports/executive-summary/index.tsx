@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,26 +45,22 @@ export default function ExecutiveSummaryScreen() {
   const insets = useSafeAreaInsets();
   const isDark = theme === 'dark';
 
-  const [data, setData] = useState<ExecutiveReportResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
   const load = async () => {
     const result = await getExecutiveReport(propertyId);
-    setData(result as ExecutiveReportResponse);
-    setLoading(false);
-    setRefreshing(false);
+    return result as ExecutiveReportResponse;
   };
 
-  const { refetch } = useDashboardFetch(queryKeys.property.reportsExecutive(propertyId), load, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: reportData, isLoading, isFetching, refetch } = useServerQuery<ExecutiveReportResponse>(
+    queryKeys.property.reportsExecutive(propertyId),
+    load,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-  const onRefresh = () => { setRefreshing(true); refetch().then(() => setRefreshing(false)); };
+  const onRefresh = () => refetch();
 
   const bg = isDark ? '#151B2B' : '#F8FAFC';
 
-  if (loading) {
+  if (isLoading) {
     return (
       <View style={[styles.container, { backgroundColor: bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.loadingWrap}>
@@ -74,7 +70,7 @@ export default function ExecutiveSummaryScreen() {
     );
   }
 
-  if (data?.error || !data) {
+  if (reportData?.error || !reportData) {
     return (
       <View style={[styles.container, { backgroundColor: bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.loadingWrap}>
@@ -84,7 +80,7 @@ export default function ExecutiveSummaryScreen() {
     );
   }
 
-  const { property, allTimeTotal, prevMonth, currMonth, topCategories, trends } = data;
+  const { property, allTimeTotal, prevMonth, currMonth, topCategories, trends } = reportData;
 
   const closureDiff = currMonth.closureRate - prevMonth.closureRate;
   const ticketDiff = prevMonth.total > 0
@@ -117,7 +113,7 @@ export default function ExecutiveSummaryScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}

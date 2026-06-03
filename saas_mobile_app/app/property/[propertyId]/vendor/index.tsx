@@ -33,7 +33,7 @@ import {
   X
 } from 'lucide-react-native';
 import { format } from 'date-fns';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 interface Vendor {
@@ -72,10 +72,6 @@ export default function VendorRevenueScreen() {
   const isDark = theme === 'dark';
   const { membership } = useAuth();
 
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [vendorCycles, setVendorCycles] = useState<CommissionCycle[]>([]);
   const [currentCycle, setCurrentCycle] = useState<CommissionCycle | null>(null);
@@ -88,9 +84,8 @@ export default function VendorRevenueScreen() {
     return prop ? ['property_admin', 'org_admin', 'org_super_admin', 'master_admin'].includes(prop.role.toLowerCase()) : false;
   }, [membership, propertyId]);
 
-  const fetchVendors = useCallback(async (refresh = false) => {
-    if (!propertyId) return;
-    if (refresh) setIsRefreshing(true); else setIsLoading(true);
+  const fetchVendors = useCallback(async () => {
+    if (!propertyId) return [];
     try {
       const supabase = createClient();
       const { data, error } = await supabase
@@ -99,12 +94,10 @@ export default function VendorRevenueScreen() {
         .eq('property_id', propertyId)
         .order('name', { ascending: true });
       if (error) throw new Error(error.message || 'Failed to fetch vendors');
-      setVendors(data || []);
+      return data || [];
     } catch (err) {
       console.error('Error fetching vendors:', err);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      return [];
     }
   }, [propertyId]);
 
@@ -132,9 +125,11 @@ export default function VendorRevenueScreen() {
     }
   };
 
-  const { refetch } = useDashboardFetch(queryKeys.property.vendor(propertyId), fetchVendors, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: vendors = [], isLoading, isFetching, refetch } = useServerQuery<Vendor[]>(
+    queryKeys.property.vendor(propertyId),
+    fetchVendors,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -199,7 +194,7 @@ export default function VendorRevenueScreen() {
       <FlatList
         data={vendors}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => refetch()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>

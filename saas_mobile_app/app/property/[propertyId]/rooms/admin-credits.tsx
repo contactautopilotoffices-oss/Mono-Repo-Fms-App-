@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import {
   View,
@@ -49,8 +49,7 @@ export default function AdminCreditsScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState<any[]>([]);
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Editing state
@@ -66,38 +65,41 @@ export default function AdminCreditsScreen() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setLoading(true);
+    if (!propertyId) return [] as any[];
     try {
       const res = await getCompaniesWithCreditsApi(propertyId);
-      if (res.companies) {
-        setCompanies(res.companies);
-        
-        // Initialize edit states
-        const initHours: Record<string, string> = {};
-        const initRemaining: Record<string, string> = {};
-        res.companies.forEach((comp: any) => {
-          if (comp.credits && comp.credits.length > 0) {
-            initHours[comp.id] = String(comp.credits[0].monthly_hours || 0);
-            initRemaining[comp.id] = String(comp.credits[0].remaining_hours || 0);
-          } else {
-            initHours[comp.id] = '0';
-            initRemaining[comp.id] = '0';
-          }
-        });
-        setEditHours(initHours);
-        setEditRemainingHours(initRemaining);
-      }
+      return res.companies || [];
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to load companies.');
-    } finally {
-      setLoading(false);
+      return [] as any[];
     }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.roomsAdminCredits(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data: companies = [], isLoading, isFetching, refetch } = useServerQuery<any[]>(
+    queryKeys.property.roomsAdminCredits(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  useEffect(() => {
+    if (companies.length > 0) {
+      const initHours: Record<string, string> = {};
+      const initRemaining: Record<string, string> = {};
+      companies.forEach((comp: any) => {
+        if (comp.credits && comp.credits.length > 0) {
+          initHours[comp.id] = String(comp.credits[0].monthly_hours || 0);
+          initRemaining[comp.id] = String(comp.credits[0].remaining_hours || 0);
+        } else {
+          initHours[comp.id] = '0';
+          initRemaining[comp.id] = '0';
+        }
+      });
+      setEditHours(initHours);
+      setEditRemainingHours(initRemaining);
+    }
+  }, [companies]);
+
+
 
   const handleSave = async (companyId: string) => {
     setSavingId(companyId);
@@ -121,7 +123,7 @@ export default function AdminCreditsScreen() {
       }
 
       Alert.alert('Success', 'Credits updated successfully');
-      fetchData(); // Refresh to get latest DB state
+      refetch(); // Refresh to get latest DB state
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to save credits.');
     } finally {
@@ -185,7 +187,7 @@ export default function AdminCreditsScreen() {
       const res = await manageCompanyMemberApi(companyId, userId, action);
       if (res.error) throw new Error(res.error);
       if (action === 'add') addMemberSheetRef.current?.dismiss();
-      fetchData(); // Refresh to get latest DB state
+      refetch(); // Refresh to get latest DB state
       Alert.alert('Success', action === 'add' ? 'Member added successfully' : 'Member removed successfully');
     } catch (e: any) {
       Alert.alert('Error', e.message || `Failed to ${action} member.`);
@@ -343,7 +345,7 @@ export default function AdminCreditsScreen() {
         </TouchableOpacity>
       </SafeBlurView>
 
-      {loading ? (
+      {isLoading ? (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color="#708F96" />
           <Text style={styles.loadingText}>Loading companies...</Text>
