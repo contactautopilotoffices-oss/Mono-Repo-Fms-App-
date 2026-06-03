@@ -887,35 +887,16 @@ export async function getProcurementCatalogItems(input: {
   search?: string;
   category?: string;
 }): Promise<any[]> {
-  if (!input.organizationId) return [];
+  const query: Record<string, any> = {};
+  if (input.propertyId) query.propertyId = input.propertyId;
+  if (input.organizationId) query.organizationId = input.organizationId;
+  if (input.search) query.search = input.search;
+  if (input.category) query.category = input.category;
 
-  const filters: any[] = [
-    { op: 'eq', column: 'organization_id', value: input.organizationId },
-    { op: 'eq', column: 'is_active', value: true }
-  ];
-
-  if (input.search) {
-    filters.push({ op: 'ilike', column: 'name', value: `%${input.search}%` });
-  }
-
-  if (input.category) {
-    filters.push({ op: 'eq', column: 'category', value: input.category });
-  }
-
-  const res = await serverApi.query<any[]>({
-    table: 'procurement_catalog',
-    action: 'select',
-    select: 'id, name, description, photo_url, category, estimated_price, unit',
-    filters,
-    orders: [{ column: 'name', ascending: true }]
-  });
-
-  if (res.error) {
-    console.error('[getProcurementCatalogItems] Error:', res.error);
-    return [];
-  }
-
-  return res.data || [];
+  const res = await serverApi.get<{ items: any[]; error?: string }>('/api/procurement/catalog', query);
+  
+  if (res.error) throw new Error(res.error.message ?? 'Failed to load procurement catalog');
+  return res.data?.items ?? [];
 }
 
 export async function addProcurementCatalogItem(input: {
@@ -927,28 +908,25 @@ export async function addProcurementCatalogItem(input: {
   quantity?: number;
   unit?: string;
   item_code?: string;
+  photo_base64?: string;
 }): Promise<any> {
-  const res = await serverApi.query<any>({
-    table: 'stock_items',
-    action: 'insert',
-    values: {
-      property_id: input.propertyId,
-      organization_id: input.organizationId,
-      name: input.name,
-      category: input.category || 'General',
-      unit_price: input.unit_price ?? 0,
-      quantity: input.quantity ?? 0,
-      unit: input.unit || 'pcs',
-      item_code: input.item_code || null,
-    },
-    selectOptions: { count: 'exact' },
+  const res = await serverApi.post<any>('/api/procurement/catalog', {
+    organization_id: input.organizationId,
+    name: input.name,
+    category: input.category || 'General',
+    estimated_price: input.unit_price ?? 0,
+    unit: input.unit || 'pcs',
+    item_code: input.item_code,
+    photo_base64: input.photo_base64,
   });
+
   if (res.error) throw new Error(res.error.message ?? 'Failed to add catalog item');
   return res.data;
 }
 
 export async function updateProcurementCatalogItem(
   id: string,
+  organizationId: string,
   updates: Partial<{
     name: string;
     category: string;
@@ -956,24 +934,32 @@ export async function updateProcurementCatalogItem(
     quantity: number;
     unit: string;
     item_code: string;
+    photo_base64: string;
+    photo_url: string;
   }>
 ): Promise<any> {
-  const res = await serverApi.query<any>({
-    table: 'stock_items',
-    action: 'update',
-    values: updates,
-    filters: [{ op: 'eq', column: 'id', value: id }],
+  const res = await serverApi.patch<any>('/api/procurement/catalog', {
+    id,
+    organization_id: organizationId,
+    name: updates.name,
+    category: updates.category,
+    estimated_price: updates.unit_price,
+    unit: updates.unit,
+    item_code: updates.item_code,
+    photo_base64: updates.photo_base64,
+    photo_url: updates.photo_url,
   });
+
   if (res.error) throw new Error(res.error.message ?? 'Failed to update catalog item');
   return res.data;
 }
 
-export async function deleteProcurementCatalogItem(id: string): Promise<void> {
-  const res = await serverApi.query<any>({
-    table: 'stock_items',
-    action: 'delete',
-    filters: [{ op: 'eq', column: 'id', value: id }],
+export async function deleteProcurementCatalogItem(id: string, organizationId: string): Promise<void> {
+  const res = await serverApi.delete<any>('/api/procurement/catalog', {
+    id,
+    organization_id: organizationId
   });
+
   if (res.error) throw new Error(res.error.message ?? 'Failed to delete catalog item');
 }
 
@@ -981,35 +967,18 @@ export async function getProcurementUsers(input: {
   propertyId?: string;
   organizationId?: string;
 }): Promise<Array<{ id: string; full_name: string; email?: string; user_photo_url?: string; role?: string }>> {
-  if (!input.organizationId) return [];
+  const query: Record<string, any> = {};
+  if (input.propertyId) query.propertyId = input.propertyId;
+  if (input.organizationId) query.organizationId = input.organizationId;
 
-  const orgRes = await serverApi.query<any[]>({
-    table: 'organization_memberships',
-    action: 'select',
-    select: 'user_id, role, users!inner(id, full_name, email, user_photo_url)',
-    filters: [
-      { op: 'eq', column: 'organization_id', value: input.organizationId },
-      { op: 'eq', column: 'is_active', value: true }
-    ]
-  });
-
-  const usersMap = new Map<string, any>();
-
-  if (orgRes.data) {
-    orgRes.data.forEach(m => {
-      if (m.users && m.role) {
-        usersMap.set(m.user_id, {
-          id: m.users.id,
-          full_name: m.users.full_name,
-          email: m.users.email,
-          user_photo_url: m.users.user_photo_url,
-          role: m.role
-        });
-      }
-    });
+  const res = await serverApi.get<Array<any>>('/api/procurement/users', query);
+  
+  if (res.error) {
+    console.error('[getProcurementUsers] Error:', res.error);
+    return [];
   }
-
-  return Array.from(usersMap.values());
+  
+  return res.data ?? [];
 }
 
 /**

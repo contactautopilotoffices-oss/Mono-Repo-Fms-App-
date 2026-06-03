@@ -1,101 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
-import { canManageOrganization } from "@/lib/authorization";
+import { getAuthenticatedUser } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  try {
-    const auth = await getAuthenticatedUser(request);
-    if (auth.response || !auth.user) {
-      return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    try {
+        const auth = await getAuthenticatedUser(request);
+        if (auth.response || !auth.user) return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const searchParams = request.nextUrl.searchParams;
-    const propertyId = searchParams.get("propertyId");
+        const adminSupabase = createAdminClient();
 
-    if (!propertyId || propertyId === 'undefined' || propertyId === 'null') {
-      return NextResponse.json({ error: 'propertyId is required' }, { status: 400 });
-    }
-    const organizationId = searchParams.get("organizationId");
+        // 1. Fetch users from property_memberships
+        const { data: propMemberships, error: propError } = await adminSupabase
+            .from('property_memberships')
+            .select(`
+                user_id,
+                user:users!user_id(id, full_name, email, user_photo_url),
+                role
+            `)
+            .eq('role', 'procurement')
+            .eq('is_active', true);
 
-    const admin = createAdminClient();
-
-    if (propertyId) {
-      const access = await getPropertyAccess(auth.user.id, propertyId);
-      if (!access.authorized) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-    } else if (organizationId && !(await canManageOrganization(auth.user.id, organizationId))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    const userMap = new Map<string, { id: string; full_name: string; email: string; user_photo_url?: string | null; role: string }>();
-
-    if (propertyId) {
-      const { data: propertyMemberships, error } = await admin
-        .from("property_memberships")
-        .select("user_id, role, user:users!user_id(id, full_name, email, user_photo_url)")
-        .eq("property_id", propertyId)
-        .eq("role", "procurement")
-        .eq("is_active", true);
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-
-      for (const membership of (propertyMemberships ?? []) as any[]) {
-        if (membership.user?.id) {
-          userMap.set(membership.user.id, {
-            id: membership.user.id,
-            full_name: membership.user.full_name,
-            email: membership.user.email,
-            user_photo_url: membership.user.user_photo_url,
-            role: membership.role,
-          });
-        }
-      }
-    }
-
-    if (organizationId || propertyId) {
-      let orgId = organizationId;
-      if (!orgId && propertyId) {
-        const { data: property } = await admin
-          .from("properties")
-          .select("organization_id")
-          .eq("id", propertyId)
-          .maybeSingle();
-        orgId = property?.organization_id ?? null;
-      }
-
-      if (orgId) {
-        const { data: organizationMemberships, error } = await admin
-          .from("organization_memberships")
-          .select("user_id, role, user:users!user_id(id, full_name, email, user_photo_url)")
-          .eq("organization_id", orgId)
-          .eq("role", "procurement")
-          .eq("is_active", true);
-
-        if (error) {
-          return NextResponse.json({ error: error.message }, { status: 500 });
+        if (propError) {
+            console.error('Error fetching property procurement users:', propError);
+            return NextResponse.json({ error: 'Database error' }, { status: 500 });
         }
 
-        for (const membership of (organizationMemberships ?? []) as any[]) {
-          if (membership.user?.id && !userMap.has(membership.user.id)) {
-            userMap.set(membership.user.id, {
-              id: membership.user.id,
-              full_name: membership.user.full_name,
-              email: membership.user.email,
-              user_photo_url: membership.user.user_photo_url,
-              role: membership.role,
+        // De-duplicate users globally
+        const userMap = new Map();
+        
+        // Add property-level procurement users
+        if (propMemberships) {
+            propMemberships.forEach((m: any) => {
+                if (m.user && !userMap.has(m.user_id)) {
+                    const u = m.user;
+                    userMap.set(m.user_id, {
+                        id: u.id,
+                        full_name: u.full_name,
+                        email: u.email,
+                        user_photo_url: u.user_photo_url,
+                        role: m.role
+                    });
+                }
             });
-          }
         }
-      }
-    }
 
-    return NextResponse.json(Array.from(userMap.values()).sort((a, b) => a.full_name.localeCompare(b.full_name)));
-  } catch (error) {
-    console.error("[saas-mobile-server] procurement users GET error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
+        // 2. Fetch users from organization_memberships (Global View)
+        const { data: orgMemberships, error: orgError } = await adminSupabase
+            .from('organization_memberships')
+            .select(`
+                user_id,
+                user:users!user_id(id, full_name, email, user_photo_url),
+                role
+            `)
+            .eq('role', 'procurement')
+            .eq('is_active', true);
+
+        if (orgError) {
+            console.error('Error fetching org procurement users:', orgError);
+        }
+
+        if (orgMemberships) {
+            orgMemberships.forEach((m: any) => {
+                if (m.user && !userMap.has(m.user_id)) {
+                    const u = m.user;
+                    userMap.set(m.user_id, {
+                        id: u.id,
+                        full_name: u.full_name,
+                        email: u.email,
+                        user_photo_url: u.user_photo_url,
+                        role: m.role
+                    });
+                }
+            });
+        }
+
+        return NextResponse.json(Array.from(userMap.values()));
+    } catch (error) {
+        console.error('[Procurement Users GET] API Error:', error);
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
 }
