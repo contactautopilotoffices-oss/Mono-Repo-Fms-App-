@@ -43,7 +43,9 @@ import {
   CreditCard,
   Plus,
   Trash2,
+  Camera,
 } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import {
   BottomSheetModal,
   BottomSheetScrollView,
@@ -120,9 +122,11 @@ function formatAmenityLabel(amenity: string): string {
 function RoomCard({
   room,
   onPress,
+  onPhotoPress,
 }: {
   room: MeetingRoom;
   onPress: () => void;
+  onPhotoPress?: (uri: string) => void;
 }) {
   const amenities = room.amenities?.slice(0, 3) || [];
   const extraCount = (room.amenities?.length || 0) - 3;
@@ -134,14 +138,25 @@ function RoomCard({
           colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.04)', 'rgba(0,0,0,0.05)']}
           style={StyleSheet.absoluteFillObject}
         />
-        {/* Photo */}
-        {room.photo_url ? (
-          <Image source={{ uri: room.photo_url }} style={styles.cardImage} />
-        ) : (
-          <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-            <Armchair size={32} color="rgba(255,255,255,0.3)" />
-          </View>
-        )}
+        {/* Photo with tap to enlarge */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => room.photo_url && onPhotoPress?.(room.photo_url)}
+          style={styles.cardImageWrapper}
+        >
+          {room.photo_url ? (
+            <Image source={{ uri: room.photo_url }} style={styles.cardImage} />
+          ) : (
+            <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
+              <Armchair size={32} color="rgba(255,255,255,0.3)" />
+            </View>
+          )}
+          {room.photo_url && (
+            <View style={styles.photoOverlay}>
+              <Camera size={16} color="rgba(255,255,255,0.8)" />
+            </View>
+          )}
+        </TouchableOpacity>
 
         {/* Content */}
         <View style={styles.cardContent}>
@@ -437,7 +452,7 @@ export default function RoomsScreen() {
   const { setRooms, setBookings, setCredit, setHasLoadedInitialData } = useMeetingRoomStore();
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<MeetingRoom | null>(null);
-  const [activeTab, setActiveTab] = useState<'rooms' | 'bookings'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'bookings' | 'all-bookings'>('rooms');
   const [toastConfig, setToastConfig] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const roomSheetRef = useRef<BottomSheetModal>(null);
@@ -455,7 +470,7 @@ export default function RoomsScreen() {
     try {
       const [roomsRes, bookingsRes, creditsRes] = await Promise.all([
         getMeetingRooms(propertyId),
-        getMeetingRoomBookings(propertyId, 'confirmed'),
+        getMeetingRoomBookings(propertyId), // all statuses
         isAdmin ? Promise.resolve({ credit: null }) : getMeetingRoomCredits(propertyId),
       ]);
 
@@ -550,10 +565,16 @@ export default function RoomsScreen() {
           style={[styles.tab, activeTab === 'bookings' && styles.tabActive]}
           onPress={() => setActiveTab('bookings')}
         >
-          <Text style={[styles.tabText, activeTab === 'bookings' && styles.tabTextActive]}>
-            {isAdmin ? 'All Bookings' : 'My Bookings'}
-          </Text>
+          <Text style={[styles.tabText, activeTab === 'bookings' && styles.tabTextActive]}>My Bookings</Text>
         </TouchableOpacity>
+        {isAdmin && (
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'all-bookings' && styles.tabActive]}
+            onPress={() => setActiveTab('all-bookings')}
+          >
+            <Text style={[styles.tabText, activeTab === 'all-bookings' && styles.tabTextActive]}>All</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Credit Banner (non-admin) */}
@@ -582,9 +603,96 @@ export default function RoomsScreen() {
         <View style={{ flex: 1, paddingTop: 8 }}>
             <RoomBookingTab propertyId={propertyId} userId={user?.id || ''} />
         </View>
+      ) : isAdmin && activeTab === 'all-bookings' ? (
+        <FlatList
+          data={bookings}
+          keyExtractor={(item) => item.id}
+          style={{ flex: 1 }}
+          contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 12) + 160 }]}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <SafeBlurView intensity={40} style={styles.bookingCard} tint="dark">
+              <LinearGradient
+                colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.15)']}
+                style={StyleSheet.absoluteFillObject}
+              />
+              <View style={styles.cardContent}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardName}>{item.meeting_room?.name || 'Room'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <CalendarDays size={12} color="#708F96" />
+                      <Text style={styles.cardMetaText}>{item.booking_date} · {item.start_time} - {item.end_time}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <Users size={12} color="#708F96" />
+                      <Text style={styles.cardMetaText}>{item.tenant?.full_name || 'Tenant'}</Text>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={[styles.amenityChip, {
+                      backgroundColor: item.status === 'confirmed' ? 'rgba(16,185,129,0.15)' : item.status === 'cancelled' ? 'rgba(239,68,68,0.15)' : 'rgba(255,159,10,0.15)',
+                      borderColor: item.status === 'confirmed' ? 'rgba(16,185,129,0.3)' : item.status === 'cancelled' ? 'rgba(239,68,68,0.3)' : 'rgba(255,159,10,0.3)',
+                      margin: 0,
+                    }]}>
+                      <Text style={[styles.amenityText, { color: item.status === 'confirmed' ? '#10B981' : item.status === 'cancelled' ? '#EF4444' : '#FF9F0A' }]}>
+                        {item.status || 'Confirmed'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </SafeBlurView>
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Armchair size={48} color="rgba(255,255,255,0.2)" />
+              <Text style={styles.emptyTitle}>No Bookings</Text>
+              <Text style={styles.emptySubtitle}>There are no bookings for this property yet.</Text>
+            </View>
+          }
+        />
       ) : (
         <FlatList
           data={bookings}
+          keyExtractor={(item) => item.id}
+          style={{ flex: 1 }}
+          contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 12) + 160 }]}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <SafeBlurView intensity={40} style={styles.bookingCard} tint="dark">
+              <LinearGradient
+                colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.15)']}
+                style={StyleSheet.absoluteFillObject}
+              />
+              <View style={styles.cardContent}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardName}>{item.meeting_room?.name || 'Room'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <CalendarDays size={12} color="#708F96" />
+                      <Text style={styles.cardMetaText}>{item.booking_date} · {item.start_time} - {item.end_time}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <Users size={12} color="#708F96" />
+                      <Text style={styles.cardMetaText}>{item.tenant?.full_name || 'Tenant'}</Text>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={[styles.amenityChip, { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: 'rgba(16,185,129,0.3)', margin: 0 }]}>
+                      <Text style={[styles.amenityText, { color: '#10B981' }]}>{item.status || 'Confirmed'}</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </SafeBlurView>
+          )}
+        />
+      )}
+      </View>
+    </View>
+  );
+}
           keyExtractor={(item) => item.id}
           style={{ flex: 1 }}
           contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 12) + 160 }]}
@@ -865,10 +973,27 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: 160,
+    height: '100%',
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
+  cardImageWrapper: {
+    width: '100%',
+    height: 160,
+    borderRadius: 14,
+    marginBottom: 0,
+    overflow: 'hidden',
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    padding: 4,
+  },
   cardImagePlaceholder: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },

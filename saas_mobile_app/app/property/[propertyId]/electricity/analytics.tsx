@@ -513,8 +513,10 @@ export default function ElectricityAnalyticsScreen() {
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <ArrowLeft size={20} color="#E6EBEE" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Grid Power Analytics</Text>
-          <Zap size={20} color="#F59E0B" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Zap size={18} color="#F59E0B" />
+            <Text style={styles.headerTitle}>Grid Power Analytics</Text>
+          </View>
           <View style={{ width: 36 }} />
         </View>
 

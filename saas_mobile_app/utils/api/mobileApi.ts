@@ -682,6 +682,9 @@ export function getRoleDefaultPath(role: string, propertyId: string): string {
   if (['org_admin', 'org_super_admin', 'owner'].includes(normalizedRole)) {
     return `/property/${propertyId}/dashboard`;
   }
+  if (['procurement', 'purchase_manager', 'purchase_executive'].includes(normalizedRole)) {
+    return `/property/${propertyId}/procurement`;
+  }
   if (['tenant', 'super_tenant'].includes(normalizedRole)) {
     return `/property/${propertyId}/tenant`;
   }

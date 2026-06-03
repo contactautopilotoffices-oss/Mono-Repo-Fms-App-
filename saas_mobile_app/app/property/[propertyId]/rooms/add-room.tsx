@@ -237,6 +237,7 @@ export default function AddRoomScreen() {
         </View>
       </SafeBlurView>
 
+      <View style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"

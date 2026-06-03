@@ -38,6 +38,7 @@ import {
   ClipboardList,
   Wrench,
   Shield,
+  ShoppingBag,
 } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TicketCreateModal } from '../../../components/tickets/TicketCreateModal';
@@ -104,6 +105,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Diesel',           route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
   { label: 'Stock / Inventory', route: 'stock',        icon: Package,         domain: 'stock' },
+  { label: 'Procurement',       route: 'procurement',  icon: ShoppingBag,     domain: 'procurement' },
   { label: 'SOPs & Checklists', route: 'checklist',    icon: ClipboardList,   domain: 'sop' },
   { label: 'PPM',               route: 'ppm',          icon: Wrench,          domain: 'reports' },
   { label: 'Reports',           route: 'reports',      icon: FileText,        domain: 'reports' },
@@ -112,7 +114,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const NAV_SECTIONS: { label: string; routes: string[] }[] = [
   { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'security', 'rooms'] },
-  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'checklist', 'ppm', 'reports'] },
+  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
 ];
 
 // ---- Get User Initials ----

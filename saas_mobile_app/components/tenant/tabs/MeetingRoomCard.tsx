@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, ActivityIndicator, Image, Dimensions } from 'react-native';
 import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
+import { Camera } from 'lucide-react-native';
 
 export interface Room {
   id: string;
@@ -67,6 +68,7 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
   const [customStart, setCustomStart] = useState('09:00');
   const [customEnd, setCustomEnd] = useState('10:00');
   const [customError, setCustomError] = useState('');
+  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
   
   const [pendingBooking, setPendingBooking] = useState<{ start: string; end: string } | null>(null);
   const [partialConfirm, setPartialConfirm] = useState<{ start: string; end: string } | null>(null);
@@ -159,11 +161,24 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
 
   return (
     <View style={styles.card}>
-      {/* Header Info */}
+      {/* Photo + Header Info */}
       <View style={styles.headerRow}>
-        <View style={styles.iconWrap}>
-          <RoomIcon color="#708F96" />
-        </View>
+        {/* Photo */}
+        {room.photo_url ? (
+          <TouchableOpacity activeOpacity={0.85} onPress={() => setEnlargedPhoto(room.photo_url!)} style={styles.photoWrap}>
+            <Image source={{ uri: room.photo_url }} style={styles.photoThumb} />
+            <View style={styles.photoBadge}>
+              <Camera size={12} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.photoWrap}>
+            <View style={[styles.photoThumb, styles.photoPlaceholder]}>
+              <RoomIcon color="rgba(255,255,255,0.3)" />
+            </View>
+          </View>
+        )}
+        {/* Info */}
         <View style={styles.infoCol}>
           <Text style={styles.roomName}>{room.name}</Text>
           <View style={styles.metaRow}>
@@ -173,6 +188,27 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
           </View>
         </View>
       </View>
+
+      {/* Fullscreen Photo Modal */}
+      <Modal visible={!!enlargedPhoto} transparent animationType="fade">
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }}
+          activeOpacity={1}
+          onPress={() => setEnlargedPhoto(null)}
+        >
+          <Image
+            source={{ uri: enlargedPhoto || '' }}
+            style={{ width: Dimensions.get('window').width * 0.95, height: Dimensions.get('window').height * 0.7, borderRadius: 16 }}
+            resizeMode="contain"
+          />
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 50, right: 20 }}
+            onPress={() => setEnlargedPhoto(null)}
+          >
+            <Text style={{ color: '#FFFFFF', fontSize: 28 }}>×</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Bookings Section */}
       <View style={styles.bookingSection}>
@@ -335,6 +371,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  photoWrap: {
+    marginRight: 14,
+  },
+  photoThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+  },
+  photoBadge: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    padding: 3,
+  },
+  photoPlaceholder: {
+    backgroundColor: 'rgba(112,143,150,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   iconWrap: {
     width: 48,

@@ -175,7 +175,7 @@ export default function DGTariffModal({
           <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={[styles.headerIcon, { backgroundColor: colors.success + '18' }]}>
-                <Ionicons name="flame-outline" size={20} color={colors.success} />
+                <Ionicons name="pricetag-outline" size={20} color={colors.success} />
               </View>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Fuel Cost Configuration</Text>
             </View>

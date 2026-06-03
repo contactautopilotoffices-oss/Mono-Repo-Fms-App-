@@ -46,6 +46,12 @@ const property = {
   stock: (propertyId: string) => ['stock', propertyId] as const,
   /** Procurement data for a property */
   procurement: (propertyId: string) => ['procurement', propertyId] as const,
+  /** Procurement material requests for a property */
+  procurementRequests: (propertyId: string) => ['procurement-requests', propertyId] as const,
+  /** Procurement logs for a property */
+  procurementLogs: (propertyId: string) => ['procurement-logs', propertyId] as const,
+  /** Procurement users for a property */
+  procurementUsers: (propertyId: string) => ['procurement-users', propertyId] as const,
   /** Checklists for a property */
   checklist: (propertyId: string) => ['checklist', propertyId] as const,
   /** PPM (Planned Preventive Maintenance) for a property */
