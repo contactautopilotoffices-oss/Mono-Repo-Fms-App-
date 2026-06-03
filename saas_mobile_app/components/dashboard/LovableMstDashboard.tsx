@@ -60,6 +60,8 @@ import {
   type LeaderRow,
 } from '@/lib/gamification';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
@@ -713,61 +715,70 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         </View>
       </Animated.View>
 
-      {/* Scope filter */}
-      <Animated.View entering={FadeInUp.delay(150).duration(500)} style={styles.timeToggleRow}>
-        <TouchableOpacity
-          style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('property')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('my_tasks')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* Time filter */}
-      <Animated.View entering={FadeInUp.delay(170).duration(500)} style={styles.timeToggleRow}>
-        {TICKET_TIME_FILTER_OPTIONS.map((option) => (
-          <TouchableOpacity
-            key={option.key}
-            style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
-            onPress={() => setTimeFilter(option.key)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </Animated.View>
-
-      {/* Stats card */}
-      <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.statsCardInner}>
-          <View style={styles.statsGrid}>
-            <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-            <StatTile value={String(stats.open)} label="OPEN" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=open`)} />
-            <StatTile value={String(stats.closed)} label="CLOSED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=closed`)} />
+      {/* Stats card matching Property Admin */}
+      <GlassTile label="Tickets" icon="ticket" delay={80}>
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {/* Scope filter */}
+          <View style={styles.timeToggleRow}>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('property')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('my_tasks')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.ticketStackSection}>
-            <Text style={styles.ticketStackTitle}>Tickets</Text>
-            {shuffledTickets.length > 0 ? (
-              <TicketStack tickets={shuffledTickets.slice(0, 5)} />
-            ) : (
-              <View style={styles.ticketStackEmpty}>
-                <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
-              </View>
-            )}
+
+          {/* Time filter */}
+          <View style={[styles.timeToggleRow, { marginBottom: 0 }]}>
+            {TICKET_TIME_FILTER_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
+                onPress={() => setTimeFilter(option.key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
-      </Animated.View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <View style={{ alignItems: 'flex-start' }}>
+            <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.open} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.closed} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+          </View>
+        </View>
+
+        <View style={{ marginTop: 20 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', marginBottom: 12, letterSpacing: 1 }}>RECENT TICKETS</Text>
+          {shuffledTickets.length > 0 ? (
+            <TicketStack tickets={shuffledTickets.slice(0, 5)} />
+          ) : (
+            <View style={styles.ticketStackEmpty}>
+              <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+            </View>
+          )}
+        </View>
+      </GlassTile>
 
       <ChecklistProgressCard completed={stats.closed} total={stats.total} delay={280} />
     </>
@@ -1131,6 +1142,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
   container: {
     flex: 1,
     backgroundColor: '#4A1A1A',

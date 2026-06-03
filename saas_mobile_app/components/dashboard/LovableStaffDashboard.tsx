@@ -43,6 +43,8 @@ import { useGamification } from '@/hooks/mst/useGamification';
 import { useAsyncStorageCache } from '@/hooks/useAsyncStorageCache';
 import { queryKeys } from '@/utils/queryKeys';
 import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 
 // WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -445,6 +447,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   });
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
   const [isLoading, setIsLoading] = useState(!hasStaffCache);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [property, setProperty] = useState<{ name: string } | null>(staffCache?.property ?? null);
@@ -679,18 +682,27 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     }
   }, [isCheckedIn, propertyId, user?.id, activeShiftId, isCheckingInOut]);
 
+  // ── Filtered Tickets ──
+  const filteredTickets = useMemo(() => {
+    let result = [...tickets];
+    if (!isTechnical && scopeFilter === 'my_tasks') {
+      result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
+    }
+    return result;
+  }, [tickets, scopeFilter, user?.id, isTechnical]);
+
   // ── Stats ──
   const stats = useMemo(() => {
-    const total = tickets.length;
-    const active = tickets.filter((t) =>
+    const total = filteredTickets.length;
+    const active = filteredTickets.filter((t) =>
       ['open', 'in_progress', 'blocked', 'client_raised'].includes(t.status)
     ).length;
-    const completed = tickets.filter((t) =>
+    const completed = filteredTickets.filter((t) =>
       ['resolved', 'closed'].includes(t.status)
     ).length;
-    const assignedToMe = tickets.filter(t => t.assigned_to === user?.id).length;
+    const assignedToMe = filteredTickets.filter(t => t.assigned_to === user?.id).length;
     return { total, active, completed, assignedToMe };
-  }, [tickets, user]);
+  }, [filteredTickets, user]);
 
   // ── Gamification user ──
   const mstUser: UserStats = useMemo(() => {
@@ -759,25 +771,56 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </Animated.View>
 
       {/* Stats card */}
-      <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.statsCardInner}>
-          <View style={styles.statsCardHeader}>
-            <TouchableOpacity style={styles.customizeBtn}>
-              <Ionicons name="options-outline" size={14} color="rgba(255,255,255,0.80)" />
-              <Text style={styles.customizeBtnText}>Customize</Text>
-            </TouchableOpacity>
+      {isTechnical ? (
+        <GlassTile label="Tickets" icon="ticket" delay={80} onPress={() => router.push(`/property/${propertyId}/tickets`)}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <View style={{ alignItems: 'flex-start' }}>
+              <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.active} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.completed} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+            </View>
           </View>
-          <View style={styles.statsGrid}>
-            <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-            <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
+        </GlassTile>
+      ) : (
+        <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
+          <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <View style={styles.statsCardInner}>
+            <View style={styles.statsCardHeader}>
+              <View style={styles.timeToggleRow}>
+                <TouchableOpacity
+                  style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+                  onPress={() => setScopeFilter('property')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+                  onPress={() => setScopeFilter('my_tasks')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.statsGrid}>
+              <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
+              <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
+            </View>
+            <View style={[styles.statsGrid, { marginTop: 12 }]}>
+              <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
+              <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
+            </View>
           </View>
-          <View style={[styles.statsGrid, { marginTop: 12 }]}>
-            <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
-            <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
-          </View>
-        </View>
-      </Animated.View>
+        </Animated.View>
+      )}
 
       <ChecklistProgressCard completed={stats.completed} total={stats.total} delay={280} />
 
@@ -1786,6 +1829,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  customizeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  timeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    padding: 4,
+    width: '100%',
+  },
+  timeToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  timeToggleBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  timeToggleText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  timeToggleTextActive: {
+    color: '#FFF',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+  },
+  tileMetricMid: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: -0.5,
+  },
+  tileSubtext: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 4,
   },
   ticketAcceptBtn: {
     flex: 1,
