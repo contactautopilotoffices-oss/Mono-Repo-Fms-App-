@@ -76,7 +76,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   // Zustand state for dashboard to prevent reloading on every mount
   const {
     tickets, ticketCounts, sopCount, sopTotal, energyKwh, energyTrend, propertyName: storedPropertyName,
-    vmsStats, vendorStats, dieselStats, healthScore, attentionItems, ticketFunnel,
+    vmsStats, vendorStats, dieselStats, healthScore, attentionItems, ticketFunnel, tenantUserIds,
     hasLoadedInitialData, loadedPropertyId, lastUpdatedAt, setDashboardData, clearCache
   } = useDashboardStore();
 
@@ -133,7 +133,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
       // 1. Tenant (client) tickets — only if raised_by is present (creator is a known tenant user)
       // is_internal=false means external; raised_by confirms it's a tenant, not property admin/staff
-      if (t.internal === false && t.raised_by && !seenIds.has(t.id)) {
+      if (t.internal === false && t.raised_by && tenantUserIds.includes(t.raised_by) && !seenIds.has(t.id)) {
         items.push({
           id: `tenant-${t.id}`,
           entity_id: t.id,
@@ -204,7 +204,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     return [...needsAttentionTickets].map((item) => {
       const matchingTicket = tickets.find((t) => t.id === item.entity_id);
       // Only flag as client/tenant if raised_by is present (creator is known tenant user)
-      const isClientTicket = matchingTicket ? (matchingTicket.internal === false && !!matchingTicket.raised_by) : false;
+      const isClientTicket = matchingTicket ? (matchingTicket.internal === false && !!matchingTicket.raised_by && tenantUserIds.includes(matchingTicket.raised_by)) : false;
       const isCritical = item.severity === 'critical';
       const isHighUrgent = ['urgent', 'high'].includes(matchingTicket?.priority ?? '');
       const isStale = item.type === 'stale_ticket';
@@ -289,6 +289,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter] }), null, 0),
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
+        safeFetch(serverApi.query({ table: 'property_memberships', action: 'select', select: 'user_id', filters: [propFilter, { op: 'in' as const, column: 'role', values: ['tenant', 'super_tenant'] }] }), []),
       ]);
 
       const perPropQueries = Promise.all(propIds.map(async (pid) => {
@@ -303,7 +304,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         return { elec, diesel, health, attention, funnel, ppm };
       }));
 
-      const [[propRes, ticketRes, sopTemplatesRes, sopCompletionsRes, vmsRes, revRes, countTotalRes, countOpenRes, countClosedRes], perPropResults] = await Promise.all([
+      const [[propRes, ticketRes, sopTemplatesRes, sopCompletionsRes, vmsRes, revRes, countTotalRes, countOpenRes, countClosedRes, tenantUsersRes], perPropResults] = await Promise.all([
         bulkQueries,
         perPropQueries
       ]);
@@ -391,6 +392,11 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       // Guard against stale response from a previous property fetch
       if (propertyIdRef.current !== requestedPropertyId) return;
 
+      let newTenantUserIds: string[] = [];
+      if (tenantUsersRes?.data) {
+        newTenantUserIds = (tenantUsersRes.data as any[]).map(r => r.user_id).filter(Boolean);
+      }
+
       setDashboardData({
         propertyName: newPropName,
         tickets: newTickets,
@@ -405,6 +411,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         healthScore: newHealthScore,
         attentionItems: newAttentionItems,
         ticketFunnel: newTicketFunnel,
+        tenantUserIds: newTenantUserIds,
         vmsStats: newVmsStats,
         vendorStats: newVendorStats,
         dieselStats: newDieselStats,

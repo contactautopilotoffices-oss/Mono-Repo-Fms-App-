@@ -32,6 +32,8 @@ interface DashboardState {
   attentionItems: Ticket[];
   // Kanban funnel
   ticketFunnel: { status: string; count: number }[];
+  // Tenant cache
+  tenantUserIds: string[];
   // Cache state
   hasLoadedInitialData: boolean;
   lastUpdatedAt: number | null;
@@ -56,6 +58,7 @@ const initialState = {
   healthScore: null,
   attentionItems: [],
   ticketFunnel: [],
+  tenantUserIds: [],
   hasLoadedInitialData: false,
   loadedPropertyId: null,
   lastUpdatedAt: null,
@@ -82,6 +85,7 @@ export const useDashboardStore = create<DashboardState>()(
         healthScore: null,
         attentionItems: [],
         ticketFunnel: [],
+        tenantUserIds: [],
         hasLoadedInitialData: false,
         loadedPropertyId: null,
         lastUpdatedAt: null,
@@ -105,6 +109,7 @@ export const useDashboardStore = create<DashboardState>()(
         healthScore: state.healthScore,
         attentionItems: state.attentionItems,
         ticketFunnel: state.ticketFunnel,
+        tenantUserIds: state.tenantUserIds,
         hasLoadedInitialData: state.hasLoadedInitialData,
         loadedPropertyId: state.loadedPropertyId,
         lastUpdatedAt: state.lastUpdatedAt,
@@ -132,6 +137,7 @@ export const useDashboardDieselStats = () => useDashboardStore((state) => state.
 export const useDashboardHealthScore = () => useDashboardStore((state) => state.healthScore);
 export const useDashboardAttentionItems = () => useDashboardStore((state) => state.attentionItems);
 export const useDashboardTicketFunnel = () => useDashboardStore((state) => state.ticketFunnel);
+export const useDashboardTenantUserIds = () => useDashboardStore((state) => state.tenantUserIds);
 export const useDashboardHasLoadedInitialData = () => useDashboardStore((state) => state.hasLoadedInitialData);
 export const useDashboardLastUpdatedAt = () => useDashboardStore((state) => state.lastUpdatedAt);
 export const useDashboardBackgroundImage = () => useDashboardStore((state) => state.backgroundImage);
