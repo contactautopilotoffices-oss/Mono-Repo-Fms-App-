@@ -27,11 +27,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     for (const key of ["title", "description", "category", "frequency", "assigned_to", "is_running", "is_active", "start_time", "end_time"]) {
       if (key in body) updates[key] = body[key];
     }
-    const { error } = await admin.from("sop_templates").update(updates).eq("id", id).eq("property_id", actualPropertyId);
+    const { error } = await admin.from("sop_templates").update(updates).eq("id", id);
     if (error) return NextResponse.json({ error: "Failed to update template" }, { status: 500 });
 
     if (Array.isArray(body.items)) {
-      await admin.from("sop_checklist_items").delete().eq("template_id", id).eq("property_id", actualPropertyId);
+      await admin.from("sop_checklist_items").delete().eq("template_id", id);
       if (body.items.length > 0) {
         const rows = body.items.map((item: any) => ({
           template_id: id,

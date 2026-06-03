@@ -1309,6 +1309,12 @@ export default function ChecklistScreen() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
+  const fetchAll = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
+
+  const fetchTemplates = fetchAll;
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await refetch();
@@ -1805,6 +1811,7 @@ export default function ChecklistScreen() {
           description: item.description.trim() || null,
           type: item.type,
           requires_photo: item.requires_photo,
+          requires_comment: item.requires_comment,
           is_optional: item.is_optional,
           order_index: item.section_title
             ? sectionIndexMap[item.section_title] * 100 + idx
@@ -1817,7 +1824,6 @@ export default function ChecklistScreen() {
       if (editingTemplate) {
         // Update existing template via API
         const res = await checklistService.updateTemplate(editingTemplate.id, {
-          propertyId,
           title: tplTitle.trim(),
           description: tplDesc.trim() || null,
           category: tplCategory,
@@ -1831,7 +1837,7 @@ export default function ChecklistScreen() {
       } else {
         // Create new template via API
         const res = await checklistService.createTemplate({
-          propertyId,
+          property_id: propertyId,
           organization_id: orgId,
           title: tplTitle.trim(),
           description: tplDesc.trim() || null,
@@ -2451,11 +2457,12 @@ export default function ChecklistScreen() {
                                 ]}
                                 onPress={() => {
                                   if (runnerIsReadOnly) return;
+                                  const newValue = opt;
                                   setItemStates((prev) => ({
                                     ...prev,
                                     [checkItem.id]: {
                                       ...prev[checkItem.id],
-                                      value: opt,
+                                      value: newValue,
                                       checked: true,
                                     },
                                   }));
@@ -2465,10 +2472,15 @@ export default function ChecklistScreen() {
                                         ci.checklist_item_id === checkItem.id,
                                     );
                                   if (compItem) {
-                                    // TODO: sop_completion_items does not exist in saas_one schema
-                                    // (supabase.from('sop_completion_items') as any)
-                                    //   .update({ value: opt, is_checked: true, checked_at: new Date().toISOString(), checked_by: user?.id })
-                                    //   .eq('id', compItem.id);
+                                    checklistService.updateCompletion(activeCompletion!.id, {
+                                      item: {
+                                        completionItemId: compItem.id,
+                                        value: newValue,
+                                        is_checked: true,
+                                        checked_at: new Date().toISOString(),
+                                        checked_by: user?.id,
+                                      },
+                                    });
                                   }
                                 }}
                                 disabled={runnerIsReadOnly}

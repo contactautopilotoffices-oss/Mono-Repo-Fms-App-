@@ -117,25 +117,19 @@ export const checklistService = {
 
   // ── Fetch template completions ────────────────────────────────────────────
   async fetchTemplateCompletions(propertyId: string, templateId: string, limit = 50) {
-    const { data, error } = await serverApi.query({
-      table: 'sop_completions',
-      action: 'select',
-      select: '*, template:template_id(*), items:sop_completion_items(*), completed_by_user:completed_by(full_name, email)',
-      filters: [
-        { op: 'eq', column: 'property_id', value: propertyId },
-        { op: 'eq', column: 'template_id', value: templateId },
-      ],
-      orders: [{ column: 'created_at', ascending: false }],
-      limit,
+    const { data, error } = await serverApi.get<{ completions: any[] }>('/api/checklist/template-completions', {
+      propertyId,
+      templateId,
+      limit: limit.toString(),
     });
-
     if (error) throw new Error(error.message);
-    return { completions: data ?? [] };
+    return { completions: (data as any)?.completions ?? [] };
   },
 
   // ── Create template ───────────────────────────────────────────────────────
   async createTemplate(payload: any) {
-    const { items, ...templatePayload } = payload;
+    // Strip client-side propertyId; use property_id from payload
+    const { propertyId, items, ...templatePayload } = payload;
 
     const { data: template, error: tErr } = await serverApi.query({
       table: 'sop_templates',
@@ -154,6 +148,7 @@ export const checklistService = {
         ...item,
         template_id: createdTemplate.id,
         order_index: item.order_index ?? idx,
+        requires_comment: item.requires_comment ?? false,
       }));
       const { error: iErr } = await serverApi.query({
         table: 'sop_checklist_items',
@@ -168,12 +163,14 @@ export const checklistService = {
 
   // ── Update template ───────────────────────────────────────────────────────
   async updateTemplate(templateId: string, payload: any) {
+    // Strip client-side keys that shouldn't go to the API
+    const { propertyId, items, ...rest } = payload;
     const { data, error } = await serverApi.query({
       table: 'sop_templates',
       action: 'update',
       select: '*',
       filters: [{ op: 'eq', column: 'id', value: templateId }],
-      values: payload,
+      values: rest,
       single: true,
     });
 
