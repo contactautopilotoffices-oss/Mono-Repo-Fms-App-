@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { useLocalSearchParams, usePathname, useRouter, Slot } from 'expo-router';
+import { useGlobalSearchParams, usePathname, useRouter, Slot } from 'expo-router';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   Pressable,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/Colors';
 import { useTheme } from '@/context';
@@ -147,20 +148,32 @@ function Sidebar({
   onNavigate: () => void;
 }) {
   const { user, signOut } = useAuth();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
+  const pathname = usePathname();
+
   const { theme } = useTheme();
   const router = useRouter();
 
   const handleNavigate = (route: string) => {
+    // Dynamically parse propertyId from the pathname to avoid stale closure issues
+    let activePropertyId = propertyId;
+    if (pathname) {
+      const parts = pathname.split('/');
+      const propIdx = parts.indexOf('property');
+      if (propIdx !== -1 && parts.length > propIdx + 1) {
+        activePropertyId = parts[propIdx + 1];
+      }
+    }
+    
     if (route.startsWith('/')) {
       if (route === '/new-request') {
         onNewRequest();
+      } else {
+        router.push(route as never);
       }
-      return;
-    }
-    router.push(`/property/${propertyId}/${route}` as never);
-    if (isMobile) {
-      onNavigate();
+    } else {
+      if (onNavigate) onNavigate();
+      router.push(`/property/${activePropertyId}/${route}` as never);
     }
   };
 
@@ -296,17 +309,13 @@ function isUuid(val: string): boolean {
 }
 
 // ---- Property Layout ----
-// Mirrors: saas_development/app/property/[propertyId]/layout.tsx
-// Key changes for mobile:
-// - Uses direct Supabase checkPropertyAccess() instead of external HTTP call
-// - Role path guards via getRoleAllowedPaths / getRoleDefaultPath
-// - Skips sidebar for tenant / super_tenant (mobile full-screen glassmorphism dashboard)
-// NOTE: Admin sidebar layout renders children directly — nested Stack conflicts with file-based routing
 export default function PropertyLayout() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const pathname = usePathname();
-  const { user, isLoading: authLoading, membership } = useAuth();
+
+  const { user, membership, isLoading: authLoading, signOut } = useAuth();
   const { theme } = useTheme();
   const colors = Colors[theme];
   const { width: windowWidth } = useWindowDimensions();
@@ -320,6 +329,7 @@ export default function PropertyLayout() {
 
   const [ticketModalVisible, setTicketModalVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobile);
+  const versionRef = React.useRef(0);
 
   // Auto-collapse/expand sidebar when screen size changes
   useEffect(() => {
@@ -330,41 +340,54 @@ export default function PropertyLayout() {
   // CRITICAL: membership is in deps — without it, the layout renders blank when
   // membership loads AFTER the initial effect run (a classic React async race condition).
   useEffect(() => {
-    console.log('[PropertyLayout] Effect running — authLoading:', authLoading, 'user:', user?.email, 'propertyId:', propertyId, 'membership:', membership ? 'exists' : 'null');
+    let isMounted = true;
+    const currentVersion = ++versionRef.current;
+    
     const checkAccess = async () => {
+      // 1. Torn State Synchronization Guard
+      // Parse propertyId from pathname to detect Expo Router transitions
+      const pathParts = pathname.split('/').filter(Boolean);
+      const pathPropertyId = pathParts[0] === 'property' ? pathParts[1] : null;
+      
+      if (pathPropertyId && propertyId !== 'all' && pathPropertyId !== 'all' && pathPropertyId !== propertyId) {
+        return;
+      }
+
       if (authLoading) {
-        console.log('[PropertyLayout] Skipping — auth still loading');
         return;
       }
       if (!user) {
-        console.log('[PropertyLayout] No user — redirecting to login');
-        router.replace('/login');
+        if (isMounted && currentVersion === versionRef.current) {
+          router.replace('/login');
+        }
         return;
       }
 
       if (!propertyId || (!isUuid(propertyId) && propertyId !== 'all')) {
-        console.log('[PropertyLayout] Invalid propertyId:', propertyId);
-        setAccessState({ authorized: false, role: null, checking: false });
+        if (isMounted && currentVersion === versionRef.current) {
+          setAccessState({ authorized: false, role: null, checking: false });
+        }
         return;
       }
 
-      console.log('[PropertyLayout] Calling checkPropertyAccess for:', propertyId);
       try {
         // Pass user from AuthContext so checkPropertyAccess doesn't need to re-hydrate
         // the session — the AuthContext client has it; the mobileApi singleton may not.
         const data = await checkPropertyAccess(propertyId, user);
-        console.log('[PropertyLayout] checkPropertyAccess result:', JSON.stringify(data));
-
+        
+        // Stale check prevention: discard if component unmounted or a newer check started
+        if (!isMounted || currentVersion !== versionRef.current) {
+          return;
+        }
+        
         if (!data.authorized) {
           // ---- DEFENSE-IN-DEPTH: checkPropertyAccess failed (may be RLS)
           // Try membership data as the fallback before declaring unauthorized.
           // This is the core fix for the blank-screen bug: when membership loaded
           // after the initial render, propMembership was null, role was "",
           // and isMobileRole was false → admin sidebar with blank Slot.
-          console.log('[PropertyLayout] checkPropertyAccess unauthorized — checking membership fallback');
           const propMembership = membership?.properties?.find((p) => p.id === propertyId);
           const membershipRole = propMembership?.role ?? null;
-          console.log('[PropertyLayout] Membership fallback — propMembership:', propMembership?.role ?? 'null', 'membershipRole:', membershipRole);
 
           if (propertyId === 'all') {
             const isPropAdminOrHigher = membership?.properties?.some(p => 
@@ -372,19 +395,16 @@ export default function PropertyLayout() {
               ['org_super_admin', 'org_admin', 'owner'].includes((p.role || '').toLowerCase())
             );
             if (isPropAdminOrHigher) {
-              console.log('[PropertyLayout] Authorized via "all" fallback');
               setAccessState({ authorized: true, role: 'property_admin', checking: false });
               return;
             }
           }
 
           if (membershipRole && MOBILE_ROLES.includes(membershipRole)) {
-            console.log('[PropertyLayout] Authorized via membership fallback — role:', membershipRole);
             setAccessState({ authorized: true, role: membershipRole, checking: false });
             return;
           }
           if (membershipRole && !MOBILE_ROLES.includes(membershipRole)) {
-            console.log('[PropertyLayout] Authorized via membership fallback (non-mobile) — role:', membershipRole);
             setAccessState({ authorized: true, role: membershipRole, checking: false });
             // Path guard for non-mobile roles
             const allowedPaths = getRoleAllowedPaths(membershipRole, propertyId);
@@ -393,19 +413,17 @@ export default function PropertyLayout() {
             );
             if (!isPathAllowed) {
               const defaultPath = getRoleDefaultPath(membershipRole, propertyId);
-              console.log('[PropertyLayout] Path not allowed — redirecting to:', defaultPath);
               router.replace(defaultPath as never);
             }
             return;
           }
 
-          console.log('[PropertyLayout] Membership fallback also denied — showing access denied');
           setAccessState({ authorized: false, role: null, checking: false });
           return;
         }
 
         const role = data.role ?? '';
-        console.log('[PropertyLayout] Authorized, role:', role, 'isMobile:', MOBILE_ROLES.includes(role));
+        console.log(`[PropertyLayout] [v${currentVersion}] Authorized, role: ${role}, isMobile: ${MOBILE_ROLES.includes(role)}`);
         setAccessState({ authorized: true, role, checking: false });
 
         // ---- Role path guards (exact match to web layout) ----
@@ -417,17 +435,22 @@ export default function PropertyLayout() {
 
           if (!isPathAllowed) {
             const defaultPath = getRoleDefaultPath(role, propertyId);
-            console.log('[PropertyLayout] Path not allowed — redirecting to:', defaultPath);
+            console.log(`[PropertyLayout] [v${currentVersion}] Path not allowed — redirecting to: ${defaultPath}`);
             router.replace(defaultPath as never);
           }
         }
       } catch (err) {
-        console.error('[PropertyLayout] Access check failed:', err);
+        if (!isMounted || currentVersion !== versionRef.current) return;
+        console.error(`[PropertyLayout] [v${currentVersion}] Access check failed:`, err);
         setAccessState({ authorized: false, role: null, checking: false });
       }
     };
 
     checkAccess();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [user, authLoading, propertyId, pathname, router, membership]);
 
   const propertyInfo = useMemo(() => {

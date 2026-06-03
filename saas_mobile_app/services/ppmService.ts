@@ -165,8 +165,13 @@ export const ppmService = {
     try {
       if (__DEV__) console.log('[PPM] fetchSchedules start, propertyId:', propertyId, 'orgId:', organizationId);
 
-      const queryFilters: any[] = [{ op: 'eq', column: 'property_id', value: propertyId }];
-      if (organizationId) queryFilters.push({ op: 'eq', column: 'organization_id', value: organizationId });
+      const queryFilters: any[] = [];
+      if (propertyId !== 'all') {
+        queryFilters.push({ op: 'eq', column: 'property_id', value: propertyId });
+      }
+      if (organizationId) {
+        queryFilters.push({ op: 'eq', column: 'organization_id', value: organizationId });
+      }
 
       const { data, error } = await serverApi.query({
         table: 'ppm_schedules',

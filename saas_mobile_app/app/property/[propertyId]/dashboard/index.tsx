@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { useLocalSearchParams, Redirect } from 'expo-router';
+import { useGlobalSearchParams, Redirect, usePathname } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 
 // ─── Role-based Dashboard imports ─────────────────────────────────────────────
@@ -25,7 +25,14 @@ const STAFF_ROLES = ['staff', 'maintenance_staff', 'technician', 'helper', 'clea
 const TENANT_ROLES = ['tenant', 'super_tenant'];
 
 export default function DashboardScreen() {
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
+  const pathname = usePathname();
+  
+  // TEMPORARY LOGGING
+  React.useEffect(() => {
+    console.log(`[Phase 1 Debug] Dashboard Index Rendered | Dashboard PropertyId: ${propertyId} | Route URL: ${pathname}`);
+  }, [propertyId, pathname]);
+
   const { membership, isMembershipLoading, user } = useAuth();
 
   // Determine the user's effective role for this property

@@ -17,8 +17,8 @@ import SkeletonLoader from './lovable/SkeletonLoader';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp } from 'react-native-reanimated';
-import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
+import { useRouter, usePathname } from 'expo-router';
+
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useWeather } from '@/hooks/useWeather';
@@ -62,26 +62,36 @@ type TabKey = 'overview' | 'tickets';
 import { useDashboardStore } from '@/stores/dashboardStore';
 import { queryKeys } from '@/utils/queryKeys';
 import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 
 interface Props {
   propertyId: string;
 }
 
 export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
   const { user, signOut, membership } = useAuth();
+  
+  // TEMPORARY LOGGING
+  useEffect(() => {
+    console.log(`[Phase 1 Debug] LovablePropertyAdminDashboard Rendered | Prop PropertyId: ${propertyId} | Route URL: ${pathname}`);
+  }, [propertyId, pathname]);
+
   const insets = useSafeAreaInsets();
   const { weather } = useWeather();
-  const router = useRouter();
 
   // Zustand state for dashboard to prevent reloading on every mount
   const {
     tickets, ticketCounts, sopCount, sopTotal, energyKwh, energyTrend, propertyName: storedPropertyName,
     vmsStats, vendorStats, dieselStats, healthScore, attentionItems, ticketFunnel, tenantUserIds,
-    hasLoadedInitialData, loadedPropertyId, lastUpdatedAt, setDashboardData, clearCache
+    lastUpdatedAt, setDashboardData, clearCache, switchProperty
   } = useDashboardStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  const [isLoading, setIsLoading] = useState(!hasLoadedInitialData || loadedPropertyId !== propertyId);
+  // Only show loading if we don't have initial data for the current property
+  const loadedPropertyId = useDashboardStore(state => state.loadedPropertyId);
+  const hasLoadedInitialData = useDashboardStore(state => state.hasLoadedInitialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
@@ -92,6 +102,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showDrawer, setShowDrawer] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
+  const [propertyPhoto, setPropertyPhoto] = useState<string | null>(null);
 
   const [ticketTimeFilter, setTicketTimeFilter] = useState<'today' | 'month' | 'all'>('all');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(
@@ -261,11 +272,51 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const isAll = propertyId === 'all';
-      const propIds = isAll 
+      let propIds = isAll 
         ? (membership?.properties?.map(p => p.id) ?? [])
         : [propertyId];
 
+      // If "all" properties is selected but membership doesn't explicitly list them
+      // (e.g. Org Super Admin), dynamically fetch them from the properties table
+      if (isAll && propIds.length === 0 && membership?.org_id) {
+        try {
+          const { data: orgProps } = await serverApi.query({
+            table: 'properties',
+            action: 'select',
+            select: 'id',
+            filters: [{ op: 'eq' as const, column: 'organization_id', value: membership.org_id }]
+          });
+          if (orgProps && Array.isArray(orgProps)) {
+            propIds = orgProps.map((p: any) => p.id);
+          }
+        } catch (err) {
+          if (__DEV__) console.warn('[Dashboard] Failed to fetch org properties:', err);
+        }
+      }
+
       if (propIds.length === 0) return; // Nothing to fetch
+
+      if (!isAll) {
+        // Fetch property photo if available
+        try {
+          const { data: propData } = await serverApi.query({
+            table: 'properties',
+            action: 'select',
+            select: 'logo_url',
+            filters: [{ op: 'eq' as const, column: 'id', value: propertyId }]
+          });
+          if (propData && propData[0]?.logo_url) {
+            setPropertyPhoto(propData[0].logo_url);
+          } else {
+            setPropertyPhoto(null);
+          }
+        } catch (err) {
+          setPropertyPhoto(null);
+        }
+      } else {
+        setPropertyPhoto(null);
+      }
+
 
       const propFilter = isAll
         ? { op: 'in' as const, column: 'property_id', values: propIds }
@@ -277,18 +328,29 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           return { data: fallbackData, count: countFallback };
         });
 
+      const monthStr = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+
       const bulkQueries = Promise.all([
         isAll
           ? Promise.resolve({ data: { name: 'All Properties Overview' } })
           : safeFetch(serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq' as const, column: 'id', value: propertyId }], single: true }), null),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, raised_by, photo_before_url', filters: [propFilter], orders: [{ column: 'created_at', ascending: false }] }), []),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, raised_by, photo_before_url', selectOptions: { limit: 150 }, filters: [propFilter], orders: [{ column: 'created_at', ascending: false }] }), []),
         safeFetch(serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [propFilter, { op: 'eq' as const, column: 'is_active', value: true }] }), []),
         safeFetch(serverApi.query({ table: 'sop_completions', action: 'select', select: 'status', filters: [propFilter, { op: 'eq' as const, column: 'completion_date', value: todayStr }] }), []),
         safeFetch(serverApi.query({ table: 'visitor_logs', action: 'select', select: 'status', filters: [propFilter] }), []),
         safeFetch(serverApi.query({ table: 'vendor_daily_revenue', action: 'select', select: 'revenue_amount, vendor_id', filters: [propFilter] }), []),
+        // All Time Counts
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter] }), null, 0),
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
         safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
+        // Month Counts
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }] }), null, 0),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
+        // Today Counts
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }] }), null, 0),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
         safeFetch(serverApi.query({ table: 'property_memberships', action: 'select', select: 'user_id', filters: [propFilter, { op: 'in' as const, column: 'role', values: ['tenant', 'super_tenant'] }] }), []),
       ]);
 
@@ -304,7 +366,13 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         return { elec, diesel, health, attention, funnel, ppm };
       }));
 
-      const [[propRes, ticketRes, sopTemplatesRes, sopCompletionsRes, vmsRes, revRes, countTotalRes, countOpenRes, countClosedRes, tenantUsersRes], perPropResults] = await Promise.all([
+      const [[
+        propRes, ticketRes, sopTemplatesRes, sopCompletionsRes, vmsRes, revRes, 
+        countTotalAll, countOpenAll, countClosedAll,
+        countTotalMonth, countOpenMonth, countClosedMonth,
+        countTotalToday, countOpenToday, countClosedToday,
+        tenantUsersRes
+      ], perPropResults] = await Promise.all([
         bulkQueries,
         perPropQueries
       ]);
@@ -401,9 +469,21 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         propertyName: newPropName,
         tickets: newTickets,
         ticketCounts: {
-          total: countTotalRes?.count ?? newTickets.length,
-          open: countOpenRes?.count ?? newTickets.filter(t => ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'].includes(t.status)).length,
-          closed: countClosedRes?.count ?? newTickets.filter(t => ['resolved', 'closed'].includes(t.status)).length,
+          all: {
+            total: countTotalAll?.count ?? 0,
+            open: countOpenAll?.count ?? 0,
+            closed: countClosedAll?.count ?? 0,
+          },
+          month: {
+            total: countTotalMonth?.count ?? 0,
+            open: countOpenMonth?.count ?? 0,
+            closed: countClosedMonth?.count ?? 0,
+          },
+          today: {
+            total: countTotalToday?.count ?? 0,
+            open: countOpenToday?.count ?? 0,
+            closed: countClosedToday?.count ?? 0,
+          }
         },
         sopTotal: newSopTotal,
         sopCount: newSopCount,
@@ -427,7 +507,6 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     } finally {
       // Only hide skeleton if we're still on the property we fetched for
       if (propertyIdRef.current === requestedPropertyId) {
-        setIsLoading(false);
         setIsRefreshing(false);
         setLastUpdated(new Date());
       }
@@ -440,16 +519,17 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   });
 
   useEffect(() => {
-    if (loadedPropertyId !== propertyId) {
-      clearCache();
-      setIsLoading(true);
+    // Only sync when the route parameter changes, to prevent reverting the store
+    // if the store updates before the route transition completes.
+    if (useDashboardStore.getState().loadedPropertyId !== propertyId) {
+      switchProperty(propertyId);
     }
     // fetchData is called by useDashboardFetch on mount (if stale)
     // Show permission onboarding on first visit
     hasRequestedPermissions().then(requested => {
       if (!requested) setShowPermissionOnboarding(true);
     });
-  }, [propertyId, loadedPropertyId]);
+  }, [propertyId]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -457,7 +537,13 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     setIsRefreshing(false);
   };
 
-  // Stats
+  // Stats from backend aggregate counts
+  const totalTickets = ticketCounts[ticketTimeFilter]?.total || 0;
+  const openTickets = ticketCounts[ticketTimeFilter]?.open || 0;
+  const resolvedTickets = ticketCounts[ticketTimeFilter]?.closed || 0;
+
+  // The filtered tickets are only used for the sparkline history and dynamic funnel, 
+  // which is acceptable to be based on the recent 150 ticket sample to show current trends.
   const filteredTickets = useMemo(() => {
     const now = new Date();
     if (ticketTimeFilter === 'today') {
@@ -470,20 +556,6 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     }
     return tickets;
   }, [tickets, ticketTimeFilter]);
-
-  const openTickets = useMemo(() => 
-    ticketTimeFilter === 'all'
-      ? ticketCounts.open
-      : filteredTickets.filter((t) => ['open', 'assigned', 'in_progress', 'resolved', 'client_raised', 'waitlist'].includes(t.status)).length, 
-    [filteredTickets, ticketTimeFilter, ticketCounts.open]
-  );
-  const resolvedTickets = useMemo(() => 
-    ticketTimeFilter === 'all'
-      ? ticketCounts.closed
-      : filteredTickets.filter((t) => ['resolved', 'closed'].includes(t.status)).length, 
-    [filteredTickets, ticketTimeFilter, ticketCounts.closed]
-  );
-  const totalTickets = ticketTimeFilter === 'all' ? ticketCounts.total : filteredTickets.length;
 
   // Dynamically compute funnel from filtered tickets
   const dynamicFunnel = useMemo(() => {
@@ -625,7 +697,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     },
   };
 
-  const shouldShowLoading = isLoading || (hasLoadedInitialData && loadedPropertyId !== propertyId);
+  const shouldShowLoading = !hasLoadedInitialData || loadedPropertyId !== propertyId;
 
   if (shouldShowLoading) {
     return (
@@ -655,15 +727,15 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <View style={{ alignItems: 'flex-start' }}>
-            <Text style={styles.tileMetricMid}>{totalTickets}</Text>
+            <AnimatedNumber style={styles.tileMetricMid} value={totalTickets} />
             <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
           </View>
           <View style={{ alignItems: 'center' }}>
-            <Text style={[styles.tileMetricMid, { color: '#FCA5A5' }]}>{openTickets}</Text>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={openTickets} />
             <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.tileMetricMid, { color: '#10B981' }]}>{resolvedTickets}</Text>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={resolvedTickets} />
             <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
           </View>
         </View>
@@ -700,7 +772,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
 
       <GlassTile label="Energy Usage" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
-        <View style={styles.tileTopRow}><View><Text style={styles.tileMetricMid}>{energyKwh} <Text style={styles.tileSuffix}>kWh</Text></Text><Text style={styles.tileSubtext}>Grid + DG consumption today</Text></View><View style={styles.trendChip}><Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" /><Text style={styles.trendChipText}>+{energyTrend}%</Text></View></View>
+        <View style={styles.tileTopRow}><View><Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>kWh</Text></Text><Text style={styles.tileSubtext}>Grid + DG consumption today</Text></View><View style={styles.trendChip}><Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" /><Text style={styles.trendChipText}>+{energyTrend}%</Text></View></View>
         <MiniBarChart data={energyHistory} highlightColor="rgba(214,158,46,0.85)" />
       </GlassTile>
 
@@ -776,21 +848,29 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
               </View>
               <View style={[styles.nameContainer, { flex: 1 }]}>
                 <Text style={styles.greetingText} numberOfLines={1}>Hey, {user?.user_metadata?.full_name?.split(' ')[0] || 'Admin'}</Text>
-                {canSwitchProperty ? (
-                  <TouchableOpacity 
-                    style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}
-                    onPress={(e) => { e.stopPropagation(); setShowPropertySwitcher(true); }}
-                  >
-                    <Text style={[styles.headerSubtitle, { marginTop: 0 }]} numberOfLines={1}>{propertyName}</Text>
-                    <Ionicons name="chevron-down" size={14} color="#FFF" style={{ marginLeft: 4 }} />
-                  </TouchableOpacity>
-                ) : (
-                  <Text style={styles.headerSubtitle} numberOfLines={1}>{propertyName}</Text>
-                )}
+                <Text style={styles.headerSubtitle} numberOfLines={1}>{propertyName}</Text>
               </View>
             </TouchableOpacity>
           </View>
           <View style={styles.headerRight}>
+            {canSwitchProperty && (
+              <TouchableOpacity 
+                style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }]} 
+                onPress={() => setShowPropertySwitcher(true)} 
+                activeOpacity={0.7}
+              >
+                {propertyPhoto ? (
+                  <Image source={{ uri: propertyPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
+                ) : (
+                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="business" size={18} color="#FFFFFF" />
+                  </View>
+                )}
+                <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#0B0B0F', borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="swap-vertical" size={10} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowCreateModal(true)} activeOpacity={0.7}>
               <Ionicons name="add-circle-outline" size={28} color="#FFFFFF" />
             </TouchableOpacity>
@@ -845,7 +925,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           orgId={orgId}
           onSelect={(newPropertyId) => {
             setShowPropertySwitcher(false);
-            clearCache();
+            switchProperty(newPropertyId);
             router.replace(`/property/${newPropertyId}/dashboard` as never);
           }}
         />
@@ -874,11 +954,16 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
               {[
                 { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
                 { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
-                { label: 'User Directory', route: 'users', icon: 'people-outline' },
-                { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
-                { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
+                { label: 'Visitors', route: 'visitors', icon: 'people-outline' },
+                { label: 'PPM', route: 'ppm', icon: 'calendar-outline' },
+                { label: 'Security', route: 'security', icon: 'shield-checkmark-outline' },
+                { label: 'Inventory', route: 'inventory', icon: 'cube-outline' },
               ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { setShowDrawer(false); router.push(`/property/${propertyId}/${item.route}` as any); }}>
+                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { 
+                  console.log(`[Phase 1 Debug] Drawer Navigation Clicked | Target: ${item.route} | Using propertyId: ${propertyId}`);
+                  setShowDrawer(false); 
+                  router.push(`/property/${propertyId}/${item.route}` as any); 
+                }}>
                   <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
                   <Text style={styles.drawerItemLabel}>{item.label}</Text>
                 </TouchableOpacity>

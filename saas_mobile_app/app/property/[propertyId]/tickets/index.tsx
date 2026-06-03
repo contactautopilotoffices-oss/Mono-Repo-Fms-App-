@@ -15,7 +15,7 @@ import {
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { createClient } from '@/utils/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -100,7 +100,7 @@ interface Ticket {
 const PAGE_SIZE = 20;
 
 export default function TicketsScreen() {
-  const { propertyId, filter } = useLocalSearchParams<{ propertyId: string; filter?: string }>();
+  const { propertyId, filter } = useGlobalSearchParams<{ propertyId: string; filter?: string }>();
   const router = useRouter();
   const isNeedsAttentionMode = filter === 'needs_attention';
   const supabase = createClient();
@@ -324,7 +324,7 @@ const fetchTickets = useCallback(async () => {
 const { data, isLoading, isFetching, refetch } = useServerQuery(
   [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, String(isNeedsAttentionMode), String(limit)],
   fetchTickets,
-  { staleTime: 1000 * 60 * 5, placeholderData: (previousData: any) => previousData }
+  { staleTime: 1000 * 60 * 5 }
 );
 
 const displayedTickets = useMemo(() => {

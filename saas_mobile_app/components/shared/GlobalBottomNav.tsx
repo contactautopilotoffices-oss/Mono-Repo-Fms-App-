@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter, useLocalSearchParams } from 'expo-router';
+import { usePathname, useRouter, useGlobalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import SidekickFace from '@/components/dashboard/SidekickFace';
@@ -24,9 +24,20 @@ const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
 export default function GlobalBottomNav() {
   const router = useRouter();
   const pathname = usePathname();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { propertyId: localPropId } = useGlobalSearchParams<{ propertyId: string }>();
   const insets = useSafeAreaInsets();
   const { membership } = useAuth();
+
+  // Safely extract propertyId from pathname to prevent stale layout bugs in Expo Router
+  const propertyId = useMemo(() => {
+    if (!pathname) return localPropId;
+    const parts = pathname.split('/');
+    const propIdx = parts.indexOf('property');
+    if (propIdx !== -1 && parts.length > propIdx + 1) {
+      return parts[propIdx + 1];
+    }
+    return localPropId;
+  }, [pathname, localPropId]);
 
   const [showChat, setShowChat] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);

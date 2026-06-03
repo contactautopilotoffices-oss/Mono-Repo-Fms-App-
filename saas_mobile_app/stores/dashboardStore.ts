@@ -10,7 +10,11 @@ import type { Ticket } from '@/types';
 interface DashboardState {
   // Ticket data
   tickets: Ticket[];
-  ticketCounts: { total: number; open: number; closed: number };
+  ticketCounts: {
+    all: { total: number; open: number; closed: number };
+    month: { total: number; open: number; closed: number };
+    today: { total: number; open: number; closed: number };
+  };
   // SOP data
   sopCount: number;
   sopTotal: number;
@@ -38,15 +42,24 @@ interface DashboardState {
   hasLoadedInitialData: boolean;
   lastUpdatedAt: number | null;
   backgroundImage: string;
+  
+  // Per-property cache
+  propertyCache: Record<string, Partial<DashboardState>>;
+
   // Actions
   setBackgroundImage: (url: string) => void;
   setDashboardData: (data: Partial<DashboardState>) => void;
+  switchProperty: (newPropertyId: string) => void;
   clearCache: () => void;
 }
 
 const initialState = {
   tickets: [],
-  ticketCounts: { total: 0, open: 0, closed: 0 },
+  ticketCounts: {
+    all: { total: 0, open: 0, closed: 0 },
+    month: { total: 0, open: 0, closed: 0 },
+    today: { total: 0, open: 0, closed: 0 }
+  },
   sopCount: 0,
   sopTotal: 0,
   energyKwh: 0,
@@ -63,39 +76,71 @@ const initialState = {
   loadedPropertyId: null,
   lastUpdatedAt: null,
   backgroundImage: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1200&auto=format&fit=crop', // Night sky default
+  propertyCache: {},
 };
 
 export const useDashboardStore = create<DashboardState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...initialState,
       setBackgroundImage: (url) => set((state) => ({ ...state, backgroundImage: url })),
-      setDashboardData: (data) => set((state) => ({ ...state, ...data })),
-      clearCache: () => set({
-        tickets: [],
-        ticketCounts: { total: 0, open: 0, closed: 0 },
-        sopCount: 0,
-        sopTotal: 0,
-        energyKwh: 0,
-        energyTrend: 12,
-        propertyName: 'Property',
-        vmsStats: { total: 0, in: 0, out: 0 },
-        vendorStats: { revenue: 0, commission: 0 },
-        dieselStats: { level: 0, consumption: 0 },
-        healthScore: null,
-        attentionItems: [],
-        ticketFunnel: [],
-        tenantUserIds: [],
-        hasLoadedInitialData: false,
-        loadedPropertyId: null,
-        lastUpdatedAt: null,
-        backgroundImage: initialState.backgroundImage,
+      setDashboardData: (data) => set((state) => {
+        const nextState = { ...state, ...data };
+        // If we have a loaded property, update its cache entry
+        if (nextState.loadedPropertyId) {
+          nextState.propertyCache = {
+            ...nextState.propertyCache,
+            [nextState.loadedPropertyId]: { ...nextState }
+          };
+        }
+        return nextState;
       }),
+      switchProperty: (newPropertyId: string) => set((state) => {
+        // If we are already on this property, do nothing
+        if (state.loadedPropertyId === newPropertyId) return state;
+
+        // Ensure current state is saved to cache before switching
+        const newCache = { ...state.propertyCache };
+        if (state.loadedPropertyId) {
+          newCache[state.loadedPropertyId] = { ...state };
+        }
+
+        // Try to load from cache
+        const cachedState = newCache[newPropertyId];
+        
+        if (cachedState) {
+          return {
+            ...state,
+            ...cachedState,
+            propertyCache: newCache,
+            loadedPropertyId: newPropertyId,
+            hasLoadedInitialData: true,
+          };
+        }
+
+        // No cache found, reset to initial state for new property
+        return {
+          ...state,
+          ...initialState,
+          backgroundImage: state.backgroundImage, // preserve background
+          propertyCache: newCache,
+          loadedPropertyId: newPropertyId,
+          hasLoadedInitialData: false,
+        };
+      }),
+      clearCache: () => set((state) => ({
+        ...initialState,
+        backgroundImage: state.backgroundImage, // preserve background
+        propertyCache: {},
+      })),
     }),
     {
       name: 'autopilot-dashboard-store',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
+        backgroundImage: state.backgroundImage,
+        loadedPropertyId: state.loadedPropertyId,
+        // Also persist active state for the current session
         tickets: state.tickets,
         ticketCounts: state.ticketCounts,
         sopCount: state.sopCount,
@@ -111,9 +156,7 @@ export const useDashboardStore = create<DashboardState>()(
         ticketFunnel: state.ticketFunnel,
         tenantUserIds: state.tenantUserIds,
         hasLoadedInitialData: state.hasLoadedInitialData,
-        loadedPropertyId: state.loadedPropertyId,
         lastUpdatedAt: state.lastUpdatedAt,
-        backgroundImage: state.backgroundImage,
       }),
     }
   )
@@ -141,3 +184,4 @@ export const useDashboardTenantUserIds = () => useDashboardStore((state) => stat
 export const useDashboardHasLoadedInitialData = () => useDashboardStore((state) => state.hasLoadedInitialData);
 export const useDashboardLastUpdatedAt = () => useDashboardStore((state) => state.lastUpdatedAt);
 export const useDashboardBackgroundImage = () => useDashboardStore((state) => state.backgroundImage);
+
