@@ -887,15 +887,35 @@ export async function getProcurementCatalogItems(input: {
   search?: string;
   category?: string;
 }): Promise<any[]> {
-  const params = new URLSearchParams();
-  if (input.propertyId) params.set('propertyId', input.propertyId);
-  if (input.organizationId) params.set('organizationId', input.organizationId);
-  if (input.search) params.set('search', input.search);
-  if (input.category) params.set('category', input.category);
+  if (!input.organizationId) return [];
 
-  const res = await apiFetch<{ items: any[]; error?: string }>(`/api/procurement/catalog?${params.toString()}`);
-  if (res.error) throw new Error(res.error ?? 'Failed to load procurement catalog');
-  return res.items ?? [];
+  const filters: any[] = [
+    { op: 'eq', column: 'organization_id', value: input.organizationId },
+    { op: 'eq', column: 'is_active', value: true }
+  ];
+
+  if (input.search) {
+    filters.push({ op: 'ilike', column: 'name', value: `%${input.search}%` });
+  }
+
+  if (input.category) {
+    filters.push({ op: 'eq', column: 'category', value: input.category });
+  }
+
+  const res = await serverApi.query<any[]>({
+    table: 'procurement_catalog',
+    action: 'select',
+    select: 'id, name, description, photo_url, category, estimated_price, unit',
+    filters,
+    orders: [{ column: 'name', ascending: true }]
+  });
+
+  if (res.error) {
+    console.error('[getProcurementCatalogItems] Error:', res.error);
+    return [];
+  }
+
+  return res.data || [];
 }
 
 export async function addProcurementCatalogItem(input: {
@@ -961,12 +981,35 @@ export async function getProcurementUsers(input: {
   propertyId?: string;
   organizationId?: string;
 }): Promise<Array<{ id: string; full_name: string; email?: string; user_photo_url?: string; role?: string }>> {
-  const params = new URLSearchParams();
-  if (input.propertyId) params.set('propertyId', input.propertyId);
-  if (input.organizationId) params.set('organizationId', input.organizationId);
+  if (!input.organizationId) return [];
 
-  const res = await apiFetch<Array<{ id: string; full_name: string; email?: string; user_photo_url?: string; role?: string }>>(`/api/procurement/users?${params.toString()}`);
-  return res ?? [];
+  const orgRes = await serverApi.query<any[]>({
+    table: 'organization_memberships',
+    action: 'select',
+    select: 'user_id, role, users!inner(id, full_name, email, user_photo_url)',
+    filters: [
+      { op: 'eq', column: 'organization_id', value: input.organizationId },
+      { op: 'eq', column: 'is_active', value: true }
+    ]
+  });
+
+  const usersMap = new Map<string, any>();
+
+  if (orgRes.data) {
+    orgRes.data.forEach(m => {
+      if (m.users && m.role) {
+        usersMap.set(m.user_id, {
+          id: m.users.id,
+          full_name: m.users.full_name,
+          email: m.users.email,
+          user_photo_url: m.users.user_photo_url,
+          role: m.role
+        });
+      }
+    });
+  }
+
+  return Array.from(usersMap.values());
 }
 
 /**
