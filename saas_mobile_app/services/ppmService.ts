@@ -89,6 +89,7 @@ export interface PPMUpdatePayload {
   done_date?: string;
   remark?: string;
   verification_status?: string;
+  completed_by?: string | null;
   vendor_id?: string | null;
   vendor_name?: string | null;
   vendor_phone?: string | null;
@@ -328,6 +329,7 @@ export const ppmService = {
       if (payload.done_date !== undefined) body.done_date = payload.done_date || null;
       if (payload.remark !== undefined) body.remark = payload.remark || null;
       if (payload.verification_status !== undefined) body.verification_status = payload.verification_status;
+      if (payload.completed_by !== undefined) body.completed_by = payload.completed_by;
       if (payload.vendor_id !== undefined) body.vendor_id = payload.vendor_id;
       if (payload.vendor_name !== undefined) body.vendor_name = payload.vendor_name;
       if (payload.vendor_phone !== undefined) body.vendor_phone = payload.vendor_phone;
@@ -491,13 +493,17 @@ export const ppmService = {
   },
 
   // ── Fetch Maintenance Vendors ─────────────────────────────────────────────
-  async fetchVendors(_propertyId: string): Promise<ApiResponse<MaintenanceVendor[]>> {
+  async fetchVendors(_propertyId: string, organizationId?: string | null): Promise<ApiResponse<MaintenanceVendor[]>> {
     try {
+      const filters: any[] = [{ op: 'eq', column: 'is_active', value: true }];
+      if (organizationId) {
+        filters.push({ op: 'eq', column: 'organization_id', value: organizationId });
+      }
       const { data, error } = await serverApi.query({
         table: 'maintenance_vendors',
         action: 'select',
         select: 'id, company_name, contact_person, phone, email, specialization, is_active',
-        filters: [{ op: 'eq', column: 'is_active', value: true }],
+        filters,
       });
       if (error) throw new Error(error.message || 'Unknown error');
       return { success: true, data: (data as MaintenanceVendor[]) ?? [], status: 200 };
