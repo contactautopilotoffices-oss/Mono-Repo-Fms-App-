@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
 import { ArrowLeft, ChevronRight, FileText, CheckCircle, Clock } from 'lucide-react-native';
-import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { queryKeys } from '@/utils/queryKeys';
 import { format } from 'date-fns';
 
@@ -28,14 +28,19 @@ export default function SnagsReportScreen() {
   const isDark = theme === 'dark';
 
   const load = async () => {
-    const supabase = createClient();
-    const { data } = await supabase
-      .from('snag_imports')
-      .select('id, filename, created_at, completed_at, total_rows, valid_rows')
-      .eq('property_id', propertyId)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    return (data || []) as SnagImport[];
+    const { data, error } = await serverApi.query<SnagImport[]>({
+      table: 'snag_imports',
+      action: 'select',
+      select: 'id, filename, created_at, completed_at, total_rows, valid_rows',
+      filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+      orders: [{ column: 'created_at', ascending: false }],
+      limit: 20,
+    });
+    if (error) {
+      console.error('Error loading snag reports:', error);
+      return [];
+    }
+    return data || [];
   };
 
   const { data: imports, isLoading, isFetching, refetch } = useServerQuery<SnagImport[]>(

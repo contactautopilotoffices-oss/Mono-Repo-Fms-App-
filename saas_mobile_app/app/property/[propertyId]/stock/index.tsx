@@ -189,36 +189,6 @@ export default function StockScreen() {
   const [moveNotes, setMoveNotes] = useState("");
   const [isSubmittingMovement, setIsSubmittingMovement] = useState(false);
 
-  // ── Computed ────────────────────────────────────────────────────────────────
-  const filteredItems = useMemo(() => {
-    let result = items;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (i) =>
-          i.name.toLowerCase().includes(q) ||
-          (i.item_code || "").toLowerCase().includes(q),
-      );
-    }
-    if (selectedCategory) {
-      result = result.filter((i) => i.category === selectedCategory);
-    }
-    return result;
-  }, [items, searchQuery, selectedCategory]);
-
-  const stats = useMemo(() => {
-    const total = items.length;
-    const lowStock = items.filter(
-      (i) => i.quantity > 0 && i.quantity < (i.min_threshold || 10),
-    ).length;
-    const outOfStock = items.filter((i) => i.quantity === 0).length;
-    const totalValue = items.reduce(
-      (sum, i) => sum + i.quantity * (i.unit_price || 0),
-      0,
-    );
-    return { total, lowStock, outOfStock, totalValue };
-  }, [items]);
-
   // ── Fetch ───────────────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     if (!propertyId) return { items: [] as StockItem[], movements: [] as StockMovement[], categories: [] as string[] };
@@ -260,6 +230,36 @@ export default function StockScreen() {
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
   const categories = data?.categories ?? [];
+
+  // ── Computed ────────────────────────────────────────────────────────────────
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          (i.item_code || "").toLowerCase().includes(q),
+      );
+    }
+    if (selectedCategory) {
+      result = result.filter((i) => i.category === selectedCategory);
+    }
+    return result;
+  }, [items, searchQuery, selectedCategory]);
+
+  const stats = useMemo(() => {
+    const total = items.length;
+    const lowStock = items.filter(
+      (i) => i.quantity > 0 && i.quantity < (i.min_threshold || 10),
+    ).length;
+    const outOfStock = items.filter((i) => i.quantity === 0).length;
+    const totalValue = items.reduce(
+      (sum, i) => sum + i.quantity * (i.unit_price || 0),
+      0,
+    );
+    return { total, lowStock, outOfStock, totalValue };
+  }, [items]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRefresh = () => refetch();

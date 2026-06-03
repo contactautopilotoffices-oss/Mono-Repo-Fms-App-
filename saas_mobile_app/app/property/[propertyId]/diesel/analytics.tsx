@@ -14,9 +14,9 @@ import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/utils/supabase/client';
+
 import { serverApi } from '@/lib/serverApi';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -288,43 +288,38 @@ export default function DieselAnalyticsScreen() {
   const [showGenPicker, setShowGenPicker] = useState(false);
 
   // Data State
-  const [generators, setGenerators] = useState<Generator[]>([]);
-  const [rawReadings, setRawReadings] = useState<{
-    today: DieselReading[];
-    month: DieselReading[];
-    prevMonth: DieselReading[];
-    trend: DieselReading[];
-    custom: DieselReading[];
-  }>({ today: [], month: [], prevMonth: [], trend: [], custom: [] });
-  const [activeTariff, setActiveTariff] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { generators: [] as Generator[], activeTariff: 0, rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] } };
     try {
-      const gensRes = await supabase
-        .from('generators')
-        .select('*')
-        .eq('property_id', propertyId)
-        .order('name');
+      const gensRes = await serverApi.query<Generator[]>({
+        table: 'generators',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        orders: [{ column: 'name', ascending: true }],
+      });
       const gens = (gensRes.data as Generator[]) || [];
-      setGenerators(gens);
 
       // Tariff
+      let currentTariff = 0;
       if (gens.length > 0) {
-        const { data: tariffData } = await supabase
-          .from('dg_tariffs')
-          .select('*')
-          .in('generator_id', gens.map((g) => g.id))
-          .is('effective_to', null)
-          .limit(1);
-        const tariffs = tariffData as DGTariff[] | null;
+        const tariffRes = await serverApi.query<DGTariff[]>({
+          table: 'dg_tariffs',
+          action: 'select',
+          select: '*',
+          filters: [
+            { op: 'in', column: 'generator_id', value: gens.map((g) => g.id) },
+            { op: 'is', column: 'effective_to', value: null },
+          ],
+          limit: 1,
+        });
+        const tariffs = tariffRes.data as DGTariff[] | null;
         if (tariffs && tariffs.length > 0) {
-          setActiveTariff(tariffs[0].cost_per_litre || 0);
+          currentTariff = tariffs[0].cost_per_litre || 0;
         }
       }
 
@@ -352,23 +347,36 @@ export default function DieselAnalyticsScreen() {
         });
       }
 
-      setRawReadings({
-        today: (todayR.data as DieselReading[]) || [],
-        month: (monthR.data as DieselReading[]) || [],
-        prevMonth: (prevMonthR.data as DieselReading[]) || [],
-        trend: (trendR.data as DieselReading[]) || [],
-        custom: (customR.data as DieselReading[]) || [],
-      });
+      return {
+        generators: gens,
+        activeTariff: currentTariff,
+        rawReadings: {
+          today: (todayR.data as DieselReading[]) || [],
+          month: (monthR.data as DieselReading[]) || [],
+          prevMonth: (prevMonthR.data as DieselReading[]) || [],
+          trend: (trendR.data as DieselReading[]) || [],
+          custom: (customR.data as DieselReading[]) || [],
+        }
+      };
     } catch (e) {
       console.error('Diesel analytics fetch error:', e);
-    } finally {
-      setIsLoading(false);
+      return { generators: [] as Generator[], activeTariff: 0, rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] } };
     }
   }, [propertyId, isCustomRange, dateFrom, dateTo]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.dieselAnalytics(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.dieselAnalytics(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const generators = data?.generators ?? [];
+  const activeTariff = data?.activeTariff ?? 0;
+  const rawReadings = data?.rawReadings ?? { today: [], month: [], prevMonth: [], trend: [], custom: [] };
+
+  useEffect(() => {
+    refetch();
+  }, [isCustomRange, dateFrom, dateTo, refetch]);
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);

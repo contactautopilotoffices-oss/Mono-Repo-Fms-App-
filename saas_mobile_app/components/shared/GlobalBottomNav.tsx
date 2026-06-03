@@ -65,6 +65,7 @@ export default function GlobalBottomNav() {
   }, [pathname, propertyId]);
 
   const navigate = (route: string) => {
+    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId}`);
     router.push(`/property/${propertyId}/${route}` as any);
   };
 

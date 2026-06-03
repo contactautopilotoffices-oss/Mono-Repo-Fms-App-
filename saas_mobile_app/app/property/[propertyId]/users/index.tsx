@@ -1035,42 +1035,7 @@ export default function UsersScreen() {
   const [selectedTab, setSelectedTab] = useState('all');
   const [selectedUser, setSelectedUser] = useState<UserWithMembership | null>(null);
 
-  // Dynamically extract all unique roles present in the team
-  const availableRoles = useMemo(() => {
-    const unique = new Set<string>();
-    users.forEach((u) => {
-      const r = u.propertyRole || u.role;
-      if (r) unique.add(r);
-    });
-
-    const activeRoles = Array.from(unique);
-
-    return [
-      { key: 'all', label: 'All' },
-      ...activeRoles.map((r) => {
-        let label = formatRole(r);
-        if (r === 'property_admin') label = 'Admins';
-        else if (r === 'staff') label = 'Staff';
-        else if (r === 'mst') label = 'MST';
-        else if (r === 'security') label = 'Security';
-        else if (r === 'tenant') label = 'Clients';
-        else if (r === 'super_tenant') label = 'Super Clients';
-        else {
-          if (!label.endsWith('s')) {
-            label = label + 's';
-          }
-        }
-        return { key: r, label };
-      }),
-    ];
-  }, [users]);
-
-  // If the selected tab is no longer available in the roles list, reset it to 'all'
-  useEffect(() => {
-    if (selectedTab !== 'all' && !availableRoles.some((r) => r.key === selectedTab)) {
-      setSelectedTab('all');
-    }
-  }, [availableRoles, selectedTab]);
+  // Moved availableRoles below fetch
   const [organizationId, setOrganizationId] = useState<string | null>(null);
 
   // Bottom sheet refs
@@ -1138,6 +1103,43 @@ export default function UsersScreen() {
   );
 
   const handleRefresh = () => refetch();
+
+  // Dynamically extract all unique roles present in the team
+  const availableRoles = useMemo(() => {
+    const unique = new Set<string>();
+    users.forEach((u) => {
+      const r = u.propertyRole || u.role;
+      if (r) unique.add(r);
+    });
+
+    const activeRoles = Array.from(unique);
+
+    return [
+      { key: 'all', label: 'All' },
+      ...activeRoles.map((r) => {
+        let label = formatRole(r);
+        if (r === 'property_admin') label = 'Admins';
+        else if (r === 'staff') label = 'Staff';
+        else if (r === 'mst') label = 'MST';
+        else if (r === 'security') label = 'Security';
+        else if (r === 'tenant') label = 'Clients';
+        else if (r === 'super_tenant') label = 'Super Clients';
+        else {
+          if (!label.endsWith('s')) {
+            label = label + 's';
+          }
+        }
+        return { key: r, label };
+      }),
+    ];
+  }, [users]);
+
+  // If the selected tab is no longer available in the roles list, reset it to 'all'
+  useEffect(() => {
+    if (selectedTab !== 'all' && !availableRoles.some((r) => r.key === selectedTab)) {
+      setSelectedTab('all');
+    }
+  }, [availableRoles, selectedTab]);
 
   function handleUserPress(user: UserWithMembership) {
     setSelectedUser(user);

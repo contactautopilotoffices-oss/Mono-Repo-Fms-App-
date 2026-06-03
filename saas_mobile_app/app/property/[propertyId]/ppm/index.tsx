@@ -51,7 +51,7 @@ import {
   Upload,
   DownloadCloud,
 } from "lucide-react-native";
-import { useDashboardFetch } from "@/hooks/useDashboardFetch";
+import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types (saas_one schema) ─────────────────────────────────────────────────
@@ -554,9 +554,6 @@ export default function PPMScreen() {
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<PPMTab>("calendar");
-  const [schedules, setSchedules] = useState<PPMSchedule[]>([]);
-  const [contracts, setContracts] = useState<AMCContract[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Calendar state
@@ -607,12 +604,45 @@ export default function PPMScreen() {
       : false;
   }, [membership, propertyId]);
 
-  const selectedDaySchedules = useMemo(() => {
-    if (!selectedDate) return [];
-    return schedules.filter(
-      (s) => normalizeDate(s.planned_date) === selectedDate,
-    );
-  }, [schedules, selectedDate]);
+  const fetchData = useCallback(async () => {
+    if (!propertyId) return { schedules: [] as PPMSchedule[], contracts: [] as AMCContract[] };
+    try {
+      const [schedulesRes, contractsRes] = await Promise.all([
+        ppmService.fetchSchedules(propertyId as string, membership?.org_id ?? null),
+        ppmService.fetchContracts(propertyId as string),
+      ]);
+
+      let s = [] as PPMSchedule[];
+      if (schedulesRes.success && schedulesRes.data) {
+        const byId = new Map<string, PPMSchedule>();
+        schedulesRes.data
+          .filter((s) => s.planned_date)
+          .forEach((s) => byId.set(s.id, s));
+
+        s = Array.from(byId.values()).sort((a, b) =>
+            a.planned_date.localeCompare(b.planned_date),
+        );
+      }
+
+      let c = [] as AMCContract[];
+      if (contractsRes.success && contractsRes.data) {
+        c = contractsRes.data;
+      }
+      return { schedules: s, contracts: c };
+    } catch (err) {
+      console.error("Error fetching PPM data:", err);
+      return { schedules: [] as PPMSchedule[], contracts: [] as AMCContract[] };
+    }
+  }, [propertyId, membership?.org_id]);
+
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.ppm(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const schedules = data?.schedules ?? [];
+  const contracts = data?.contracts ?? [];
 
   const overdueSchedules = useMemo(() => {
     return schedules.filter((s) => isOverdue(s));
@@ -624,53 +654,12 @@ export default function PPMScreen() {
     );
   }, [contracts]);
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
-  const fetchSchedules = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const [schedulesRes, contractsRes] = await Promise.all([
-        ppmService.fetchSchedules(propertyId as string, membership?.org_id ?? null),
-        ppmService.fetchContracts(propertyId as string),
-      ]);
-
-      if (schedulesRes.success && schedulesRes.data) {
-        const byId = new Map<string, PPMSchedule>();
-        schedulesRes.data
-          .filter((s) => s.planned_date)
-          .forEach((s) => byId.set(s.id, s));
-
-        setSchedules(
-          Array.from(byId.values()).sort((a, b) =>
-            a.planned_date.localeCompare(b.planned_date),
-          ),
-        );
-      }
-
-      if (contractsRes.success && contractsRes.data) {
-        setContracts(contractsRes.data);
-      }
-    } catch (err) {
-      console.error("Error fetching PPM data:", err);
-    }
-  }, [propertyId]);
-
-  const fetchAll = useCallback(
-    async (refresh = false) => {
-      if (refresh) setIsRefreshing(true);
-      else setIsLoading(true);
-      try {
-        await fetchSchedules();
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [fetchSchedules],
-  );
-
-  const { refetch } = useDashboardFetch(queryKeys.property.ppm(propertyId), fetchAll, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const selectedDaySchedules = useMemo(() => {
+    if (!selectedDate) return [];
+    return schedules.filter(
+      (s) => normalizeDate(s.planned_date) === selectedDate,
+    );
+  }, [schedules, selectedDate]);
 
   useEffect(() => {
     if (hasPositionedCalendarRef.current || schedules.length === 0) return;
@@ -733,7 +722,7 @@ export default function PPMScreen() {
       });
       if (res.success) {
         setShowDetail(false);
-        await fetchSchedules();
+        await refetch();
         Alert.alert("Updated", "PPM task updated successfully");
       } else {
         Alert.alert("Error", String(res.error || "Failed to update"));
@@ -768,7 +757,7 @@ export default function PPMScreen() {
       if (!res.success) throw new Error(String(res.error || 'Failed to create'));
       setShowAdd(false);
       resetAddForm();
-      await fetchSchedules();
+      await refetch();
       Alert.alert("Success", "PPM schedule created");
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to create schedule");

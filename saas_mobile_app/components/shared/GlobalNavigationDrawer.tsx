@@ -33,6 +33,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
   const [showSignOut, setShowSignOut] = useState(false);
 
   const navigateTo = (route: string) => {
+    console.log(`[VERIFICATION LOG] GlobalNavDrawer Navigating | Route: ${route} | Drawer PropertyId: ${propertyId}`);
     onClose();
     router.push(`/property/${propertyId}/${route}` as any);
   };

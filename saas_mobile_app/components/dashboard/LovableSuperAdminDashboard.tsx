@@ -26,6 +26,7 @@ import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import SignOutModal from '@/components/ui/SignOutModal';
 import DetailModal, { type TileDetail } from '@/components/dashboard/DetailModal';
 import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
+import { CreatePropertyModal, EditPropertyModal } from '@/components/dashboard';
 
 import { 
   BG, 
@@ -62,8 +63,11 @@ export default function LovableSuperAdminDashboard() {
   const insets = useSafeAreaInsets();
   const { weather } = useWeather();
 
-  // Access control — Lovable super admin is email-gated
-  const hasAccess = user?.email?.toLowerCase() === LOVABLE_EMAIL?.toLowerCase();
+  const orgRole = membership?.org_role?.toLowerCase() || '';
+  const isSuperAdmin = ['org_super_admin', 'master_admin', 'owner'].includes(orgRole) || user?.email?.toLowerCase() === LOVABLE_EMAIL?.toLowerCase();
+  
+  // Access control
+  const hasAccess = isSuperAdmin || ['org_admin', 'property_admin'].includes(orgRole);
 
   // orgId — use membership from AuthContext (already fetched), fall back to org_memberships query
   const orgId = membership?.org_id ?? '';
@@ -88,6 +92,8 @@ export default function LovableSuperAdminDashboard() {
   const [showSignOut, setShowSignOut] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<SuperAdminProperty | null>(null);
 
   // Issue #9: Search Debounce
   const [searchQuery, setSearchQuery] = useState('');
@@ -307,12 +313,23 @@ export default function LovableSuperAdminDashboard() {
                 <Text style={styles.mainTitle}>Properties</Text>
                 <Text style={styles.mainSubtitle}>Super Admin Dashboard</Text>
               </View>
-              <TouchableOpacity
-                style={styles.signOutIconBtn}
-                onPress={() => setShowSignOut(true)}
-              >
-                <Ionicons name="log-out-outline" size={20} color="rgba(255,255,255,0.60)" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                {isSuperAdmin && (
+                  <TouchableOpacity
+                    style={styles.addPropertyBtn}
+                    onPress={() => setShowCreateModal(true)}
+                  >
+                    <Ionicons name="add" size={20} color="#FFFFFF" />
+                    <Text style={styles.addPropertyBtnText}>Add</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.signOutIconBtn}
+                  onPress={() => setShowSignOut(true)}
+                >
+                  <Ionicons name="log-out-outline" size={20} color="rgba(255,255,255,0.60)" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Search */}
@@ -351,6 +368,7 @@ export default function LovableSuperAdminDashboard() {
                   property={p}
                   index={i}
                   onPress={() => handlePropertyPress(p)}
+                  onEdit={isSuperAdmin ? () => setEditingProperty(p) : undefined}
                 />
               ))}
               {filteredProperties.length === 0 && (
@@ -391,6 +409,22 @@ export default function LovableSuperAdminDashboard() {
 
 
       {/* Modals */}
+      <CreatePropertyModal
+        organizationId={orgId}
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => {
+          onRefresh();
+        }}
+      />
+      <EditPropertyModal
+        property={editingProperty}
+        isOpen={!!editingProperty}
+        onClose={() => setEditingProperty(null)}
+        onSuccess={() => {
+          onRefresh();
+        }}
+      />
       <CassandraSessionModal visible={showChat} onClose={() => setShowChat(false)} orgId={orgId} propertyId={membership?.properties?.[0]?.id} initialMode="voice" />
       <SignOutModal
         visible={showSignOut}
@@ -475,7 +509,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: 'rgba(255,255,255,0.45)',
     marginTop: 2,
-      },
+  },
+  addPropertyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 20,
+    gap: 4,
+  },
+  addPropertyBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   signOutIconBtn: {
     width: 40,
     height: 40,

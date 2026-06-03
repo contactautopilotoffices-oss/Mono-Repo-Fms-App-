@@ -29,7 +29,7 @@ import {
   fetchUsersList,
   manageCompanyMemberApi,
 } from '@/utils/api/mobileApi';
-import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import {
   ChevronLeft,
   Building2,
@@ -142,19 +142,22 @@ export default function AdminCreditsScreen() {
       }
 
       // 1. Find all user_ids already assigned to ANY company in this property
-      const supabase = createClient();
-      const { data: companies } = await supabase
-        .from('companies')
-        .select('id')
-        .eq('property_id', propertyId);
+      const { data: companies } = await serverApi.query<{id: string}[]>({
+        table: 'companies',
+        action: 'select',
+        select: 'id',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }]
+      });
       const companyIds = (companies || []).map((c: any) => c.id);
 
       let assignedUserIds = new Set<string>();
       if (companyIds.length > 0) {
-        const { data: members } = await supabase
-          .from('company_members')
-          .select('user_id')
-          .in('company_id', companyIds);
+        const { data: members } = await serverApi.query<{user_id: string}[]>({
+          table: 'company_members',
+          action: 'select',
+          select: 'user_id',
+          filters: [{ op: 'in', column: 'company_id', value: companyIds }]
+        });
         assignedUserIds = new Set((members || []).map((m: any) => m.user_id));
       }
 

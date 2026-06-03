@@ -29,9 +29,10 @@ interface PropertyCardProps {
   property: Property;
   index: number;
   onPress: () => void;
+  onEdit?: () => void;
 }
 
-const PropertyCard = React.memo(({ property, index, onPress }: PropertyCardProps) => {
+const PropertyCard = React.memo(({ property, index, onPress, onEdit }: PropertyCardProps) => {
   const pressScale = useSharedValue(1);
   const gradient = getSkyGradient(property.name);
   const hasImage = !!property.image_url;
@@ -83,7 +84,7 @@ const PropertyCard = React.memo(({ property, index, onPress }: PropertyCardProps
               end={{ x: 0, y: 1 }}
               style={styles.cardOverlay}
             >
-              <CardContent property={property} />
+              <CardContent property={property} onEdit={onEdit} />
             </LinearGradient>
           </ImageBackground>
         ) : (
@@ -93,7 +94,7 @@ const PropertyCard = React.memo(({ property, index, onPress }: PropertyCardProps
             end={{ x: 0, y: 1 }}
             style={styles.cardGradient}
           >
-            <CardContent property={property} />
+            <CardContent property={property} onEdit={onEdit} />
           </LinearGradient>
         )}
       </AnimatedPressable>
@@ -103,8 +104,10 @@ const PropertyCard = React.memo(({ property, index, onPress }: PropertyCardProps
 
 function CardContent({
   property,
+  onEdit,
 }: {
   property: Property;
+  onEdit?: () => void;
 }) {
   const open = property.openTickets;
   const resolved = property.resolvedTickets;
@@ -124,9 +127,22 @@ function CardContent({
 
       <View style={styles.cardTopRow}>
         <View style={styles.cardLeft}>
-          <Text style={styles.cardName} numberOfLines={1}>
-            {property.name}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={styles.cardName} numberOfLines={1}>
+              {property.name}
+            </Text>
+            {onEdit && (
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.6)" />
+              </TouchableOpacity>
+            )}
+          </View>
           <View style={styles.cardInfoRow}>
             <Text style={styles.cardCode}>{property.code}</Text>
             <View style={styles.dot} />

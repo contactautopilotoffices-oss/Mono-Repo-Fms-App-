@@ -45,10 +45,20 @@ export function extractBearerToken(authHeader: string | null): string | null {
  * a network round-trip on mobile. On Expo Go, AsyncStorage may not be fully
  * synchronised when the app starts, so we fall back to getUser() which validates
  * the token with the Supabase Auth server — slower but authoritative.
+ *
+ * @param forceRefresh - If true, forces a session refresh with the Auth server
+ *   to obtain a fresh access token (used after a 401 response).
  */
-export async function getSupabaseToken(): Promise<string | null> {
+export async function getSupabaseToken(forceRefresh = false): Promise<string | null> {
   try {
     const supabase = createClient();
+
+    // On 401 retry: refresh the session to get a new, valid access token
+    if (forceRefresh) {
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      if (refreshData.session?.access_token) return refreshData.session.access_token;
+    }
+
     // getSession() reads from cached storage — works immediately, no network call.
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) return sessionData.session.access_token;

@@ -90,43 +90,37 @@ export interface ChecklistFilters {
 export const checklistService = {
   // ── Fetch all checklist data for a property ───────────────────────────────
   async fetchChecklistData(propertyId: string) {
-    const todayStr = new Date().toISOString().split('T')[0];
+    try {
+      // Use the dedicated /api/checklist endpoint which queries the correct
+      // sop_templates / sop_completions tables with proper joins.
+      const { data, error } = await serverApi.get<{
+        templates: any[];
+        propertyMembers: { id: string; full_name: string; role: string }[];
+        organizationId: string | null;
+      }>('/api/checklist', { propertyId });
 
-    const [{ data: templates, error: tErr }, { data: completions, error: cErr }] = await Promise.all([
-      serverApi.query({
-        table: 'checklist_templates',
-        action: 'select',
-        select: '*, items:checklist_items(*)',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'is_active', value: true },
-        ],
-        orders: [{ column: 'created_at', ascending: false }],
-      }),
-      serverApi.query({
-        table: 'checklist_completions',
-        action: 'select',
-        select: '*, template:template_id(*), items:checklist_completion_items(*), completed_by_user:completed_by(full_name, email)',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'gte', column: 'created_at', value: `${todayStr}T00:00:00.000Z` },
-        ],
-        orders: [{ column: 'created_at', ascending: false }],
-      }),
-    ]);
+      if (error) {
+        return { templates: [], propertyMembers: [], organizationId: null, error: error.message };
+      }
 
-    if (tErr) throw new Error(tErr.message);
-    if (cErr) throw new Error(cErr.message);
-
-    return { templates: templates ?? [], completions: completions ?? [] };
+      return {
+        templates: (data as any)?.templates ?? [],
+        propertyMembers: (data as any)?.propertyMembers ?? [],
+        organizationId: (data as any)?.organizationId ?? null,
+        error: null,
+      };
+    } catch (err: any) {
+      console.error('[checklistService] fetchChecklistData error:', err);
+      return { templates: [], propertyMembers: [], organizationId: null, error: err.message };
+    }
   },
 
   // ── Fetch template completions ────────────────────────────────────────────
   async fetchTemplateCompletions(propertyId: string, templateId: string, limit = 50) {
     const { data, error } = await serverApi.query({
-      table: 'checklist_completions',
+      table: 'sop_completions',
       action: 'select',
-      select: '*, template:template_id(*), items:checklist_completion_items(*), completed_by_user:completed_by(full_name, email)',
+      select: '*, template:template_id(*), items:sop_completion_items(*), completed_by_user:completed_by(full_name, email)',
       filters: [
         { op: 'eq', column: 'property_id', value: propertyId },
         { op: 'eq', column: 'template_id', value: templateId },
@@ -144,7 +138,7 @@ export const checklistService = {
     const { items, ...templatePayload } = payload;
 
     const { data: template, error: tErr } = await serverApi.query({
-      table: 'checklist_templates',
+      table: 'sop_templates',
       action: 'insert',
       select: '*',
       values: templatePayload,
@@ -162,7 +156,7 @@ export const checklistService = {
         order_index: item.order_index ?? idx,
       }));
       const { error: iErr } = await serverApi.query({
-        table: 'checklist_items',
+        table: 'sop_checklist_items',
         action: 'insert',
         values: itemRows,
       });
@@ -175,7 +169,7 @@ export const checklistService = {
   // ── Update template ───────────────────────────────────────────────────────
   async updateTemplate(templateId: string, payload: any) {
     const { data, error } = await serverApi.query({
-      table: 'checklist_templates',
+      table: 'sop_templates',
       action: 'update',
       select: '*',
       filters: [{ op: 'eq', column: 'id', value: templateId }],
@@ -190,7 +184,7 @@ export const checklistService = {
   // ── Soft-delete template ──────────────────────────────────────────────────
   async deleteTemplate(templateId: string) {
     const { data, error } = await serverApi.query({
-      table: 'checklist_templates',
+      table: 'sop_templates',
       action: 'update',
       select: '*',
       filters: [{ op: 'eq', column: 'id', value: templateId }],
@@ -205,9 +199,9 @@ export const checklistService = {
   // ── Start completion ──────────────────────────────────────────────────────
   async startCompletion(payload: any) {
     const { data, error } = await serverApi.query({
-      table: 'checklist_completions',
+      table: 'sop_completions',
       action: 'insert',
-      select: '*, template:template_id(*), items:checklist_completion_items(*)',
+      select: '*, template:template_id(*), items:sop_completion_items(*)',
       values: payload,
       single: true,
     });
@@ -219,7 +213,7 @@ export const checklistService = {
   // ── Update completion ─────────────────────────────────────────────────────
   async updateCompletion(completionId: string, payload: any) {
     const { data, error } = await serverApi.query({
-      table: 'checklist_completions',
+      table: 'sop_completions',
       action: 'update',
       select: '*',
       filters: [{ op: 'eq', column: 'id', value: completionId }],

@@ -17,7 +17,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
+
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/context';
 import TicketListItem from '@/components/tickets/TicketListItem';
@@ -103,7 +104,7 @@ export default function TicketsScreen() {
   const { propertyId, filter } = useGlobalSearchParams<{ propertyId: string; filter?: string }>();
   const router = useRouter();
   const isNeedsAttentionMode = filter === 'needs_attention';
-  const supabase = createClient();
+  // Keep supabase for realtime subscriptions if any, else we can remove it later
   const { membership, user: authUser } = useAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -125,7 +126,7 @@ export default function TicketsScreen() {
 
   const hasActiveFilters = categoryFilter !== 'all' || searchQuery.trim() !== '' || sortBy !== 'newest' || raisedByFilter !== 'all' || assignedToFilter !== 'all';
 
-  const buildQuery = useCallback((offset: number, limit: number) => {
+  const buildQueryParams = useCallback((offset: number, limit: number) => {
     if (!propertyId) return null;
     
     const propIds = propertyId === 'all' 
@@ -134,37 +135,29 @@ export default function TicketsScreen() {
 
     if (propIds.length === 0) return null;
 
-    let q = supabase
-      .from('tickets')
-      .select(`id, title, description, status, priority, ticket_number, created_at, updated_at,
-               property_id, organization_id, photo_before_url, is_internal, raised_by, assigned_to,
-               skill_group:skill_groups(name, code),
-               assignee:users!assigned_to(id, full_name, user_photo_url),
-               creator:users!raised_by(id, full_name, property_memberships(role)),
-               ticket_escalation_logs(from_level, to_level, escalated_at,
-                 from_employee:users!from_employee_id(full_name, user_photo_url),
-                 to_employee:users!to_employee_id(full_name, user_photo_url))`);
-                 
+    const queryFilters: any[] = [];
+    
     if (propertyId === 'all') {
-      q = q.in('property_id', propIds);
+      queryFilters.push({ op: 'in', column: 'property_id', values: propIds });
     } else {
-      q = q.eq('property_id', propertyId);
+      queryFilters.push({ op: 'eq', column: 'property_id', value: propertyId });
     }
 
-    q = q.range(offset, offset + limit - 1);
-
     if (isNeedsAttentionMode) {
-        // Fetch all active tickets so we can client-side filter for needs attention
-        q = q.not('status', 'in', '("resolved","closed")');
-      } else if (statusFilter === 'mine') {
-        q = q.eq('assigned_to', authUser?.id ?? '');
-      } else if (statusFilter === 'open') {
-        q = q.in('status', ['open', 'assigned']);
-      } else if (statusFilter === 'in_progress') {
-        q = q.in('status', ['in_progress']);
-      } else if (statusFilter !== 'all') {
-        q = q.eq('status', statusFilter);
-      }
+      // Fetch all active tickets so we can client-side filter for needs attention
+      // Not in resolved or closed
+      // Since 'not in' is not directly supported by standard serverApi without custom logic,
+      // we can fetch open, assigned, in_progress, etc.
+      queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'needs_approval'] });
+    } else if (statusFilter === 'mine') {
+      queryFilters.push({ op: 'eq', column: 'assigned_to', value: authUser?.id ?? '' });
+    } else if (statusFilter === 'open') {
+      queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned'] });
+    } else if (statusFilter === 'in_progress') {
+      queryFilters.push({ op: 'in', column: 'status', values: ['in_progress'] });
+    } else if (statusFilter !== 'all') {
+      queryFilters.push({ op: 'eq', column: 'status', value: statusFilter });
+    }
 
     if (dateRange !== 'all') {
       const now = new Date();
@@ -181,25 +174,42 @@ export default function TicketsScreen() {
         d.setDate(d.getDate() - 30);
         start = d.toISOString().split('T')[0];
       }
-      q = q.gte('created_at', start).lte('created_at', end);
+      queryFilters.push({ op: 'gte', column: 'created_at', value: start });
+      queryFilters.push({ op: 'lte', column: 'created_at', value: end });
     }
 
     // Advanced filters
     if (categoryFilter !== 'all') {
-      q = q.eq('skill_group.code', categoryFilter);
+      // NOTE: Filtering on joined tables in PostgREST is complex.
+      // We assume skill_groups table filtering might not be fully supported by serverApi directly
+      // as easily as .eq('skill_group.code', ...). 
+      // If serverApi supports embedded filters, great.
+      queryFilters.push({ op: 'eq', column: 'skill_group.code', value: categoryFilter });
     }
     if (raisedByFilter !== 'all') {
-      q = q.eq('raised_by', raisedByFilter);
+      queryFilters.push({ op: 'eq', column: 'raised_by', value: raisedByFilter });
     }
     if (assignedToFilter !== 'all') {
-      q = q.eq('assigned_to', assignedToFilter);
+      queryFilters.push({ op: 'eq', column: 'assigned_to', value: assignedToFilter });
     }
 
-    // Sort order — server-side for created_at, client-side for priority
-    q = q.order('created_at', { ascending: sortBy === 'oldest' });
-
-    return q;
-  }, [propertyId, statusFilter, dateRange, supabase, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy]);
+    return {
+      table: 'tickets',
+      action: 'select',
+      select: `id, title, description, status, priority, ticket_number, created_at, updated_at,
+               property_id, organization_id, photo_before_url, is_internal, raised_by, assigned_to,
+               skill_group:skill_groups(name, code),
+               assignee:users!assigned_to(id, full_name, user_photo_url),
+               creator:users!raised_by(id, full_name, property_memberships(role)),
+               ticket_escalation_logs(from_level, to_level, escalated_at,
+                 from_employee:users!from_employee_id(full_name, user_photo_url),
+                 to_employee:users!to_employee_id(full_name, user_photo_url))`,
+      filters: queryFilters,
+      orders: [{ column: 'created_at', ascending: sortBy === 'oldest' }],
+      limit,
+      offset,
+    };
+  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy]);
 
 const defaultCounts: Record<StatusFilter, number> = {
   all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
@@ -226,92 +236,57 @@ const getStatusCounts = useCallback(async () => {
     };
     const { start, end } = getDateRange(dateRange);
 
-    const applyDateFilter = (q: any) => {
-      if (dateRange !== 'all') {
-        return q.gte('created_at', start).lte('created_at', end);
-      }
-      return q;
+    const baseFilters: any[] = [];
+    if (dateRange !== 'all') {
+      baseFilters.push({ op: 'gte', column: 'created_at', value: start });
+      baseFilters.push({ op: 'lte', column: 'created_at', value: end });
+    }
+    if (propertyId === 'all') {
+      baseFilters.push({ op: 'in', column: 'property_id', values: propIds });
+    } else {
+      baseFilters.push({ op: 'eq', column: 'property_id', value: propertyId });
+    }
+
+    const fetchCount = async (additionalFilters: any[]) => {
+      const res = await serverApi.query({
+        table: 'tickets',
+        action: 'select',
+        select: 'id',
+        selectOptions: { count: 'exact', head: true },
+        filters: [...baseFilters, ...additionalFilters],
+      });
+      return res.count ?? 0;
     };
 
-    const applyPropertyFilter = (q: any) => {
-      if (propertyId === 'all') {
-        return q.in('property_id', propIds);
-      }
-      return q.eq('property_id', propertyId);
-    };
-
-    const { count: allCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-      )
-    ) as any;
-    counts.all = allCount ?? 0;
-
-    const { count: mineCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .eq('assigned_to', authUser?.id ?? '')
-      )
-    ) as any;
-    counts.mine = mineCount ?? 0;
-
-    const { count: openCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .in('status', ['open', 'assigned'])
-      )
-    ) as any;
-    counts.open = openCount ?? 0;
-
-    const { count: progressCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .in('status', ['in_progress'])
-      )
-    ) as any;
-    counts.in_progress = progressCount ?? 0;
-
-    const { count: resolvedCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .eq('status', 'resolved')
-      )
-    ) as any;
-    counts.resolved = resolvedCount ?? 0;
-
-    const { count: closedCount } = await applyDateFilter(
-      applyPropertyFilter(
-        supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .eq('status', 'closed')
-      )
-    ) as any;
-    counts.closed = closedCount ?? 0;
+    counts.all = await fetchCount([]);
+    counts.mine = await fetchCount([{ op: 'eq', column: 'assigned_to', value: authUser?.id ?? '' }]);
+    counts.open = await fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned'] }]);
+    counts.in_progress = await fetchCount([{ op: 'in', column: 'status', values: ['in_progress'] }]);
+    counts.resolved = await fetchCount([{ op: 'eq', column: 'status', value: 'resolved' }]);
+    counts.closed = await fetchCount([{ op: 'eq', column: 'status', value: 'closed' }]);
 
     return counts;
   } catch (err) {
     console.error('Error fetching status counts:', err);
     return defaultCounts;
   }
-}, [propertyId, dateRange, supabase, authUser?.id, membership?.properties]);
+}, [propertyId, dateRange, authUser?.id, membership?.properties]);
 
 const fetchTickets = useCallback(async () => {
   if (!propertyId) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
   try {
-    const q = buildQuery(0, limit + 1);
-    if (!q) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
-    const { data, error } = await q;
-    let items: Ticket[] = (data ?? []) as Ticket[];
-    if (error && error.code === 'PGRST116') {
+    const qParams = buildQueryParams(0, limit + 1);
+    if (!qParams) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+    
+    const res = await serverApi.query<Ticket[]>(qParams as any);
+    
+    let items: Ticket[] = (res.data ?? []) as Ticket[];
+    if (res.error && (res.error as any).code === 'PGRST116') {
       items = [];
-    } else if (error) {
-      throw error;
+    } else if (res.error) {
+      throw new Error(res.error.message);
     }
+    
     const hasMoreItems = items.length > limit;
     const counts = await getStatusCounts();
     return { tickets: items.slice(0, limit), hasMore: hasMoreItems, statusCounts: counts };
@@ -319,7 +294,7 @@ const fetchTickets = useCallback(async () => {
     console.error('Error fetching tickets:', err);
     return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
   }
-}, [propertyId, buildQuery, limit, getStatusCounts]);
+}, [propertyId, buildQueryParams, limit, getStatusCounts]);
 
 const { data, isLoading, isFetching, refetch } = useServerQuery(
   [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, String(isNeedsAttentionMode), String(limit)],
@@ -375,12 +350,17 @@ const onRefresh = () => {
   const fetchFilterOptions = useCallback(async () => {
     if (!propertyId) return;
     try {
-      const { data } = await (supabase as any)
-        .from('property_memberships')
-        .select('user_id, users:user_id(id, full_name)')
-        .eq('property_id', propertyId)
-        .eq('is_active', true);
-      const users = (data ?? [])
+      const res = await serverApi.query<{ user_id: string; users?: { id: string; full_name: string } }>({
+        table: 'property_memberships',
+        action: 'select',
+        select: 'user_id, users:user_id(id, full_name)',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'is_active', value: true }
+        ],
+      });
+      const data = res.data ?? [];
+      const users = data
         .map((m: any) => ({ id: m.users?.id, full_name: m.users?.full_name }))
         .filter((u: any) => u.id && u.full_name);
       // Deduplicate by id
@@ -394,7 +374,7 @@ const onRefresh = () => {
     } catch (err) {
       console.error('Error fetching filter options:', err);
     }
-  }, [propertyId, supabase]);
+  }, [propertyId]);
 
   useEffect(() => {
     fetchFilterOptions();

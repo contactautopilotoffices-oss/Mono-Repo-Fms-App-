@@ -14,9 +14,9 @@ import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/utils/supabase/client';
+
 import { serverApi } from '@/lib/serverApi';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -264,52 +264,41 @@ export default function ElectricityAnalyticsScreen() {
   const [showMeterPicker, setShowMeterPicker] = useState(false);
 
   // Data State
-  const [meters, setMeters] = useState<ElectricityMeter[]>([]);
-  const [rawReadings, setRawReadings] = useState<{
-    today: ElectricityReading[];
-    month: ElectricityReading[];
-    prevMonth: ElectricityReading[];
-    trend: ElectricityReading[];
-    custom: ElectricityReading[];
-  }>({ today: [], month: [], prevMonth: [], trend: [], custom: [] });
-  const [activeTariff, setActiveTariff] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { meters: [] as ElectricityMeter[], activeTariff: 0, rawReadings: { today: [] as ElectricityReading[], month: [] as ElectricityReading[], prevMonth: [] as ElectricityReading[], trend: [] as ElectricityReading[], custom: [] as ElectricityReading[] } };
     try {
-      const [metersRes] = await Promise.all([
-        supabase
-          .from('electricity_meters')
-          .select('*')
-          .eq('property_id', propertyId)
-          .is('deleted_at', null)
-          .order('name'),
-      ]);
+      const metersRes = await serverApi.query<ElectricityMeter[]>({
+        table: 'electricity_meters',
+        action: 'select',
+        select: '*',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'is', column: 'deleted_at', value: null },
+        ],
+        orders: [{ column: 'name', ascending: true }],
+      });
       const mts = (metersRes.data as ElectricityMeter[]) || [];
-      setMeters(mts);
 
       // Tariff
-      const { data: tariffData } = await (supabase as any)
-        .rpc('get_active_grid_tariff', { p_property_id: propertyId, p_date: todayStr });
-      const rpcTariffs = (tariffData || []) as GridTariff[];
-      if (rpcTariffs.length > 0) {
-        setActiveTariff(rpcTariffs[0].rate_per_unit || 0);
-      } else {
-        const { data: allTariffs } = await supabase
-          .from('grid_tariffs')
-          .select('*')
-          .eq('property_id', propertyId)
-          .order('effective_from', { ascending: false })
-          .limit(1);
-        const tariffs = (allTariffs || []) as GridTariff[];
-        if (tariffs.length > 0) {
-          setActiveTariff(tariffs[0].rate_per_unit || 0);
-        }
+      let currentTariff = 0;
+      const tariffRes = await serverApi.query<GridTariff[]>({
+        table: 'grid_tariffs',
+        action: 'select',
+        select: '*',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'lte', column: 'effective_from', value: todayStr },
+        ],
+        orders: [{ column: 'effective_from', ascending: false }],
+        limit: 1,
+      });
+      const tariffs = (tariffRes.data || []) as GridTariff[];
+      if (tariffs.length > 0) {
+        currentTariff = tariffs[0].rate_per_unit || 0;
       }
 
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
@@ -335,23 +324,36 @@ export default function ElectricityAnalyticsScreen() {
         });
       }
 
-      setRawReadings({
-        today: (todayR.data as ElectricityReading[]) || [],
-        month: (monthR.data as ElectricityReading[]) || [],
-        prevMonth: (prevMonthR.data as ElectricityReading[]) || [],
-        trend: (trendR.data as ElectricityReading[]) || [],
-        custom: (customR.data as ElectricityReading[]) || [],
-      });
+      return {
+        meters: mts,
+        activeTariff: currentTariff,
+        rawReadings: {
+          today: (todayR.data as ElectricityReading[]) || [],
+          month: (monthR.data as ElectricityReading[]) || [],
+          prevMonth: (prevMonthR.data as ElectricityReading[]) || [],
+          trend: (trendR.data as ElectricityReading[]) || [],
+          custom: (customR.data as ElectricityReading[]) || [],
+        }
+      };
     } catch (e) {
       console.error('Electricity analytics fetch error:', e);
-    } finally {
-      setIsLoading(false);
+      return { meters: [] as ElectricityMeter[], activeTariff: 0, rawReadings: { today: [] as ElectricityReading[], month: [] as ElectricityReading[], prevMonth: [] as ElectricityReading[], trend: [] as ElectricityReading[], custom: [] as ElectricityReading[] } };
     }
   }, [propertyId, isCustomRange, dateFrom, dateTo]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.electricityAnalytics(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.electricityAnalytics(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const meters = data?.meters ?? [];
+  const activeTariff = data?.activeTariff ?? 0;
+  const rawReadings = data?.rawReadings ?? { today: [], month: [], prevMonth: [], trend: [], custom: [] };
+
+  useEffect(() => {
+    refetch();
+  }, [isCustomRange, dateFrom, dateTo, refetch]);
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);

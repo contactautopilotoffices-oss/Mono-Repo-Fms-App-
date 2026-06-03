@@ -5,6 +5,7 @@ export { default as TicketSLATile } from './TicketSLATile';
 export { default as NotificationBell } from './NotificationBell';
 export { default as PropertySelectionView } from './PropertySelectionView';
 export { default as CreatePropertyModal } from './CreatePropertyModal';
+export { default as EditPropertyModal } from './EditPropertyModal';
 export { default as InviteMemberModal } from './InviteMemberModal';
 export { default as SettingsView } from './SettingsView';
 export { default as UserManagement } from './UserManagement';

@@ -43,7 +43,7 @@ import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 interface Ticket {
@@ -373,21 +373,61 @@ export default function TicketDetailScreen() {
         .eq('property_id', propertyId)
         .eq('feature_key', 'ticket_validation')
         .maybeSingle();
-      setValidationEnabled(featData?.is_enabled === true);
+      // Fetch MSTs inline
+      let msts: { id: string; full_name: string }[] = [];
+      const { data: mstData } = await supabase
+        .from('property_memberships')
+        .select('role, user:users(id, full_name)')
+        .eq('property_id', propertyId)
+        .eq('is_active', true);
+      
+      msts = (mstData ?? [])
+        .filter((m: any) => m.role !== 'client')
+        .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
+        .filter((u: any) => u.id && u.full_name);
 
+      return {
+        ticket: ticketData as Ticket,
+        currentUserRole: userRole,
+        comments: (commentData ?? []) as Comment[],
+        activities: populatedActivities as Activity[],
+        escalationLogs: (escData ?? []) as EscalationLog[],
+        validationEnabled: featData?.is_enabled === true,
+        userNameMap: newMap,
+        availableMSTs: msts
+      };
 
     } catch (err) {
       console.error('[fetchTicket] Unexpected error:', err);
       Alert.alert('Refresh Failed', `Could not reload ticket data. Please try again.`);
-    } finally {
-      setLoading(false);
+      return null;
     }
   }, [propertyId, id, session]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.ticketDetail(id), fetchTicket, {
-    staleTime: 1000 * 60 * 5,
-    enabled: !!id,
-  });
+  const { data, refetch, isLoading } = useServerQuery(
+    queryKeys.property.ticketDetail(id),
+    fetchTicket,
+    {
+      staleTime: 1000 * 60 * 5,
+      enabled: !!id,
+    }
+  );
+
+  useEffect(() => {
+    if (data) {
+      setTicket(data.ticket);
+      setCurrentUserRole(data.currentUserRole);
+      setComments(data.comments);
+      setActivities(data.activities);
+      setEscalationLogs(data.escalationLogs);
+      setValidationEnabled(data.validationEnabled);
+      setUserNameMap(data.userNameMap);
+      setAvailableMSTs(data.availableMSTs);
+      setLoading(false);
+    } else if (!isLoading) {
+      setLoading(false);
+    }
+  }, [data, isLoading]);
 
   // Trigger fetch when ticket ID changes (navigation to same ticket re-mounts component)
   useEffect(() => {
@@ -395,21 +435,6 @@ export default function TicketDetailScreen() {
       refetch();
     }
   }, [id, propertyId]);
-
-  const fetchMSTs = async () => {
-    if (!propertyId) return;
-    const { data } = await supabase
-      .from('property_memberships')
-      .select('role, user:users(id, full_name)')
-      .eq('property_id', propertyId)
-      .eq('is_active', true);
-    
-    const msts = (data ?? [])
-      .filter((m: any) => m.role !== 'client')
-      .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
-      .filter((u: any) => u.id && u.full_name);
-    setAvailableMSTs(msts as { id: string; full_name: string }[]);
-  };
 
   const handleSendComment = async () => {
     if (!newComment.trim() || !id) return;

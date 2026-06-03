@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/Colors';
-import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
@@ -129,26 +129,28 @@ export default function EscalationScreen() {
   const fetchAll = useCallback(async () => {
     try {
       if (!propertyId) return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
-      const supabase = createClient();
-
-      const [{ data: hierarchyRows, error: hErr }, { data: memberRows, error: mErr }] = await Promise.all([
-        supabase
-          .from('escalation_hierarchies')
-          .select('*')
-          .eq('property_id', propertyId)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('property_memberships')
-          .select('users:user_id(id, full_name, email, role)')
-          .eq('property_id', propertyId),
+      const [hRes, mRes] = await Promise.all([
+        serverApi.query<EscalationHierarchy[]>({
+          table: 'escalation_hierarchies',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }]
+        }),
+        serverApi.query<{ users: any }[]>({
+          table: 'property_memberships',
+          action: 'select',
+          select: 'users:user_id(id, full_name, email, role)',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }]
+        }),
       ]);
 
-      if (hErr) throw new Error(hErr.message);
-      if (mErr) throw new Error(mErr.message);
+      if (hRes.error) throw new Error(hRes.error.message);
+      if (mRes.error) throw new Error(mRes.error.message);
 
       return {
-        hierarchies: (hierarchyRows || []) as EscalationHierarchy[],
-        users: ((memberRows || [])
+        hierarchies: (hRes.data || []) as EscalationHierarchy[],
+        users: ((mRes.data || [])
           .map((m: any) => m.users)
           .filter(Boolean) as UserOption[]),
       };
@@ -182,10 +184,10 @@ export default function EscalationScreen() {
     if (formLevels.length === 0 || !formLevels.some((l) => l.role || l.user_id)) { Alert.alert('Error', 'Add at least one escalation level'); return; }
     setIsSaving(true);
     try {
-      const supabase = createClient();
-      const { error: insertErr } = await supabase
-        .from('escalation_hierarchies')
-        .insert({
+      const res = await serverApi.query({
+        table: 'escalation_hierarchies',
+        action: 'insert',
+        values: {
           property_id: propertyId,
           name: formName.trim(),
           description: formDescription.trim() || null,
@@ -196,8 +198,9 @@ export default function EscalationScreen() {
             user_name: l.user_name || null,
             response_time_minutes: l.response_time_minutes,
           })),
-        });
-      if (insertErr) throw new Error(insertErr.message || 'Failed to create hierarchy');
+        }
+      });
+      if (res.error) throw new Error(res.error.message || 'Failed to create hierarchy');
       
       setShowCreateModal(false); resetForm(); await refetch();
       Alert.alert('✅ Created', 'Escalation hierarchy created successfully');
@@ -209,10 +212,10 @@ export default function EscalationScreen() {
     if (!selectedHierarchy || !formName.trim()) { Alert.alert('Error', 'Hierarchy name is required'); return; }
     setIsSaving(true);
     try {
-      const supabase = createClient();
-      const { error: updateErr } = await supabase
-        .from('escalation_hierarchies')
-        .update({
+      const res = await serverApi.query({
+        table: 'escalation_hierarchies',
+        action: 'update',
+        values: {
           name: formName.trim(),
           description: formDescription.trim() || null,
           levels: formLevels.filter((l) => l.role || l.user_id).map((l, idx) => ({
@@ -222,10 +225,13 @@ export default function EscalationScreen() {
             user_name: l.user_name || null,
             response_time_minutes: l.response_time_minutes,
           })),
-        })
-        .eq('id', selectedHierarchy.id)
-        .eq('property_id', propertyId);
-      if (updateErr) throw new Error(updateErr.message || 'Failed to update hierarchy');
+        },
+        filters: [
+          { op: 'eq', column: 'id', value: selectedHierarchy.id },
+          { op: 'eq', column: 'property_id', value: propertyId }
+        ]
+      });
+      if (res.error) throw new Error(res.error.message || 'Failed to update hierarchy');
       
       setShowEditModal(false); resetForm(); setSelectedHierarchy(null); await refetch();
       Alert.alert('✅ Updated', 'Escalation hierarchy updated');
@@ -240,13 +246,15 @@ export default function EscalationScreen() {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try {
-            const supabase = createClient();
-            const { error: delErr } = await supabase
-              .from('escalation_hierarchies')
-              .delete()
-              .eq('id', hierarchy.id)
-              .eq('property_id', propertyId);
-            if (delErr) throw new Error(delErr.message || 'Failed to delete hierarchy');
+            const res = await serverApi.query({
+              table: 'escalation_hierarchies',
+              action: 'delete',
+              filters: [
+                { op: 'eq', column: 'id', value: hierarchy.id },
+                { op: 'eq', column: 'property_id', value: propertyId }
+              ]
+            });
+            if (res.error) throw new Error(res.error.message || 'Failed to delete hierarchy');
             setHierarchies((prev) => prev.filter((h) => h.id !== hierarchy.id));
           } catch (err: any) { Alert.alert('Error', err.message || 'Failed to delete'); }
         },

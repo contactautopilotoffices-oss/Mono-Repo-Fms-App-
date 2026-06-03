@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/context";
 import { Colors } from "@/constants/Colors";
-import { supabase } from "@/utils/supabase/client";
+import { serverApi } from '@/lib/serverApi';
 import { dieselService } from "@/services/dieselService";
 
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
@@ -38,7 +38,7 @@ import {
   Trash2,
   Zap,
 } from "lucide-react-native";
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -583,16 +583,22 @@ function LogReadingModal({
     if (!visible || !selectedGenId) return;
     const loadBounds = async () => {
       // 1. Fetch latest reading BEFORE or ON this date
-      const { data: beforeData } = await (supabase
-        .from("diesel_readings")
-        .select("closing_hours, closing_diesel_level, closing_kwh")
-        .eq("property_id", propertyId)
-        .eq("generator_id", selectedGenId)
-        .lt("reading_date", readingDate)
-        .order("reading_date", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle() as any);
+      const beforeRes = await serverApi.query<{closing_hours: number; closing_diesel_level: number; closing_kwh: number}[]>({
+        table: 'diesel_readings',
+        action: 'select',
+        select: 'closing_hours, closing_diesel_level, closing_kwh',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'generator_id', value: selectedGenId },
+          { op: 'lt', column: 'reading_date', value: readingDate },
+        ],
+        orders: [
+          { column: 'reading_date', ascending: false },
+          { column: 'created_at', ascending: false },
+        ],
+        limit: 1,
+      });
+      const beforeData = beforeRes.data?.[0] ?? null;
 
       if (beforeData) {
         setLastClosings((prev) => ({
@@ -615,16 +621,22 @@ function LogReadingModal({
       }
 
       // 2. Fetch earliest reading AFTER this date
-      const { data: afterData } = await (supabase
-        .from("diesel_readings")
-        .select("opening_hours, opening_diesel_level")
-        .eq("property_id", propertyId)
-        .eq("generator_id", selectedGenId)
-        .gt("reading_date", readingDate)
-        .order("reading_date", { ascending: true })
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle() as any);
+      const afterRes = await serverApi.query<{opening_hours: number; opening_diesel_level: number}[]>({
+        table: 'diesel_readings',
+        action: 'select',
+        select: 'opening_hours, opening_diesel_level',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'generator_id', value: selectedGenId },
+          { op: 'gt', column: 'reading_date', value: readingDate },
+        ],
+        orders: [
+          { column: 'reading_date', ascending: true },
+          { column: 'created_at', ascending: true },
+        ],
+        limit: 1,
+      });
+      const afterData = afterRes.data?.[0] ?? null;
 
       setCeilings((prev) => ({
         ...prev,
@@ -1224,13 +1236,6 @@ export default function DieselScreen() {
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
 
-  const [generators, setGenerators] = useState<Generator[]>([]);
-
-  const [readings, setReadings] = useState<DieselReading[]>([]);
-  const [lastClosings, setLastClosings] = useState<Record<string, LastClosing>>(
-    {},
-  );
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
   const [showSheet, setShowSheet] = useState(false);
@@ -1266,7 +1271,7 @@ export default function DieselScreen() {
               const delRes = await dieselService.deleteReading(id, propertyId as string);
               if (!delRes.success) throw new Error(String(delRes.error || 'Delete failed'));
 
-              await fetchData();
+              await refetch();
               if (showHistoryModal) fetchHistoryReadings();
             } catch (e: any) {
               Alert.alert(
@@ -1290,12 +1295,16 @@ export default function DieselScreen() {
     if (!propertyId) return;
     setIsLoadingHistory(true);
     try {
-      const { data } = await (supabase
-        .from("diesel_readings")
-        .select("*")
-        .eq("property_id", propertyId)
-        .order("reading_date", { ascending: false })
-        .order("created_at", { ascending: false }) as any);
+      const { data } = await serverApi.query<DieselReading[]>({
+        table: 'diesel_readings',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        orders: [
+          { column: 'reading_date', ascending: false },
+          { column: 'created_at', ascending: false },
+        ],
+      });
       setHistoryReadings((data as DieselReading[]) || []);
     } catch (e) {
       console.error("Error fetching history:", e);
@@ -1305,8 +1314,7 @@ export default function DieselScreen() {
   };
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };
     try {
       const [gensRes, readingsRes] = await Promise.all([
         dieselService.fetchGenerators(propertyId),
@@ -1315,8 +1323,6 @@ export default function DieselScreen() {
 
       const gensData = (gensRes.success ? gensRes.data : []) ?? [];
       const readingsData: any[] = (readingsRes.success ? readingsRes.data : []) ?? [];
-
-      setGenerators(gensData as any);
 
       // Latest per generator
       const latest: Record<string, DieselReading> = {};
@@ -1331,18 +1337,22 @@ export default function DieselScreen() {
           };
         }
       });
-      setReadings(readingsData);
-      setLastClosings(closings);
+      return { generators: gensData as Generator[], readings: readingsData as DieselReading[], lastClosings: closings };
     } catch (e) {
       console.error("Diesel fetch error:", e);
-    } finally {
-      setIsLoading(false);
+      return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };
     }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.diesel(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.diesel(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const generators = data?.generators ?? [];
+  const readings = data?.readings ?? [];
+  const lastClosings = data?.lastClosings ?? {};
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);

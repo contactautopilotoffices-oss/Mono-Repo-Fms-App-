@@ -75,8 +75,8 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import Svg, { Circle as SvgCircle } from "react-native-svg";
-import { useDashboardFetch } from "@/hooks/useDashboardFetch";
-import { queryKeys } from '@/utils/queryKeys';
+import { useServerQuery } from "@/hooks/useServerQuery";
+import { queryKeys } from "@/utils/queryKeys";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -965,9 +965,6 @@ export default function ChecklistScreen() {
   // ── State ────────────────────────────────────────────────────────────────────
   const [view, setView] = useState<SubView>("history");
 
-  const [templates, setTemplates] = useState<SOPTemplate[]>([]);
-  const [completions, setCompletions] = useState<SOPCompletion[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<SOPTemplate | null>(
@@ -1026,8 +1023,6 @@ export default function ChecklistScreen() {
   >([]);
 
   // UI state
-  const [propertyMembers, setPropertyMembers] = useState<PropertyMember[]>([]);
-  const [orgId, setOrgId] = useState<string | null>(null);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [expandedTemplateId, setExpandedTemplateId] = useState<string | null>(
     null,
@@ -1050,6 +1045,43 @@ export default function ChecklistScreen() {
       "master_admin",
     ].includes(prop.role.toLowerCase());
   }, [membership, propertyId]);
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    if (!propertyId) return { templates: [] as SOPTemplate[], propertyMembers: [] as PropertyMember[], orgId: null as string | null, completions: [] as SOPCompletion[] };
+    const res = await checklistService.fetchChecklistData(propertyId);
+    if (res.error) throw new Error(res.error);
+
+    const typed = (res.templates || []) as SOPTemplate[];
+
+    // Build flat completions list
+    const allComps: SOPCompletion[] = [];
+    typed.forEach((t) => {
+      if (t.completions) allComps.push(...t.completions);
+    });
+    allComps.sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+    
+    return {
+      templates: typed,
+      propertyMembers: res.propertyMembers || [],
+      orgId: res.organizationId || null,
+      completions: allComps,
+    };
+  }, [propertyId]);
+
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.checklist(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const templates = data?.templates ?? [];
+  const propertyMembers = data?.propertyMembers ?? [];
+  const orgId = data?.orgId ?? null;
+  const completions = data?.completions ?? [];
 
   // ── Computed ────────────────────────────────────────────────────────────────
   const filteredTemplates = useMemo(() => {
@@ -1275,74 +1307,6 @@ export default function ChecklistScreen() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Real-time sync (replaced with polling on focus/refresh) ──────────────
-  useEffect(() => {
-    // No-op: realtime replaced by manual refresh
-    return () => {};
-  }, [propertyId, view]);
-
-  const setupRealtime = useCallback((completionId: string) => {
-    // No-op: realtime replaced by manual refresh
-    realtimeChannel.current = null;
-  }, []);
-
-  // ── Fetch ───────────────────────────────────────────────────────────────────
-  const fetchPropertyMembers = useCallback(async () => {
-    // Members are now fetched via checklistService.fetchChecklistData in fetchTemplates
-  }, [propertyId]);
-
-  const fetchTemplates = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      const res = await checklistService.fetchChecklistData(propertyId);
-      if (res.error) throw new Error(res.error);
-
-      const typed = (res.templates || []) as SOPTemplate[];
-      setTemplates(typed);
-
-      // Set property members from the same API call
-      if (res.propertyMembers) {
-        setPropertyMembers(res.propertyMembers);
-      }
-
-      // Set org ID from the same API call
-      if (res.organizationId && !orgId) {
-        setOrgId(res.organizationId);
-      }
-
-      // Build flat completions list
-      const allComps: SOPCompletion[] = [];
-      typed.forEach((t) => {
-        if (t.completions) allComps.push(...t.completions);
-      });
-      allComps.sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      );
-      setCompletions(allComps);
-    } catch (err) {
-      console.error("Error fetching templates:", err);
-    }
-  }, [propertyId, orgId]);
-
-  const fetchAll = useCallback(
-    async (refresh = false) => {
-      if (refresh) setIsRefreshing(true);
-      else setIsLoading(true);
-      try {
-        await Promise.all([fetchTemplates(), fetchPropertyMembers()]);
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
-      }
-    },
-    [fetchTemplates, fetchPropertyMembers],
-  );
-
-  const { refetch } = useDashboardFetch(queryKeys.property.checklist(propertyId), fetchAll, {
-    staleTime: 1000 * 60 * 5,
-  });
-
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleRefresh = async () => {
@@ -1358,7 +1322,7 @@ export default function ChecklistScreen() {
     setItemStates({});
     setAdminUnlocked(false);
     setView("history");
-    fetchAll(true);
+    refetch();
   };
 
   const handleToggleExpand = async (template: SOPTemplate) => {
@@ -1410,7 +1374,6 @@ export default function ChecklistScreen() {
       }
     }
 
-    setIsLoading(true);
     try {
       const isOvernight =
         template.start_time &&

@@ -140,13 +140,7 @@ export default function ProcurementScreen() {
   // ── Data ─────────────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery]         = useState('');
 
-  // ── Stats ────────────────────────────────────────────────────────────────────
-  const stats = useMemo(() => {
-    const pending  = allRequests.filter(r => ['pending', 'pending_approval', 'pending_quotation'].includes(r.status)).length;
-    const approved = allRequests.filter(r => r.status === 'approved').length;
-    const total    = allRequests.length;
-    return { pending, approved, total };
-  }, [allRequests]);
+  // Moved stats block below fetch
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchProcurementData = useCallback(async () => {
@@ -197,6 +191,14 @@ export default function ProcurementScreen() {
   const catalogItems = data?.catalogItems ?? [];
 
   const handleRefresh = () => refetch();
+
+  // ── Stats ────────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const pending  = allRequests.filter(r => ['pending', 'pending_approval', 'pending_quotation'].includes(r.status)).length;
+    const approved = allRequests.filter(r => r.status === 'approved').length;
+    const total    = allRequests.length;
+    return { pending, approved, total };
+  }, [allRequests]);
 
   // ── Handle request updated (remove from pending) ──────────────────────────
   const handleRequestUpdated = useCallback(() => {

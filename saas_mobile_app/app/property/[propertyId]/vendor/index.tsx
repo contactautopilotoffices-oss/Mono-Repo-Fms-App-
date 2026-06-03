@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/Colors';
-import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
@@ -87,12 +87,13 @@ export default function VendorRevenueScreen() {
   const fetchVendors = useCallback(async () => {
     if (!propertyId) return [];
     try {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('property_id', propertyId)
-        .order('name', { ascending: true });
+      const { data, error } = await serverApi.query<Vendor[]>({
+        table: 'vendors',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        orders: [{ column: 'name', ascending: true }],
+      });
       if (error) throw new Error(error.message || 'Failed to fetch vendors');
       return data || [];
     } catch (err) {
@@ -104,12 +105,13 @@ export default function VendorRevenueScreen() {
   const fetchVendorData = async (vendorId: string) => {
     setIsVendorLoading(true);
     try {
-      const supabase = createClient();
-      const { data: cycles, error } = await supabase
-        .from('commission_cycles')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .order('cycle_number', { ascending: false });
+      const { data: cycles, error } = await serverApi.query<CommissionCycle[]>({
+        table: 'commission_cycles',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'vendor_id', value: vendorId }],
+        orders: [{ column: 'cycle_number', ascending: false }],
+      });
 
       if (error) throw new Error(error.message || 'Failed to fetch vendor data');
 

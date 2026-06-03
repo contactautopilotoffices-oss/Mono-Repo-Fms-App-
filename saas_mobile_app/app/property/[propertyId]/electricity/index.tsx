@@ -22,7 +22,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme, useAuth } from "@/context";
 import { Colors } from "@/constants/Colors";
-import { supabase } from "@/utils/supabase/client";
+
 import { electricityService } from "@/services/electricityService";
 import { serverApi } from "@/lib/serverApi";
 
@@ -37,9 +37,10 @@ import {
   TrendingUp,
   Trash2,
   CalendarDays,
+  ArrowRight,
 } from "lucide-react-native";
 import { Calendar } from "react-native-calendars";
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1091,11 +1092,13 @@ function TariffModal({
   const fetchTariffs = async () => {
     setIsLoading(true);
     try {
-      const { data, error: fetchErr } = (await supabase
-        .from("grid_tariffs")
-        .select("*")
-        .eq("property_id", propertyId)
-        .order("effective_from", { ascending: false })) as any;
+      const { data, error: fetchErr } = await serverApi.query<StoredTariff[]>({
+        table: 'grid_tariffs',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        orders: [{ column: 'effective_from', ascending: false }],
+      });
 
       if (fetchErr) throw fetchErr;
       setTariffs(data || []);
@@ -1874,14 +1877,6 @@ export default function ElectricityScreen() {
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
 
-  const [meters, setMeters] = useState<ElectricityMeter[]>([]);
-
-  const [readings, setReadings] = useState<ElectricityReading[]>([]);
-  const [previousClosings, setPreviousClosings] = useState<
-    Record<string, number>
-  >({});
-  const [activeTariff, setActiveTariff] = useState<GridTariff | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
   const [showSheet, setShowSheet] = useState(false);
@@ -1916,9 +1911,8 @@ export default function ElectricityScreen() {
               const delRes = await electricityService.deleteReading(id, reading.meter_id, propertyId as string);
               if (!delRes.success) throw new Error(String(delRes.error || 'Could not delete reading'));
 
-              await fetchData();
+              await refetch();
               if (showHistoryModal) fetchHistoryReadings();
-              setReadings((prev) => prev.filter((r) => r.id !== id));
             } catch (e: any) {
               Alert.alert(
                 "Delete Failed",
@@ -1937,12 +1931,16 @@ export default function ElectricityScreen() {
     if (!propertyId) return;
     setIsLoadingHistory(true);
     try {
-      const { data } = await (supabase
-        .from("electricity_readings")
-        .select("*")
-        .eq("property_id", propertyId)
-        .order("reading_date", { ascending: false })
-        .order("created_at", { ascending: false }) as any);
+      const { data } = await serverApi.query<ElectricityReading[]>({
+        table: 'electricity_readings',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        orders: [
+          { column: 'reading_date', ascending: false },
+          { column: 'created_at', ascending: false },
+        ],
+      });
       setHistoryReadings((data as ElectricityReading[]) || []);
     } catch (e) {
       console.error("Error fetching history:", e);
@@ -1957,8 +1955,7 @@ export default function ElectricityScreen() {
   }, [mode]);
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    setIsLoading(true);
+    if (!propertyId) return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null };
     try {
       const [metersRes, readingsRes, tariffsRes] = await Promise.all([
         electricityService.fetchMeters(propertyId),
@@ -1970,9 +1967,6 @@ export default function ElectricityScreen() {
       const readingsData = (readingsRes.success ? readingsRes.data : []) ?? [];
       const tariffsData = (tariffsRes.success ? tariffsRes.data : []) ?? [];
 
-      setMeters(metersData as any);
-      setReadings(readingsData as any);
-
       // Fetch previous closings
       const closings: Record<string, number> = {};
       const seen: Record<string, boolean> = {};
@@ -1982,27 +1976,38 @@ export default function ElectricityScreen() {
           closings[r.meter_id] = r.closing_reading;
         }
       });
-      setPreviousClosings(closings);
 
       // Set active tariff
+      let currentTariff = null;
       const todayStr = new Date().toISOString().split("T")[0];
       if (tariffsData.length > 0) {
-        const active =
+        currentTariff =
           tariffsData.find(
             (t: any) => !t.effective_to && t.effective_from <= todayStr,
           ) || tariffsData[0];
-        setActiveTariff(active as any);
       }
+      return {
+        meters: metersData as ElectricityMeter[],
+        readings: readingsData as ElectricityReading[],
+        previousClosings: closings,
+        activeTariff: currentTariff as GridTariff | null
+      };
     } catch (e) {
       console.error("Electricity fetch error:", e);
-    } finally {
-      setIsLoading(false);
+      return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null };
     }
   }, [propertyId]);
 
-  const { refetch } = useDashboardFetch(queryKeys.property.electricity(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
+  const { data, isLoading, refetch } = useServerQuery(
+    queryKeys.property.electricity(propertyId),
+    fetchData,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const meters = data?.meters ?? [];
+  const readings = data?.readings ?? [];
+  const previousClosings = data?.previousClosings ?? {};
+  const activeTariff = data?.activeTariff ?? null;
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);

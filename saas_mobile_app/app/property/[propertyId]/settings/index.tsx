@@ -21,6 +21,7 @@ import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors, DASHBOARD_BACKGROUNDS, type DashboardBgKey } from '@/constants/Colors';
 import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -99,27 +100,31 @@ export default function SettingsScreen() {
   const fetchData = useCallback(async () => {
     if (!propertyId || !user) return { property: null as Property | null, userProfile: null as UserProfile | null };
     try {
-      const [{ data: propData }, { data: userData }] = await Promise.all([
-        (supabase as any)
-          .from('properties')
-          .select('id, name, code, address')
-          .eq('id', propertyId)
-          .maybeSingle(),
-        (supabase as any)
-          .from('users')
-          .select('id, full_name, email, user_photo_url, role, designation')
-          .eq('id', user.id)
-          .maybeSingle(),
+      const [propRes, userRes] = await Promise.all([
+        serverApi.query<Property[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'id, name, code, address',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.query<UserProfile[]>({
+          table: 'users',
+          action: 'select',
+          select: 'id, full_name, email, user_photo_url, role, designation',
+          filters: [{ op: 'eq', column: 'id', value: user.id }],
+          limit: 1,
+        }),
       ]);
       return {
-        property: (propData as Property) || null,
-        userProfile: (userData as UserProfile) || null,
+        property: propRes.data?.[0] || null,
+        userProfile: userRes.data?.[0] || null,
       };
     } catch (error) {
       console.error('Error fetching settings data:', error);
       return { property: null as Property | null, userProfile: null as UserProfile | null };
     }
-  }, [propertyId, user, supabase]);
+  }, [propertyId, user]);
 
   useEffect(() => {
     (async () => {

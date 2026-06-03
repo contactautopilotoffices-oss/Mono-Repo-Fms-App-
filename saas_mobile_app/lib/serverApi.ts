@@ -55,21 +55,32 @@ interface QueryFilter {
 // ---------------------------------------------------------------------------
 
 async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
-  const token = await getSupabaseToken();
+  const doFetch = async (authToken: string | null) => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
+    return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  let token = await getSupabaseToken();
+  let response = await doFetch(token);
 
-  const response = await fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  // Retry once on 401 — force-refresh the session to get a fresh access token
+  if (response.status === 401) {
+    token = await getSupabaseToken(true);
+    if (token) {
+      response = await doFetch(token);
+    }
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -86,24 +97,35 @@ async function serverGet(
   endpoint: string,
   query?: Record<string, string | number | boolean | null | undefined>
 ): Promise<unknown> {
-  const token = await getSupabaseToken();
+  const doFetch = async (authToken: string | null) => {
+    const headers: Record<string, string> = {};
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
 
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+    const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value));
+      }
+    }
 
-  const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined && value !== null && value !== '') {
-      url.searchParams.set(key, String(value));
+    return fetch(url.toString(), {
+      method: 'GET',
+      headers,
+    });
+  };
+
+  let token = await getSupabaseToken();
+  let response = await doFetch(token);
+
+  // Retry once on 401 — force-refresh the session to get a fresh access token
+  if (response.status === 401) {
+    token = await getSupabaseToken(true);
+    if (token) {
+      response = await doFetch(token);
     }
   }
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers,
-  });
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
