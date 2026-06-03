@@ -681,7 +681,7 @@ export default function NewMstDashboard({ propertyId }: MstDashboardProps) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
         <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-        {weather && <WeatherBackground condition={manualCondition || weather.condition} />}
+        {weather && <WeatherBackground condition={manualCondition || weather?.condition} />}
         <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading dashboard...</Text>
@@ -693,7 +693,7 @@ export default function NewMstDashboard({ propertyId }: MstDashboardProps) {
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-      {weather && <WeatherBackground condition={manualCondition || weather.condition} />}
+      {weather && <WeatherBackground condition={manualCondition || weather?.condition} />}
       <View style={styles.mainContainer}>
         {/* Main Content */}
         <View style={styles.contentArea}>

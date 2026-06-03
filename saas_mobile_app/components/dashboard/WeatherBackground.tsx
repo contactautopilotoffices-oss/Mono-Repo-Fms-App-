@@ -6,7 +6,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 export type WeatherCondition = 'clear-night' | 'sunny' | 'cloudy' | 'rainy' | 'clear-day' | 'cloudy-day' | 'cloudy-night' | 'cosmic';
 
 interface WeatherBackgroundProps {
-  condition: WeatherCondition;
+  condition: WeatherCondition | undefined | null;
 }
 
 const BACKGROUND_IMAGES: Record<string, any> = {
@@ -32,10 +32,12 @@ const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = 
 };
 
 export default function WeatherBackground({ condition }: WeatherBackgroundProps) {
-  // Resolve condition safely, fallback to sunny
-  const mappedCondition = condition?.toLowerCase() || 'sunny';
-  const backgroundImage = BACKGROUND_IMAGES[mappedCondition] || BACKGROUND_IMAGES['sunny'];
-  const gradientColors = THEME_GRADIENTS[mappedCondition] || THEME_GRADIENTS['sunny'];
+  // Default to night backdrop — dashboard always shows dark background
+  const mappedCondition = (condition && typeof condition === 'string')
+    ? condition.toLowerCase()
+    : 'clear-night';
+  const backgroundImage = BACKGROUND_IMAGES[mappedCondition] || BACKGROUND_IMAGES['clear-night'];
+  const gradientColors = THEME_GRADIENTS[mappedCondition] || THEME_GRADIENTS['clear-night'];
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">

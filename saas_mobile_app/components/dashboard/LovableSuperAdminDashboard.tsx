@@ -405,7 +405,7 @@ export default function LovableSuperAdminDashboard() {
         colors={['#1c2135', '#0f121e', '#07090e']}
         style={StyleSheet.absoluteFillObject}
       />
-      {weather && <WeatherBackground condition={weather.condition} />}
+      <WeatherBackground condition={weather?.condition} />
 
       {/* Main Content Area */}
       <View style={{ flex: 1 }}>

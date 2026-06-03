@@ -653,7 +653,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     <View style={[sMain.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" />
       <LinearGradient colors={[...BG]} style={StyleSheet.absoluteFillObject} />
-      {weather && <WeatherBackground condition={weather.condition} />}
+      <WeatherBackground condition={weather?.condition} />
 
       {/* ── Header ── */}
       <Animated.View entering={FadeInDown.duration(400)} style={sMain.header}>

@@ -131,16 +131,17 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       // Skip already-closed tickets
       if (RESOLVED_STATUSES.includes(t.status)) return;
 
-      // 1. Tenant (external) tickets
-      if (t.internal === false && !seenIds.has(t.id)) {
+      // 1. Tenant (client) tickets — only if raised_by is present (creator is a known tenant user)
+      // is_internal=false means external; raised_by confirms it's a tenant, not property admin/staff
+      if (t.internal === false && t.raised_by && !seenIds.has(t.id)) {
         items.push({
           id: `tenant-${t.id}`,
           entity_id: t.id,
           entity_type: 'ticket',
           severity: 'high',
           type: 'tenant_ticket',
-          title: 'Tenant Ticket',
-          description: t.title || 'Tenant raised ticket',
+          title: 'Client Ticket',
+          description: t.title || 'Client raised ticket',
           action_label: 'View',
         });
         seenIds.add(t.id);
@@ -202,7 +203,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     if (!needsAttentionTickets.length) return [];
     return [...needsAttentionTickets].map((item) => {
       const matchingTicket = tickets.find((t) => t.id === item.entity_id);
-      const isTenant = matchingTicket ? matchingTicket.internal === false : false;
+      // Only flag as client/tenant if raised_by is present (creator is known tenant user)
+      const isClientTicket = matchingTicket ? (matchingTicket.internal === false && !!matchingTicket.raised_by) : false;
       const isCritical = item.severity === 'critical';
       const isHighUrgent = ['urgent', 'high'].includes(matchingTicket?.priority ?? '');
       const isStale = item.type === 'stale_ticket';
@@ -210,7 +212,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       // Priority scoring matches saas_one web logic
       let priorityScore = 0;
       if (isCritical) priorityScore += 15;
-      if (isTenant) priorityScore += 10;
+      if (isClientTicket) priorityScore += 10;
       if (isHighUrgent) priorityScore += 8;
       if (isStale) priorityScore += 3;
 
@@ -279,7 +281,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         isAll
           ? Promise.resolve({ data: { name: 'All Properties Overview' } })
           : safeFetch(serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq' as const, column: 'id', value: propertyId }], single: true }), null),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, photo_before_url', filters: [propFilter], orders: [{ column: 'created_at', ascending: false }] }), []),
+        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, raised_by, photo_before_url', filters: [propFilter], orders: [{ column: 'created_at', ascending: false }] }), []),
         safeFetch(serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [propFilter, { op: 'eq' as const, column: 'is_active', value: true }] }), []),
         safeFetch(serverApi.query({ table: 'sop_completions', action: 'select', select: 'status', filters: [propFilter, { op: 'eq' as const, column: 'completion_date', value: todayStr }] }), []),
         safeFetch(serverApi.query({ table: 'visitor_logs', action: 'select', select: 'status', filters: [propFilter] }), []),
@@ -736,7 +738,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <DashboardBackground />
-      {weather && <WeatherBackground condition={weather.condition} />}
+      <WeatherBackground condition={weather?.condition} />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />} contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}>
         <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>

@@ -1196,7 +1196,7 @@ export default function PremiumMstDashboard({ propertyId }: MstDashboardProps) {
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-      {weather && <WeatherBackground condition={manualCondition || weather.condition} />}
+      <WeatherBackground condition={manualCondition || weather?.condition} />
       <View style={styles.mainContainer}>
         <View style={styles.contentArea}>
           {/* Top Bar */}

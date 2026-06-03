@@ -1,14 +1,18 @@
 /**
  * PPMProgressCard — Mini calendar + task summary for Preventive Maintenance
  * Shows a compact month view with PPM task dots and upcoming count.
+ * Uses shared ppmStore for instant load + background refresh.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SPACING, CARD_SURFACES } from '@/constants/designSystem';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { ppmService, PPMSchedule } from '@/services/ppmService';
+import { usePpmStore } from '@/stores/ppmStore';
+import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { queryKeys } from '@/utils/queryKeys';
 
 interface PPMProgressCardProps {
   propertyId: string;
@@ -36,24 +40,40 @@ export const PPMProgressCard: React.FC<PPMProgressCardProps> = ({
   delay = 200,
   onPress,
 }) => {
-  const [schedules, setSchedules] = useState<PPMSchedule[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ── Shared store for instant load + background refresh ─────────────────────
+  const { schedules: cachedSchedules, hasLoadedInitialData, setSchedules } = usePpmStore();
+  const cached = cachedSchedules[propertyId] ?? [];
+
+  // Local loading state — only true if no cache AND still fetching
+  const [isFetching, setIsFetching] = useState(!hasLoadedInitialData[propertyId]);
+
+  const fetchSchedules = useCallback(async () => {
+    if (!propertyId) return;
+    setIsFetching(true);
+    try {
+      const res = await ppmService.fetchSchedules(propertyId, organizationId);
+      if (res.success && res.data) {
+        setSchedules(propertyId, res.data);
+      }
+    } finally {
+      setIsFetching(false);
+    }
+  }, [propertyId, organizationId, setSchedules]);
+
+  useDashboardFetch(queryKeys.property.ppm(propertyId), fetchSchedules, {
+    staleTime: 1000 * 60 * 10, // 10 min
+    enabled: !!propertyId,
+  });
 
   useEffect(() => {
-    if (!propertyId) {
-      if (__DEV__) console.log('[PPMProgressCard] no propertyId');
-      return;
+    if (!propertyId) return;
+    if (!hasLoadedInitialData[propertyId]) {
+      fetchSchedules();
     }
-    if (__DEV__) console.log('[PPMProgressCard] fetching schedules for', propertyId, 'org:', organizationId);
-    let mounted = true;
-    ppmService.fetchSchedules(propertyId, organizationId).then((res) => {
-      if (!mounted) return;
-      if (__DEV__) console.log('[PPMProgressCard] fetch result:', res.success, res.data?.length ?? 0, 'items');
-      if (res.success && res.data) setSchedules(res.data);
-      setLoading(false);
-    });
-    return () => { mounted = false; };
-  }, [propertyId, organizationId]);
+  }, [propertyId]);
+
+  // Use cached data if available, fall back to empty array for instant render
+  const schedules = cached.length > 0 ? cached : [];
 
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;
 
@@ -65,7 +85,7 @@ export const PPMProgressCard: React.FC<PPMProgressCardProps> = ({
     return { title: 'Plan Maintenance! 🛠️', subtitle: 'Start your PPM schedule' };
   }, [percent]);
 
-  // ── Calendar data ─────────────────────────────────────────────
+  // ── Calendar data ─────────────────────────────────────────────────────────────
   const today = useMemo(() => new Date(), []);
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -80,7 +100,7 @@ export const PPMProgressCard: React.FC<PPMProgressCardProps> = ({
       d.total++;
       if (s.status === 'done') d.done++;
       else if (s.status === 'pending') d.pending++;
-      else if (s.status === 'postponed') d.overdue++; // treat postponed as overdue-ish
+      else if (s.status === 'postponed') d.overdue++;
       map[s.planned_date] = d;
     });
     return map;
@@ -214,10 +234,7 @@ export const PPMProgressCard: React.FC<PPMProgressCardProps> = ({
 };
 
 const styles = StyleSheet.create({
-  wrapper: {
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
-  },
+  wrapper: { marginHorizontal: SPACING.lg, marginTop: SPACING.md },
   card: {
     borderRadius: CARD_SURFACES.cardRadius,
     backgroundColor: CARD_SURFACES.cardBg,
@@ -227,183 +244,36 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.lg,
     overflow: 'hidden',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.sm,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.65)',
-    fontWeight: '500',
-  },
-  title: {
-    fontSize: 22,
-    color: '#fff',
-    fontWeight: '800',
-    marginTop: 2,
-  },
-  badge: {
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  badgeText: {
-    fontSize: 14,
-    color: '#F59E0B',
-    fontWeight: '700',
-  },
-  // ── Calendar ──
-  calendarSection: {
-    marginTop: SPACING.sm,
-    paddingHorizontal: SPACING.xs,
-  },
-  monthLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: SPACING.sm,
-    textAlign: 'center',
-  },
-  dayHeaders: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  dayHeaderText: {
-    width: 32,
-    textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.4)',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  dayCell: {
-    width: 32,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-    borderRadius: 8,
-  },
-  todayCell: {
-    backgroundColor: 'rgba(139,92,246,0.25)',
-    borderWidth: 1,
-    borderColor: 'rgba(139,92,246,0.5)',
-  },
-  dayText: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.75)',
-    fontWeight: '500',
-  },
-  todayText: {
-    color: '#fff',
-    fontWeight: '700',
-  },
-  dayDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginTop: 2,
-  },
-  // ── Counts ──
-  countsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
-  },
-  countBadge: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  countBadgeValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  countBadgeLabel: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.5)',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  // ── Breakdown ──
-  breakdown: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-    paddingHorizontal: SPACING.sm,
-  },
-  breakdownItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  breakdownDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  breakdownLabel: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.5)',
-    fontWeight: '500',
-  },
-  breakdownValue: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '700',
-  },
-  breakdownDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-  },
-  footerBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.20)',
-  },
-  footerBtnText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
-    fontWeight: '500',
-  },
-  footerBtnCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-  },
-  footerBtnIcon: {
-    fontSize: 18,
-    color: 'rgba(255,255,255,0.85)',
-    fontWeight: '600',
-  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm },
+  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
+  title: { fontSize: 22, color: '#fff', fontWeight: '800', marginTop: 2 },
+  badge: { backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  badgeText: { fontSize: 14, color: '#F59E0B', fontWeight: '700' },
+  calendarSection: { marginTop: SPACING.sm, paddingHorizontal: SPACING.xs },
+  monthLabel: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginBottom: SPACING.sm, textAlign: 'center' },
+  dayHeaders: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  dayHeaderText: { width: 32, textAlign: 'center', fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
+  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  dayCell: { width: 32, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 4, borderRadius: 8 },
+  todayCell: { backgroundColor: 'rgba(139,92,246,0.25)', borderWidth: 1, borderColor: 'rgba(139,92,246,0.5)' },
+  dayText: { fontSize: 12, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  todayText: { color: '#fff', fontWeight: '700' },
+  dayDot: { width: 4, height: 4, borderRadius: 2, marginTop: 2 },
+  countsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: SPACING.md, gap: SPACING.sm },
+  countBadge: { flex: 1, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  countBadgeValue: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  countBadgeLabel: { fontSize: 10, color: 'rgba(255,255,255,0.5)', fontWeight: '500', marginTop: 2 },
+  breakdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: SPACING.lg, paddingHorizontal: SPACING.sm },
+  breakdownItem: { flex: 1, alignItems: 'center', gap: 4 },
+  breakdownDot: { width: 8, height: 8, borderRadius: 4 },
+  breakdownLabel: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: '500' },
+  breakdownValue: { fontSize: 16, color: '#fff', fontWeight: '700' },
+  breakdownDivider: { width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.1)' },
+  footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: SPACING.lg },
+  footerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.20)' },
+  footerBtnText: { fontSize: 14, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
+  footerBtnCircle: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 0, paddingVertical: 0 },
+  footerBtnIcon: { fontSize: 18, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
 });
 
 export default PPMProgressCard;

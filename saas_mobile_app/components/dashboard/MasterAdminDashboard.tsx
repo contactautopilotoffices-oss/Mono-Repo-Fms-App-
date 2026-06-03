@@ -24,8 +24,7 @@ import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import WeatherBadge from '@/components/dashboard/WeatherBadge';
 import { useWeather } from '@/hooks/useWeather';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
-import { useAsyncStorageCache } from '@/hooks/useAsyncStorageCache';
+import { useServerQuery } from '@/hooks/useServerQuery';
 import { useTheme } from '@/context';
 import SignOutModal from '../ui/SignOutModal';
 import Skeleton from '../ui/Skeleton';
@@ -69,35 +68,17 @@ export default function MasterAdminDashboard() {
 
   const supabase = useMemo(() => createClient(), []);
 
-  // ── AsyncStorage cache — declared BEFORE useState that uses its values ──
-  const { cachedData: masterCache, hasCache: hasMasterCache, saveCache: saveMasterCache } = useAsyncStorageCache<{
-    organizations: Organization[];
-    users: SystemUser[];
-    stats: DashboardStats;
-  }>({ key: 'master-admin-dashboard', propertyId: user?.id ?? 'master', staleTime: 10 * 60 * 1000 });
-
-  // State — pre-seeded from cache for instant paint
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [organizations, setOrganizations] = useState<Organization[]>(masterCache?.organizations ?? []);
-  const [users, setUsers] = useState<SystemUser[]>(masterCache?.users ?? []);
-  const [isLoading, setIsLoading] = useState(!hasMasterCache);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [manualCondition, setManualCondition] = useState<import('@/hooks/useWeather').WeatherCondition | null>(null);
-  const [stats, setStats] = useState<DashboardStats>({
-    entities: masterCache?.stats.entities ?? 0,
-    activeSessions: 0,
-    securityAlerts: 0,
-    pendingDeletions: 0,
-  });
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateOrgModal, setShowCreateOrgModal] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgCode, setNewOrgCode] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
 
-  const checkMasterAdmin = async () => {
-    if (!user) return;
+  const fetchData = useCallback(async () => {
+    if (!user) throw new Error('Not authenticated');
 
     const { data: userProfile } = await (supabase
       .from('users')
@@ -105,77 +86,55 @@ export default function MasterAdminDashboard() {
       .eq('id', user.id)
       .single() as any);
 
-    if (userProfile?.is_master_admin) {
-      fetchData();
-    } else {
-      setIsLoading(false);
+    if (!userProfile?.is_master_admin) {
+      return { organizations: [], users: [], stats: { entities: 0, activeSessions: 0, securityAlerts: 0, pendingDeletions: 0 } };
     }
-  };
 
-  const fetchData = async () => {
-    setIsLoading(true);
-    await Promise.all([
-      fetchOrganizations(),
-      fetchUsers(),
-      fetchStats(),
-    ]);
-    setIsLoading(false);
-  };
-
-  const fetchOrganizations = async () => {
-    const { data, error } = await (supabase
+    const { data: orgData, error: orgError } = await (supabase
       .from('organizations')
       .select('*, properties(count)')
       .order('created_at', { ascending: false }) as any);
+    if (orgError) throw new Error('Failed to fetch organizations');
 
-    if (error) {
-      console.error('Error fetching organizations:', error);
-    } else {
-      setOrganizations(data ?? []);
-    }
-  };
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id, full_name, email, phone, created_at, is_master_admin')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (userError) throw new Error('Failed to fetch users');
 
-  const fetchUsers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, full_name, email, phone, created_at, is_master_admin')
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (!error) setUsers((data as SystemUser[]) || []);
-    } catch (err) {
-      console.error('Error fetching users:', err);
-    }
-  };
+    const [{ count: orgCount }, { count: userCount }] = await Promise.all([
+      supabase.from('organizations').select('id', { count: 'exact', head: true }),
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+    ]);
+    const stats: DashboardStats = {
+      entities: (orgCount ?? 0) + (userCount ?? 0),
+      activeSessions: 0,
+      securityAlerts: 0,
+      pendingDeletions: 0,
+    };
 
-  const fetchStats = async () => {
-    try {
-      const [{ count: orgCount }, { count: userCount }] = await Promise.all([
-        supabase.from('organizations').select('id', { count: 'exact', head: true }),
-        supabase.from('users').select('id', { count: 'exact', head: true }),
-      ]);
-      const computed: DashboardStats = {
-        entities: (orgCount ?? 0) + (userCount ?? 0),
-        activeSessions: 0,
-        securityAlerts: 0,
-        pendingDeletions: 0,
-      };
-      setStats(computed);
-      // Save to cache after all data loads
-      saveMasterCache({ organizations, users, stats: computed });
-    } catch (err) {
-      console.error('Error fetching stats:', err);
-    }
-  };
+    return {
+      organizations: (orgData ?? []) as Organization[],
+      users: ((userData ?? []) as SystemUser[]),
+      stats,
+    };
+  }, [user, supabase]);
 
-  const { refetch } = useDashboardFetch(queryKeys.admin.masterAdmin(user?.id ?? 'none'), checkMasterAdmin, {
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{
+    organizations: Organization[];
+    users: SystemUser[];
+    stats: DashboardStats;
+  }>(queryKeys.admin.masterAdmin(user?.id ?? 'none'), fetchData, {
     staleTime: 1000 * 60 * 5,
   });
 
-  const onRefresh = useCallback(async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
+  const organizations = data?.organizations ?? [];
+  const users = data?.users ?? [];
+  const stats = data?.stats ?? { entities: 0, activeSessions: 0, securityAlerts: 0, pendingDeletions: 0 };
+
+  const onRefresh = useCallback(() => {
+    refetch();
   }, [refetch]);
 
   const handleCreateOrg = async () => {
@@ -196,7 +155,7 @@ export default function MasterAdminDashboard() {
       setShowCreateOrgModal(false);
       setNewOrgName('');
       setNewOrgCode('');
-      fetchOrganizations();
+      refetch();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to create organization');
     } finally {
@@ -221,7 +180,7 @@ export default function MasterAdminDashboard() {
                 deleted_at: new Date().toISOString()
               })
               .eq('id', orgId);
-            fetchOrganizations();
+            refetch();
           }
         }
       ]
@@ -236,7 +195,7 @@ export default function MasterAdminDashboard() {
         deleted_at: null
       })
       .eq('id', orgId);
-    fetchOrganizations();
+    refetch();
   };
 
   const filteredOrganizations = useMemo(() => {
@@ -260,7 +219,7 @@ export default function MasterAdminDashboard() {
   const renderOverviewTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Header */}
@@ -376,7 +335,7 @@ export default function MasterAdminDashboard() {
   const renderOrganizationsTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Search */}
@@ -454,7 +413,7 @@ export default function MasterAdminDashboard() {
   const renderUsersTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Search */}
@@ -572,7 +531,7 @@ export default function MasterAdminDashboard() {
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: isDark ? '#060912' : '#F8FAFC' }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-      {weather && <WeatherBackground condition={manualCondition || weather.condition} />}
+      <WeatherBackground condition={manualCondition || weather?.condition} />
 
       {/* Top Navigation — clean, floating style */}
       <View style={styles.topNav}>
