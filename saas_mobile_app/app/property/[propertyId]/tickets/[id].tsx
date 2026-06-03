@@ -386,7 +386,15 @@ export default function TicketDetailScreen() {
 
   const { refetch } = useDashboardFetch(queryKeys.property.ticketDetail(id), fetchTicket, {
     staleTime: 1000 * 60 * 5,
+    enabled: !!id,
   });
+
+  // Trigger fetch when ticket ID changes (navigation to same ticket re-mounts component)
+  useEffect(() => {
+    if (id && propertyId) {
+      refetch();
+    }
+  }, [id, propertyId]);
 
   const fetchMSTs = async () => {
     if (!propertyId) return;
