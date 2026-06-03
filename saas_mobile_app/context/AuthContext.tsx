@@ -15,6 +15,8 @@ import { createClient } from '@/utils/supabase/client';
 import { UserMembership, PropertyInfo } from '@/types/membership';
 import { clearToken } from '@/services/cassandra/cassandraAuthService';
 import { queryClient } from '@/utils/queryClient';
+import { prefetchCriticalOnLogin, prefetchImportantOnLogin } from '@/services/prefetchService';
+import { useDashboardStore } from '@/stores/dashboardStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +42,7 @@ export interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   // Cache helpers
   refreshMembership: () => Promise<void>;
+  triggerPrefetch: (propertyId: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -249,6 +252,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           properties: builtProperties,
         };
 
+        // Also initialise dashboardStore with the first property so signIn can prefetch
+        if (builtProperties.length > 0 && !useDashboardStore.getState().loadedPropertyId) {
+          useDashboardStore.getState().setDashboardData({ loadedPropertyId: builtProperties[0].id });
+        }
+
         await persistMembershipCache(userId, membershipData);
         setMembership(membershipData);
       } catch (err) {
@@ -348,6 +356,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Auth actions
   // ---------------------------------------------------------------------------
 
+  /** Kick off background prefetch for dashboard/tickets after login */
+  const triggerPrefetch = useCallback(async (propertyId: string) => {
+    try {
+      // Immediately warm critical caches (dashboard counts + ticket list)
+      await prefetchCriticalOnLogin(propertyId);
+      // Defer non-critical screens until UI settles
+      setTimeout(() => prefetchImportantOnLogin(propertyId), 2000);
+    } catch (err) {
+      console.warn('[AuthContext] prefetch error:', err);
+    }
+  }, []);
+
   const signIn = useCallback(
     async (email: string, password: string) => {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -358,17 +378,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { data: { user: null, session: null }, error: error.message };
       }
 
-      // State is also updated via onAuthStateChange, but we update immediately
-      // so callers can rely on the returned session right away.
       const enrichedUser = enrichUser(data.session.user);
       setSession(data.session);
       setUser(enrichedUser);
 
+      // fetchMembership sets loadedPropertyId in dashboardStore
       await fetchMembership(data.session.user.id);
+
+      // Trigger prefetch once we have property context
+      const propId = useDashboardStore.getState().loadedPropertyId;
+      if (propId) {
+        triggerPrefetch(propId);
+      }
 
       return { data: { user: enrichedUser, session: data.session }, error: null };
     },
-    [supabase, fetchMembership]
+    [supabase, fetchMembership, triggerPrefetch]
   );
 
   const signUp = useCallback(
@@ -439,6 +464,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signOut,
       resetPassword,
       refreshMembership,
+      triggerPrefetch,
     }),
     [
       user,
@@ -451,6 +477,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signOut,
       resetPassword,
       refreshMembership,
+      triggerPrefetch,
     ]
   );
 

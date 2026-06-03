@@ -21,12 +21,12 @@ import { useTheme } from "@/context";
 import { Colors } from "@/constants/Colors";
 import { serverApi } from '@/lib/serverApi';
 import { dieselService } from "@/services/dieselService";
-
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import GeneratorConfigModal from "@/components/diesel/GeneratorConfigModal";
 import DGTariffModal from "@/components/diesel/DGTariffModal";
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import { LinearGradient } from "expo-linear-gradient";
+import { useDieselPrefetch } from '@/hooks/useDieselPrefetch';
 import {
   Fuel,
   ChevronDown,
@@ -582,23 +582,44 @@ function LogReadingModal({
   useEffect(() => {
     if (!visible || !selectedGenId) return;
     const loadBounds = async () => {
-      // 1. Fetch latest reading BEFORE or ON this date
-      const beforeRes = await serverApi.query<{closing_hours: number; closing_diesel_level: number; closing_kwh: number}[]>({
-        table: 'diesel_readings',
-        action: 'select',
-        select: 'closing_hours, closing_diesel_level, closing_kwh',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'generator_id', value: selectedGenId },
-          { op: 'lt', column: 'reading_date', value: readingDate },
-        ],
-        orders: [
-          { column: 'reading_date', ascending: false },
-          { column: 'created_at', ascending: false },
-        ],
-        limit: 1,
-      });
+      // FAST: Parallel fetch for before AND after readings simultaneously
+      const [beforeRes, afterRes] = await Promise.all([
+        // 1. Fetch latest reading BEFORE or ON this date
+        serverApi.query<{closing_hours: number; closing_diesel_level: number; closing_kwh: number}[]>({
+          table: 'diesel_readings',
+          action: 'select',
+          select: 'closing_hours, closing_diesel_level, closing_kwh',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'generator_id', value: selectedGenId },
+            { op: 'lt', column: 'reading_date', value: readingDate },
+          ],
+          orders: [
+            { column: 'reading_date', ascending: false },
+            { column: 'created_at', ascending: false },
+          ],
+          limit: 1,
+        }),
+        // 2. Fetch earliest reading AFTER this date
+        serverApi.query<{opening_hours: number; opening_diesel_level: number}[]>({
+          table: 'diesel_readings',
+          action: 'select',
+          select: 'opening_hours, opening_diesel_level',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'generator_id', value: selectedGenId },
+            { op: 'gt', column: 'reading_date', value: readingDate },
+          ],
+          orders: [
+            { column: 'reading_date', ascending: true },
+            { column: 'created_at', ascending: true },
+          ],
+          limit: 1,
+        }),
+      ]);
+
       const beforeData = beforeRes.data?.[0] ?? null;
+      const afterData = afterRes.data?.[0] ?? null;
 
       if (beforeData) {
         setLastClosings((prev) => ({
@@ -619,24 +640,6 @@ function LogReadingModal({
           },
         }));
       }
-
-      // 2. Fetch earliest reading AFTER this date
-      const afterRes = await serverApi.query<{opening_hours: number; opening_diesel_level: number}[]>({
-        table: 'diesel_readings',
-        action: 'select',
-        select: 'opening_hours, opening_diesel_level',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'generator_id', value: selectedGenId },
-          { op: 'gt', column: 'reading_date', value: readingDate },
-        ],
-        orders: [
-          { column: 'reading_date', ascending: true },
-          { column: 'created_at', ascending: true },
-        ],
-        limit: 1,
-      });
-      const afterData = afterRes.data?.[0] ?? null;
 
       setCeilings((prev) => ({
         ...prev,
@@ -1313,31 +1316,13 @@ export default function DieselScreen() {
     }
   };
 
+  // FAST: Use optimized parallel fetch from dieselService
   const fetchData = useCallback(async () => {
     if (!propertyId) return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };
     try {
-      const [gensRes, readingsRes] = await Promise.all([
-        dieselService.fetchGenerators(propertyId),
-        dieselService.fetchReadings(propertyId),
-      ]);
-
-      const gensData = (gensRes.success ? gensRes.data : []) ?? [];
-      const readingsData: any[] = (readingsRes.success ? readingsRes.data : []) ?? [];
-
-      // Latest per generator
-      const latest: Record<string, DieselReading> = {};
-      const closings: Record<string, LastClosing> = {};
-      readingsData.forEach((r) => {
-        if (!latest[r.generator_id]) {
-          latest[r.generator_id] = r;
-          closings[r.generator_id] = {
-            hours: r.closing_hours,
-            diesel: r.closing_diesel_level,
-            kwh: r.closing_kwh ?? 0,
-          };
-        }
-      });
-      return { generators: gensData as Generator[], readings: readingsData as DieselReading[], lastClosings: closings };
+      const result = await dieselService.fetchAll(propertyId);
+      if (!result.success) throw new Error(String(result.error ?? 'Failed to fetch diesel data'));
+      return result.data;
     } catch (e) {
       console.error("Diesel fetch error:", e);
       return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };

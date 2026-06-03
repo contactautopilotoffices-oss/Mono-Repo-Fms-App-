@@ -15,10 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
 
-import { serverApi } from '@/lib/serverApi';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { LinearGradient } from 'expo-linear-gradient';
+import { dieselApi } from '@/services/dieselApi';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
   Fuel,
@@ -45,31 +45,8 @@ interface Generator {
   status: string;
 }
 
-interface DGTariff {
-  id: string;
-  generator_id: string;
-  cost_per_litre: number;
-  effective_from: string;
-  effective_to: string | null;
-  created_by?: string;
-  created_at: string;
-}
-
-interface DieselReading {
-  id: string;
-  generator_id: string;
-  opening_hours: number;
-  closing_hours: number;
-  opening_diesel_level: number;
-  closing_diesel_level: number;
-  diesel_added_litres: number;
-  computed_consumed_litres?: number;
-  computed_cost?: number;
-  tariff_rate?: number;
-  tariff_rate_used?: number;
-  reading_date?: string;
-  created_at: string;
-}
+// Reuse DieselReading from dieselApi for consistency
+import type { DieselReading } from '@/services/dieselApi';
 
 interface TrendPoint {
   date: string;
@@ -292,77 +269,46 @@ export default function DieselAnalyticsScreen() {
 
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // FAST: Use optimized parallel dieselApi for analytics
   const fetchData = useCallback(async () => {
-    if (!propertyId) return { generators: [] as Generator[], activeTariff: 0, rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] } };
+    if (!propertyId) return {
+      generators: [] as Generator[],
+      activeTariff: 0,
+      rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] }
+    };
     try {
-      const gensRes = await serverApi.query<Generator[]>({
-        table: 'generators',
-        action: 'select',
-        select: '*',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        orders: [{ column: 'name', ascending: true }],
-      });
-      const gens = (gensRes.data as Generator[]) || [];
-
-      // Tariff
-      let currentTariff = 0;
-      if (gens.length > 0) {
-        const tariffRes = await serverApi.query<DGTariff[]>({
-          table: 'dg_tariffs',
-          action: 'select',
-          select: '*',
-          filters: [
-            { op: 'in', column: 'generator_id', value: gens.map((g) => g.id) },
-            { op: 'is', column: 'effective_to', value: null },
-          ],
-          limit: 1,
-        });
-        const tariffs = tariffRes.data as DGTariff[] | null;
-        if (tariffs && tariffs.length > 0) {
-          currentTariff = tariffs[0].cost_per_litre || 0;
-        }
-      }
-
-      const todayStart = todayStr;
-      const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-      const prevMonthStart = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toISOString().split('T')[0];
-      const prevMonthEnd = new Date(new Date().getFullYear(), new Date().getMonth(), 0).toISOString().split('T')[0];
-      const trendStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-      const baseFilters = [{ op: 'eq' as const, column: 'property_id', value: propertyId }];
-
-      const [todayR, monthR, prevMonthR, trendR] = await Promise.all([
-        serverApi.query<DieselReading[]>({ table: 'diesel_readings', action: 'select', filters: [...baseFilters, { op: 'eq', column: 'reading_date', value: todayStart }] }),
-        serverApi.query<DieselReading[]>({ table: 'diesel_readings', action: 'select', filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: monthStart }] }),
-        serverApi.query<DieselReading[]>({ table: 'diesel_readings', action: 'select', filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: prevMonthStart }, { op: 'lte', column: 'reading_date', value: prevMonthEnd }] }),
-        serverApi.query<DieselReading[]>({ table: 'diesel_readings', action: 'select', filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: trendStart }] }),
+      // Use dieselApi.fetchAnalytics for parallel data fetching (4 queries at once)
+      const [gensRes, analyticsResult] = await Promise.all([
+        dieselApi.fetchGenerators(propertyId),
+        dieselApi.fetchAnalytics(propertyId),
       ]);
 
-      let customR: any = { data: [] };
-      if (isCustomRange && dateFrom && dateTo) {
-        customR = await serverApi.query<DieselReading[]>({
-          table: 'diesel_readings',
-          action: 'select',
-          filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: dateFrom }, { op: 'lte', column: 'reading_date', value: dateTo }],
-        });
-      }
+      const gens = gensRes.success ? gensRes.data : [];
+      // Get active tariff from generators' tariffs
+      const activeTariff = gens.length > 0
+        ? (analyticsResult.data?.today[0]?.tariff_rate_used ?? 0)
+        : 0;
 
       return {
         generators: gens,
-        activeTariff: currentTariff,
+        activeTariff,
         rawReadings: {
-          today: (todayR.data as DieselReading[]) || [],
-          month: (monthR.data as DieselReading[]) || [],
-          prevMonth: (prevMonthR.data as DieselReading[]) || [],
-          trend: (trendR.data as DieselReading[]) || [],
-          custom: (customR.data as DieselReading[]) || [],
+          today: (analyticsResult.success ? analyticsResult.data.today : []),
+          month: (analyticsResult.success ? analyticsResult.data.month : []),
+          prevMonth: (analyticsResult.success ? analyticsResult.data.previousMonth : []),
+          trend: (analyticsResult.success ? analyticsResult.data.trend : []),
+          custom: (analyticsResult.success ? analyticsResult.data.trend : []), // Reuse trend for custom
         }
       };
     } catch (e) {
       console.error('Diesel analytics fetch error:', e);
-      return { generators: [] as Generator[], activeTariff: 0, rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] } };
+      return {
+        generators: [] as Generator[],
+        activeTariff: 0,
+        rawReadings: { today: [] as DieselReading[], month: [] as DieselReading[], prevMonth: [] as DieselReading[], trend: [] as DieselReading[], custom: [] as DieselReading[] }
+      };
     }
-  }, [propertyId, isCustomRange, dateFrom, dateTo]);
+  }, [propertyId]);
 
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.dieselAnalytics(propertyId),
@@ -394,7 +340,7 @@ export default function DieselAnalyticsScreen() {
       return readings.filter(filterFn).reduce(
         (acc, r) => {
           let cost = r.computed_cost || 0;
-          const rate = r.tariff_rate || r.tariff_rate_used || activeTariff || 0;
+          const rate = r.tariff_rate_used || activeTariff || 0;
           if (cost === 0 && rate > 0) {
             cost = (r.computed_consumed_litres || 0) * rate;
           }

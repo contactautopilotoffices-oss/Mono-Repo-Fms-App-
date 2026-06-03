@@ -39,6 +39,7 @@ import { ppmService } from '@/services/ppmService';
 import { useCassandraStore } from '@/stores/cassandraStore';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
+import { useSidebarToggle } from '@/context/SidebarToggleContext';
 import {
   SPACING,
   TYPOGRAPHY,
@@ -99,10 +100,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showTileDetail, setShowTileDetail] = useState<TileDetail | null>(null);
   const [showNeedsAttention, setShowNeedsAttention] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showDrawer, setShowDrawer] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
   const [propertyPhoto, setPropertyPhoto] = useState<string | null>(null);
+
+  // Layout sidebar toggle (connected to the capability-filtered sidebar in _layout.tsx)
+  const toggleSidebar = useSidebarToggle();
 
   const [ticketTimeFilter, setTicketTimeFilter] = useState<'today' | 'month' | 'all'>('all');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(
@@ -832,7 +835,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       <WeatherBackground condition={weather?.condition} />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />} contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}>
         <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>
+          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => toggleSidebar?.()} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>
           <View style={styles.headerCenter}>
             <TouchableOpacity 
               style={styles.profileRow} 
@@ -931,86 +934,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         />
       )}
       
-      <Modal visible={showDrawer} transparent animationType="fade" onRequestClose={() => setShowDrawer(false)}>
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }]}>
-            <View style={styles.drawerHeader}>
-              <View style={styles.drawerLogoContainer}>
-                <Image 
-                  source={require('@/assets/images/autopilot-logo-new.png')} 
-                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]} 
-                  resizeMode="contain" 
-                />
-              </View>
-              <TouchableOpacity onPress={() => setShowDrawer(false)} style={styles.drawerCloseBtn}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.drawerSectionHeader}>
-                <Ionicons name="construct-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
-              </View>
-              {[
-                { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
-                { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
-                { label: 'Visitors', route: 'visitors', icon: 'people-outline' },
-                { label: 'PPM', route: 'ppm', icon: 'calendar-outline' },
-                { label: 'Security', route: 'security', icon: 'shield-checkmark-outline' },
-                { label: 'Inventory', route: 'inventory', icon: 'cube-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { 
-                  console.log(`[Phase 1 Debug] Drawer Navigation Clicked | Target: ${item.route} | Using propertyId: ${propertyId}`);
-                  setShowDrawer(false); 
-                  router.push(`/property/${propertyId}/${item.route}` as any); 
-                }}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
 
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="hammer-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>UTILITIES</Text>
-              </View>
-              {[
-                { label: 'Diesel Manager', route: 'diesel', icon: 'water-outline' },
-                { label: 'Electricity', route: 'electricity', icon: 'flash-outline' },
-                { label: 'Stock / Inventory', route: 'stock', icon: 'cube-outline' },
-                { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
-                { label: 'PPM', route: 'ppm', icon: 'calendar-clear-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { setShowDrawer(false); router.push(`/property/${propertyId}/${item.route}` as any); }}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="pie-chart-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>MANAGEMENT</Text>
-              </View>
-              {[
-                { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
-                { label: 'Escalation', route: 'escalation', icon: 'git-branch-outline' },
-                { label: 'Vendor Revenue', route: 'vendor', icon: 'restaurant-outline' },
-                { label: 'Reports', route: 'reports', icon: 'document-text-outline' },
-                { label: 'Settings', route: 'settings', icon: 'settings-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => { setShowDrawer(false); router.push(`/property/${propertyId}/${item.route}` as any); }}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.drawerSignOut} onPress={() => { setShowDrawer(false); setShowSignOut(true); }}>
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-              <Text style={styles.drawerSignOutText}>Logout</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.drawerBackdrop} onPress={() => setShowDrawer(false)} />
-        </View>
-      </Modal>
     </View>
   );
 }

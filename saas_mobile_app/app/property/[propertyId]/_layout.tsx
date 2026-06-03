@@ -60,9 +60,15 @@ const FULL_DASHBOARD_ROLES: string[] = [];
 // ---- Full-screen routes for full-dashboard roles (no sidebar) ----
 const FULL_SCREEN_ROUTES = [
   'staff', 'soft_service_manager',
-  'property_admin', 'lovable-admin', 'lovable-super-admin', 'settings', 'profile', 'tickets', 'dashboard', 'index', 'stock',
+  'property_admin', 'lovable-admin', 'lovable-super-admin', 'settings', 'profile', 'tickets', 'index', 'stock',
   'tenant', 'rooms', 'visitors', 'requests',
 ];
+
+// Sidebar context so child screens can toggle the layout sidebar
+export const SidebarToggleContext = React.createContext<(() => void) | null>(null);
+export function useSidebarToggle() {
+  return React.useContext(SidebarToggleContext);
+}
 
 // ---- Property Context ----
 export const PropertyContext = React.createContext<{
@@ -580,47 +586,48 @@ export default function PropertyLayout() {
     );
   }
 
-  // Capability-based module filtering in Sidebar ensures each role only sees permitted modules.
   return (
     <PropertyContext.Provider value={propertyInfo}>
-      <View style={styles.container}>
-        {/* Mobile backdrop when sidebar expanded */}
-        {isMobile && !sidebarCollapsed && (
-          <Pressable
-            style={styles.mobileBackdrop}
-            onPress={() => setSidebarCollapsed(true)}
+      <SidebarToggleContext.Provider value={() => setSidebarCollapsed(c => !c)}>
+        <View style={styles.container}>
+          {/* Mobile backdrop when sidebar expanded */}
+          {isMobile && !sidebarCollapsed && (
+            <Pressable
+              style={styles.mobileBackdrop}
+              onPress={() => setSidebarCollapsed(true)}
+            />
+          )}
+
+          {/* Persistent Sidebar */}
+          <Sidebar
+            currentRoute={currentRoute}
+            onNewRequest={() => setTicketModalVisible(true)}
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(c => !c)}
+            role={role}
+            isMobile={isMobile}
+            onNavigate={() => setSidebarCollapsed(true)}
           />
-        )}
 
-        {/* Persistent Sidebar */}
-        <Sidebar
-          currentRoute={currentRoute}
-          onNewRequest={() => setTicketModalVisible(true)}
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(c => !c)}
-          role={role}
-          isMobile={isMobile}
-          onNavigate={() => setSidebarCollapsed(true)}
-        />
+          {/* Content — children render here via Expo Router file-based routing */}
+          <View style={[styles.contentArea, {
+            backgroundColor: colors.background,
+            marginLeft: isMobile ? 0 : (sidebarCollapsed ? 72 : SIDEBAR_WIDTH),
+          }]}>
+            <Slot />
+          </View>
 
-        {/* Content — children render here via Expo Router file-based routing */}
-        <View style={[styles.contentArea, {
-          backgroundColor: colors.background,
-          marginLeft: isMobile ? 0 : (sidebarCollapsed ? 72 : SIDEBAR_WIDTH),
-        }]}>
-          <Slot />
+          {/* New Request — ticket modal with AI classification */}
+          <TicketCreateModal
+            isOpen={ticketModalVisible}
+            onClose={() => setTicketModalVisible(false)}
+            propertyId={propertyId ?? ''}
+            organizationId={membership?.org_id ?? ''}
+            role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
+          />
+          {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
         </View>
-
-        {/* New Request — ticket modal with AI classification */}
-        <TicketCreateModal
-          isOpen={ticketModalVisible}
-          onClose={() => setTicketModalVisible(false)}
-          propertyId={propertyId ?? ''}
-          organizationId={membership?.org_id ?? ''}
-          role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
-        />
-        {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
-      </View>
+      </SidebarToggleContext.Provider>
     </PropertyContext.Provider>
   );
 }
