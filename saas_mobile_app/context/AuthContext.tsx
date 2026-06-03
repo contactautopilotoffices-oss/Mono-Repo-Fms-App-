@@ -244,7 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const membershipData: UserMembership = {
           org_id: resolvedOrgId,
-          org_name: ((orgData as any)?.organization)?.name ?? null,
+          org_name: orgFromJoin?.name ?? null,
           org_role: (orgData as any)?.role ?? null,
           properties: builtProperties,
         };
