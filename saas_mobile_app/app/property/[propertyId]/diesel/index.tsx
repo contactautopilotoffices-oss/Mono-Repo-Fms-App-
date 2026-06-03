@@ -27,6 +27,7 @@ import DGTariffModal from "@/components/diesel/DGTariffModal";
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import { LinearGradient } from "expo-linear-gradient";
 import { useDieselPrefetch } from '@/hooks/useDieselPrefetch';
+import { useSidebarToggle } from '../_layout';
 import {
   Fuel,
   ChevronDown,
