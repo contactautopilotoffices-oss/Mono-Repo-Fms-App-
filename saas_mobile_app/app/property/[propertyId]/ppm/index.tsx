@@ -827,7 +827,7 @@ export default function PPMScreen() {
           ...selectedSchedule,
           attachments: updatedAttachments,
         });
-        await fetchSchedules();
+        await refetch();
       }
     } catch (err: any) {
       Alert.alert("Upload Error", err.message || "Failed to upload photos");
@@ -860,7 +860,7 @@ export default function PPMScreen() {
         ...selectedSchedule,
         attachments: updatedAttachments,
       });
-      await fetchSchedules();
+      await refetch();
     } catch (err: any) {
       Alert.alert("Error", err.message);
     }
