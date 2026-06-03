@@ -1,14 +1,14 @@
 #!/bin/bash
-# Render start script — creates cassandra package shim so imports resolve
-# The repo root IS the cassandra package, so we symlink it as such.
+# Render start script — self-contained, no CWD dependency
 set -e
 
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Always cd to the directory this script lives in, regardless of where bash was invoked
+# (BASH_SOURCE[0] is the script's own path even when called from another directory)
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# Create a cassandra symlink pointing to repo root so
-# "from cassandra.tools..." resolves correctly
-if [ ! -e "$REPO_ROOT/cassandra" ]; then
-  ln -s "$REPO_ROOT" "$REPO_ROOT/cassandra"
+# Create cassandra -> . symlink so "from cassandra.tools..." imports resolve
+if [ ! -e "cassandra" ]; then
+  ln -sf . cassandra
   echo "[start] Created cassandra -> . symlink"
 fi
 
