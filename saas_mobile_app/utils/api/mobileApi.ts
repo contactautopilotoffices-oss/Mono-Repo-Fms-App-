@@ -6,6 +6,7 @@
  */
 import { createClient } from '@/utils/supabase/client';
 import { Platform } from 'react-native';
+import { serverApi } from '@/lib/serverApi';
 
 // ---------------------------------------------------------------------
 // Supabase client-with-token (used for server-side API calls)
@@ -81,7 +82,6 @@ export async function getCurrentUserId(): Promise<string | null> {
 // Web API base URL
 // ---------------------------------------------------------------------
 export const WEB_API_BASE = process.env.EXPO_PUBLIC_WEB_API_URL ?? 'https://www.back2basiics.com';
-
 // ---------------------------------------------------------------------
 // Typed API Response shapes
 // ---------------------------------------------------------------------
@@ -850,20 +850,22 @@ export async function listMaterialRequests(input: {
   ticketId?: string;
   approverId?: string;
 }): Promise<MaterialRequest[]> {
-  const supabase = createClient();
-  let query = supabase
-    .from('material_requests')
-    .select('*, ticket:ticket_id(ticket_number, title, floor_number), requester:requested_by(full_name), approver:approved_by(full_name), rejecter:rejected_by(full_name), target_approver:target_approver_id(full_name), assignee:assignee_uid(full_name)')
-    .order('created_at', { ascending: false });
+  const filters: any[] = [];
+  if (input.propertyId) filters.push({ op: 'eq', column: 'property_id', value: input.propertyId });
+  if (input.organizationId) filters.push({ op: 'eq', column: 'organization_id', value: input.organizationId });
+  if (input.ticketId) filters.push({ op: 'eq', column: 'ticket_id', value: input.ticketId });
+  if (input.approverId) filters.push({ op: 'eq', column: 'target_approver_id', value: input.approverId });
 
-  if (input.propertyId) query = query.eq('property_id', input.propertyId);
-  if (input.organizationId) query = query.eq('organization_id', input.organizationId);
-  if (input.ticketId) query = query.eq('ticket_id', input.ticketId);
-  if (input.approverId) query = query.eq('target_approver_id', input.approverId);
+  const res = await serverApi.query<MaterialRequest[]>({
+    table: 'material_requests',
+    action: 'select',
+    select: '*, ticket:ticket_id(ticket_number, title, floor_number), requester:requested_by(full_name), approver:approved_by(full_name), rejecter:rejected_by(full_name), target_approver:target_approver_id(full_name), assignee:assignee_uid(full_name)',
+    filters,
+    orders: [{ column: 'created_at', ascending: false }],
+  });
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message ?? 'Failed to load material requests');
-  return (data ?? []) as MaterialRequest[];
+  if (res.error) throw new Error(res.error.message ?? 'Failed to load material requests');
+  return (res.data ?? []) as MaterialRequest[];
 }
 
 export async function getProcurementCatalogItems(input: {
@@ -872,47 +874,86 @@ export async function getProcurementCatalogItems(input: {
   search?: string;
   category?: string;
 }): Promise<any[]> {
-  const supabase = createClient();
-  let query = supabase
-    .from('stock_items')
-    .select('*')
-    .order('name', { ascending: true });
+  const params = new URLSearchParams();
+  if (input.propertyId) params.set('propertyId', input.propertyId);
+  if (input.organizationId) params.set('organizationId', input.organizationId);
+  if (input.search) params.set('search', input.search);
+  if (input.category) params.set('category', input.category);
 
-  if (input.propertyId) query = query.eq('property_id', input.propertyId);
-  if (input.organizationId) query = query.eq('organization_id', input.organizationId);
-  if (input.search) query = query.ilike('name', `%${input.search}%`);
-  if (input.category) query = query.eq('category', input.category);
+  const res = await apiFetch<{ items: any[]; error?: string }>(`/api/procurement/catalog?${params.toString()}`);
+  if (res.error) throw new Error(res.error ?? 'Failed to load procurement catalog');
+  return res.items ?? [];
+}
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message ?? 'Failed to load procurement catalog');
-  return data ?? [];
+export async function addProcurementCatalogItem(input: {
+  propertyId?: string;
+  organizationId?: string;
+  name: string;
+  category?: string;
+  unit_price?: number;
+  quantity?: number;
+  unit?: string;
+  item_code?: string;
+}): Promise<any> {
+  const res = await serverApi.query<any>({
+    table: 'stock_items',
+    action: 'insert',
+    values: {
+      property_id: input.propertyId,
+      organization_id: input.organizationId,
+      name: input.name,
+      category: input.category || 'General',
+      unit_price: input.unit_price ?? 0,
+      quantity: input.quantity ?? 0,
+      unit: input.unit || 'pcs',
+      item_code: input.item_code || null,
+    },
+    selectOptions: { count: 'exact' },
+  });
+  if (res.error) throw new Error(res.error.message ?? 'Failed to add catalog item');
+  return res.data;
+}
+
+export async function updateProcurementCatalogItem(
+  id: string,
+  updates: Partial<{
+    name: string;
+    category: string;
+    unit_price: number;
+    quantity: number;
+    unit: string;
+    item_code: string;
+  }>
+): Promise<any> {
+  const res = await serverApi.query<any>({
+    table: 'stock_items',
+    action: 'update',
+    values: updates,
+    filters: [{ op: 'eq', column: 'id', value: id }],
+  });
+  if (res.error) throw new Error(res.error.message ?? 'Failed to update catalog item');
+  return res.data;
+}
+
+export async function deleteProcurementCatalogItem(id: string): Promise<void> {
+  const res = await serverApi.query<any>({
+    table: 'stock_items',
+    action: 'delete',
+    filters: [{ op: 'eq', column: 'id', value: id }],
+  });
+  if (res.error) throw new Error(res.error.message ?? 'Failed to delete catalog item');
 }
 
 export async function getProcurementUsers(input: {
   propertyId?: string;
   organizationId?: string;
 }): Promise<Array<{ id: string; full_name: string; email?: string; user_photo_url?: string; role?: string }>> {
-  const supabase = createClient();
+  const params = new URLSearchParams();
+  if (input.propertyId) params.set('propertyId', input.propertyId);
+  if (input.organizationId) params.set('organizationId', input.organizationId);
 
-  if (input.propertyId) {
-    const { data, error } = await supabase
-      .from('property_memberships')
-      .select('role, users:user_id(id, full_name, email, user_photo_url)')
-      .eq('property_id', input.propertyId);
-    if (error) throw new Error(error.message ?? 'Failed to load procurement users');
-    return ((data ?? []).map((m: any) => ({ ...m.users, role: m.role })).filter((u: any) => u?.id));
-  }
-
-  if (input.organizationId) {
-    const { data, error } = await supabase
-      .from('organization_memberships')
-      .select('role, users:user_id(id, full_name, email, user_photo_url)')
-      .eq('organization_id', input.organizationId);
-    if (error) throw new Error(error.message ?? 'Failed to load procurement users');
-    return ((data ?? []).map((m: any) => ({ ...m.users, role: m.role })).filter((u: any) => u?.id));
-  }
-
-  return [];
+  const res = await apiFetch<Array<{ id: string; full_name: string; email?: string; user_photo_url?: string; role?: string }>>(`/api/procurement/users?${params.toString()}`);
+  return res ?? [];
 }
 
 /**
@@ -936,76 +977,60 @@ export async function updateMaterialRequestStatus(
   status: 'approved' | 'rejected' | 'escalated',
   notes?: string
 ): Promise<MaterialRequest> {
-  const supabase = createClient();
-  const { data: sessionData } = await supabase.auth.getSession();
-  const userId = sessionData?.session?.user?.id ?? null;
-
   const updatePayload: Record<string, any> = { status };
   if (notes !== undefined) updatePayload.notes = notes;
   const now = new Date().toISOString();
-  if (status === 'approved') { updatePayload.approved_by = userId; updatePayload.approved_at = now; }
-  if (status === 'rejected') { updatePayload.rejected_by = userId; updatePayload.rejected_at = now; }
-  if (status === 'escalated') { updatePayload.escalated_by = userId; updatePayload.escalated_at = now; }
+  if (status === 'approved') { updatePayload.approved_by = await getCurrentUserId(); updatePayload.approved_at = now; }
+  if (status === 'rejected') { updatePayload.rejected_by = await getCurrentUserId(); updatePayload.rejected_at = now; }
+  if (status === 'escalated') { updatePayload.escalated_by = await getCurrentUserId(); updatePayload.escalated_at = now; }
 
-  const { data, error } = await supabase
-    .from('material_requests')
-    .update(updatePayload)
-    .eq('id', requestId)
-    .select('*')
-    .single();
+  const res = await serverApi.query<MaterialRequest>({
+    table: 'material_requests',
+    action: 'update',
+    values: updatePayload,
+    filters: [{ op: 'eq', column: 'id', value: requestId }],
+  });
 
-  if (error) throw new Error(error.message ?? 'Failed to update material request');
-  return data as MaterialRequest;
+  if (res.error) throw new Error(res.error.message ?? 'Failed to update material request');
+  return res.data as MaterialRequest;
 }
 
 export async function createTicketMaterialRequest(
   ticketId: string,
   payload: {
     assignee_uid: string;
-    items: Array<{ name: string; qty?: string; quantity?: number; notes?: string; description?: string; unit_price?: number | null }>;
+    property_id: string;
+    organization_id: string;
+    budget_type?: 'rnm' | 'general';
+    has_custom_items?: boolean;
+    items: Array<{
+      catalog_item_id?: string | null;
+      name: string;
+      quantity: number;
+      unit_price?: number;
+      photo_url?: string;
+      description?: string;
+      links?: string[];
+      attachments?: string[];
+    }>;
   }
 ): Promise<{ success?: boolean; material_request?: MaterialRequest; error?: string }> {
   try {
-    const supabase = createClient();
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id;
-
-    // Fetch ticket to get property_id and organization_id
-    const { data: ticket, error: tErr } = await supabase
-      .from('tickets')
-      .select('property_id, organization_id')
-      .eq('id', ticketId)
-      .single();
-    if (tErr) throw new Error(tErr.message);
-
-    const items: MaterialRequestItem[] = payload.items.map((i) => ({
-      name: i.name,
-      quantity: i.quantity ?? (i.qty ? parseInt(i.qty, 10) : 1),
-      description: i.description ?? i.notes ?? null,
-      unit_price: i.unit_price ?? null,
-      total_price: null,
-      photo_url: null,
-    }));
-
-    const totalAmount = items.reduce((s, i) => s + (i.unit_price ?? 0) * (i.quantity ?? 1), 0);
-
-    const { data, error } = await supabase
-      .from('material_requests')
-      .insert({
+    const res = await apiFetch<MaterialRequest & { error?: string }>('/api/procurement/requests', {
+      method: 'POST',
+      body: JSON.stringify({
         ticket_id: ticketId,
-        property_id: ticket.property_id,
-        organization_id: ticket.organization_id,
-        requested_by: userId,
+        property_id: payload.property_id,
+        organization_id: payload.organization_id,
         assignee_uid: payload.assignee_uid,
-        items,
-        status: 'pending',
-        total_amount: totalAmount || null,
-      })
-      .select('*')
-      .single();
+        budget_type: payload.budget_type ?? 'general',
+        has_custom_items: payload.has_custom_items ?? false,
+        items: payload.items,
+      }),
+    });
 
-    if (error) throw new Error(error.message ?? 'Failed to create material request');
-    return { success: true, material_request: data as MaterialRequest };
+    if (res.error) throw new Error(res.error);
+    return { success: true, material_request: res };
   } catch (err: any) {
     return { success: false, error: err.message ?? 'Failed to create material request' };
   }

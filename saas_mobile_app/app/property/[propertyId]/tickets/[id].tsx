@@ -15,6 +15,7 @@ import {
   Dimensions,
   Modal,
   StatusBar,
+  Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,8 +36,9 @@ import MediaCaptureModal, { MediaFile } from '@/components/shared/MediaCaptureMo
 import MediaActionsSheet from '@/components/shared/MediaActionsSheet';
 import ImagePreviewModal from '@/components/shared/ImagePreviewModal';
 import VideoPreviewModal from '@/components/shared/VideoPreviewModal';
+import ProcurementCatalogModal from '@/components/procurement/ProcurementCatalogModal';
 import { compressImage, getStoragePath, getStoragePathForSlot, readFileAsArrayBuffer } from '@/utils/mediaUtils';
-import { WEB_API_BASE, createTicketMaterialRequest, getProcurementUsers } from '@/utils/api/mobileApi';
+import { WEB_API_BASE } from '@/utils/api/mobileApi';
 import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -102,12 +104,6 @@ interface EscalationLog {
   escalated_at: string;
   from_employee?: { full_name: string } | null;
   to_employee?:  { full_name: string } | null;
-}
-
-interface MaterialItem {
-  name: string;
-  qty: string;
-  notes: string;
 }
 
 const PRIORITY_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
@@ -186,16 +182,13 @@ export default function TicketDetailScreen() {
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
   const [availableMSTs, setAvailableMSTs] = useState<{ id: string; full_name: string }[]>([]);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
-  const [materialItems, setMaterialItems] = useState<MaterialItem[]>([{ name: '', qty: '1', notes: '' }]);
-  const [procurementUsers, setProcurementUsers] = useState<{ id: string; full_name: string; user_photo_url?: string; role?: string }[]>([]);
-  const [selectedProcurementId, setSelectedProcurementId] = useState<string | null>(null);
-  const [showProcurementDropdown, setShowProcurementDropdown] = useState(false);
-  const [validationEnabled, setValidationEnabled] = useState(false);
   const [userNameMap, setUserNameMap] = useState<Record<string, string>>({});
   const [showLoggersMenu, setShowLoggersMenu] = useState(false);
-  const [showPauseModal, setShowPauseModal] = useState(false);
-  const [pauseReason, setPauseReason] = useState<string | null>(null);
-  const [updatingPause, setUpdatingPause] = useState(false);
+  // Share & Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [isUpdatingContent, setIsUpdatingContent] = useState(false);
 
   // Media actions sheet state
   const [selectedMediaSlot, setSelectedMediaSlot] = useState<'before' | 'after' | null>(null);
@@ -305,8 +298,13 @@ export default function TicketDetailScreen() {
       // Build userNameMap from activity entries for reassignment display and activity log names
       const newMap: Record<string, string> = {};
       activityData.forEach((act: Activity) => {
+        // Resolve performed_by (primary field)
         if (act.performed_by && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(act.performed_by)) {
           newMap[act.performed_by] = act.performed_by;
+        }
+        // Also resolve user_id for backward compatibility (some old entries used user_id)
+        if ((act as any).user_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((act as any).user_id)) {
+          newMap[(act as any).user_id] = (act as any).user_id;
         }
         const detailObj = act.details ? (() => { try { return JSON.parse(act.details); } catch { return null; } })() : null;
         if (
@@ -315,6 +313,13 @@ export default function TicketDetailScreen() {
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailObj.new_value)
         ) {
           newMap[detailObj.new_value] = detailObj.new_value;
+        }
+        if (
+          (act.action === 'assigned' || act.action === 'reassigned') &&
+          detailObj?.old_value &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailObj.old_value)
+        ) {
+          newMap[detailObj.old_value] = detailObj.old_value;
         }
       });
       // Resolve assignee names from the ticket's assignee relation
@@ -338,8 +343,10 @@ export default function TicketDetailScreen() {
       }
       
       const populatedActivities = activityData.map((act: Activity) => {
-        if (act.performed_by && newMap[act.performed_by] && newMap[act.performed_by] !== act.performed_by) {
-           return { ...act, user: { full_name: newMap[act.performed_by] } };
+        // Try performed_by first, then user_id for backward compatibility
+        const actorId = act.performed_by || (act as any).user_id;
+        if (actorId && newMap[actorId] && newMap[actorId] !== actorId) {
+           return { ...act, user: { full_name: newMap[actorId] } };
         }
         return act;
       });
@@ -394,42 +401,6 @@ export default function TicketDetailScreen() {
     setAvailableMSTs(msts as { id: string; full_name: string }[]);
   };
 
-  const fetchProcurementUsers = async () => {
-    try {
-      const users = await getProcurementUsers({
-        propertyId,
-        organizationId: ticket?.organization_id,
-      });
-      console.log('[fetchProcurementUsers] Success! Found users:', users.length);
-      setProcurementUsers(users);
-    } catch (err) {
-      console.error('[fetchProcurementUsers] Failed:', err);
-      setProcurementUsers([]);
-    }
-  };
-
-
-  const handleAddMaterialItem = () => {
-    setMaterialItems(prev => [...prev, { name: '', qty: '1', notes: '' }]);
-  };
-
-  const handleRemoveMaterialItem = (index: number) => {
-    if (materialItems.length > 1) {
-      setMaterialItems(materialItems.filter((_, i) => i !== index));
-    } else {
-      setMaterialItems([{ name: '', qty: '1', notes: '' }]);
-    }
-  };
-
-  const updateMaterialItem = (index: number, field: string, value: string) => {
-    const newItems = [...materialItems];
-    newItems[index] = { ...newItems[index], [field]: value };
-    setMaterialItems(newItems);
-  };
-
-
-
-
   const handleSendComment = async () => {
     if (!newComment.trim() || !id) return;
     setSendingComment(true);
@@ -452,58 +423,7 @@ export default function TicketDetailScreen() {
     }
   };
 
-  const handleAddMaterial = async () => {
-    if (!selectedProcurementId || !id) {
-       Alert.alert('Selection Required', 'Please select a procurement member to assign this request to.');
-       return;
-    }
-    const validItems = materialItems.filter(item => item.name.trim());
-    if (validItems.length === 0) {
-       Alert.alert('Items Required', 'Please add at least one material item with a name.');
-       return;
-    }
 
-    setShowMaterialModal(false);
-    try {
-      const userId = authUser?.id;
-      const procUser = procurementUsers.find(u => u.id === selectedProcurementId);
-      
-      let commentText = `[MATERIAL REQUESTED]`;
-      validItems.forEach((item, index) => {
-        commentText += `\n${index + 1}. ${item.qty} of ${item.name.trim()}`;
-        if (item.notes.trim()) commentText += ` - Notes: ${item.notes.trim()}`;
-      });
-      if (procUser) {
-        commentText += `\nAssignee: @${procUser.full_name} (${procUser.role ?? 'Procurement'})`;
-      }
-      
-      const requestRes = await createTicketMaterialRequest(id, {
-        assignee_uid: selectedProcurementId,
-        items: validItems.map((item) => ({
-          name: item.name.trim(),
-          qty: item.qty,
-          notes: item.notes.trim() || undefined,
-        })),
-      });
-
-      if (!requestRes.success) {
-        throw new Error(requestRes.error || 'Failed to create material request');
-      }
-
-      // Refresh comments/activity after server-side logging
-      await fetchTicket();
-      
-      // Reset state
-      setMaterialItems([{ name: '', qty: '1', notes: '' }]);
-      setSelectedProcurementId(null);
-      setShowProcurementDropdown(false);
-      
-      Alert.alert('Success', 'Material request submitted successfully.');
-    } catch (err) {
-      console.error('Error adding material:', err);
-      Alert.alert('Error', 'Failed to submit material request. Please try again.');
-    }
-  };
 
   const handleUpdateStatus = async (newStatus: string) => {
     if (!id || !ticket) return;
@@ -617,43 +537,7 @@ export default function TicketDetailScreen() {
     }
   };
 
-  const handleTogglePause = async (reason?: string) => {
-    if (!id || !ticket || updatingPause) return;
-    setUpdatingPause(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const isPausing = !ticket.work_paused;
-      const updates: Record<string, unknown> = {
-        work_paused: isPausing,
-        work_pause_reason: isPausing ? (reason ?? null) : null,
-      };
-      await serverApi.query({
-        table: 'tickets',
-        action: 'update',
-        values: updates,
-        filters: [{ op: 'eq', column: 'id', value: id }],
-      });
-      if (user?.id) {
-        await serverApi.query({
-          table: 'ticket_activity_log',
-          action: 'insert',
-          values: {
-            ticket_id: id,
-            user_id: user.id,
-            action: isPausing ? 'sla_paused' : 'sla_resumed',
-            new_value: isPausing ? (reason ?? 'Paused') : 'Resumed',
-          },
-        });
-      }
-      setTicket(prev => prev ? { ...prev, work_paused: isPausing, work_pause_reason: isPausing ? (reason ?? undefined) : undefined } : prev);
-    } catch (err) {
-      console.warn('[handleTogglePause] error:', err);
-    } finally {
-      setUpdatingPause(false);
-      setShowPauseModal(false);
-      setPauseReason(null);
-    }
-  };
+
 
   const handleReassign = async (mstId: string) => {
     if (!id || !ticket) return;
@@ -1077,13 +961,51 @@ export default function TicketDetailScreen() {
           <Ionicons name="chevron-back" size={26} color={textPrimary} />
         </TouchableOpacity>
         <Text style={[styles.topNavTitle, { color: textPrimary }]}>Request Details</Text>
-        <TouchableOpacity
-          style={styles.bellButton}
-          onPress={() => { Alert.alert('Notifications', 'Notifications coming soon!'); }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="notifications-outline" size={24} color={textSecondary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          {/* Share Button */}
+          <TouchableOpacity
+            style={styles.headerActionBtn}
+            onPress={async () => {
+              try {
+                const shareUrl = `${WEB_API_BASE}/tickets/${id}`;
+                const shareText = `Ticket ${ticket.ticket_number ?? ticket.id.slice(0, 8).toUpperCase()}: ${ticket.title}`;
+                await Share.share({
+                  message: `${shareText}\n${shareUrl}`,
+                  url: shareUrl,
+                });
+              } catch (err) {
+                console.error('Share error:', err);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="share-outline" size={22} color={textSecondary} />
+          </TouchableOpacity>
+          {/* Material Request Button — for non-tenant users */}
+          {!isTenant && (
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => setShowMaterialModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="cart-outline" size={22} color={textSecondary} />
+            </TouchableOpacity>
+          )}
+          {/* Edit Button — show for creator, assignee, or admin/MST users */}
+          {(authUser?.id === ticket.creator?.id || isAssignee || isMSTUser) && (
+            <TouchableOpacity
+              style={styles.headerActionBtn}
+              onPress={() => {
+                setEditTitle(ticket.title);
+                setEditDescription(ticket.description);
+                setIsEditing(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="create-outline" size={22} color={textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </SafeBlurView>
 
       <KeyboardAvoidingView
@@ -1133,12 +1055,7 @@ export default function TicketDetailScreen() {
               <View style={[styles.priorityBadge, { backgroundColor: pCfg.bg }]}>
                 <Text style={[styles.priorityText, { color: pCfg.text }]}>{pCfg.label}</Text>
               </View>
-              {ticket.work_paused && (
-                <View style={[styles.pausedBadge, { backgroundColor: 'rgba(245,158,11,0.1)' }]}>
-                  <Ionicons name="pause" size={10} color="#F59E0B" />
-                  <Text style={[styles.pausedText, { color: '#F59E0B' }]}>Paused</Text>
-                </View>
-              )}
+
             </View>
           </SafeBlurView>
 
@@ -1179,29 +1096,7 @@ export default function TicketDetailScreen() {
                     </Text>
                   </TouchableOpacity>
                 )}
-                {/* Pause / Resume SLA — for assignee during in_progress */}
-                {isAssignee && ticket.status === 'in_progress' && (
-                  <TouchableOpacity
-                    style={[styles.primaryBlockBtn, { backgroundColor: ticket.work_paused ? '#10B981' : '#F59E0B', flex: 1 }]}
-                    onPress={() => {
-                      if (ticket.work_paused) {
-                        handleTogglePause();
-                      } else {
-                        setShowPauseModal(true);
-                      }
-                    }}
-                    disabled={updatingPause}
-                  >
-                    {updatingPause ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <Ionicons name={ticket.work_paused ? 'play-circle' : 'pause-circle'} size={20} color="#FFF" />
-                    )}
-                    <Text style={styles.primaryBlockBtnText}>
-                      {ticket.work_paused ? 'Resume SLA' : 'Pause SLA'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+
                 {/* Reassign — always shown except when closed */}
                 {ticket.status !== 'closed' && (
                   <TouchableOpacity
@@ -1463,7 +1358,11 @@ export default function TicketDetailScreen() {
                   }
 
                   // For reassignments, resolve user names
-                  const performerName = act.user?.full_name ?? 'Unknown';
+                  // Use userNameMap as fallback for robust name resolution
+                  const actorId = act.performed_by || (act as any).user_id;
+                  const performerName = act.user?.full_name
+                    || (actorId && userNameMap[actorId])
+                    || (actorId && actorId.length === 36 ? 'System' : (actorId || 'System'));
                   let fromName: string | null = null;
                   let toName: string | null = null;
 
@@ -1508,7 +1407,7 @@ export default function TicketDetailScreen() {
                           <View style={styles.seqUserRow}>
                             <View style={[styles.seqAvatar, { backgroundColor: `${dotColor}20` }]}>
                               <Text style={[styles.seqAvatarText, { color: dotColor }]}>
-                                {performerName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                {performerName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
                               </Text>
                             </View>
                             <Text style={[styles.seqUserName, { color: textPrimary }]}>
@@ -1843,7 +1742,7 @@ export default function TicketDetailScreen() {
           ]}>
             <TouchableOpacity 
               style={{ marginRight: 8, padding: 8 }} 
-              onPress={() => { setShowMaterialModal(true); fetchProcurementUsers(); }}
+              onPress={() => setShowMaterialModal(true)}
             >
               <Ionicons name="add" size={24} color={isDark ? '#8696A0' : '#54656F'} />
             </TouchableOpacity>
@@ -1913,191 +1812,15 @@ export default function TicketDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Material Modal */}
-      <Modal visible={showMaterialModal} transparent animationType="fade" onRequestClose={() => setShowMaterialModal(false)}>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.pickerCard, { backgroundColor: isDark ? '#1E2633' : '#FFF', borderColor, width: '96%', padding: 20, borderRadius: 28, maxHeight: '90%' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, justifyContent: 'space-between' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Ionicons name="cube-outline" size={24} color="#69D2A4" />
-                <Text style={{ color: textPrimary, fontSize: 20, fontWeight: '800', fontStyle: 'italic' }}>Request Materials</Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowMaterialModal(false)}>
-                <Ionicons name="close" size={20} color="#94A3B8" />
-              </TouchableOpacity>
-            </View>
-            <Text style={{ color: textSecondary, fontSize: 13, fontStyle: 'italic', marginBottom: 24 }}>Requisition materials from the inventory forces.</Text>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>Assign To Procurement</Text>
-              <Text style={{ fontSize: 10, color: '#3B82F6', fontWeight: '700' }}>REQUIRED</Text>
-            </View>
-
-            <View style={{ marginBottom: 24, zIndex: 10 }}>
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, padding: 12,
-                  backgroundColor: '#FFFFFF',
-                  shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2
-                }}
-                onPress={() => setShowProcurementDropdown(!showProcurementDropdown)}
-              >
-                {selectedProcurementId ? (
-                  (() => {
-                    const u = procurementUsers.find(user => user.id === selectedProcurementId);
-                    return (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginRight: 12, overflow: 'hidden' }}>
-                          {u?.user_photo_url ? (
-                            <Image source={{ uri: u.user_photo_url }} style={{ width: 40, height: 40 }} />
-                          ) : (
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>{u?.full_name?.charAt(0)}</Text>
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: '#1A2332', fontSize: 14, fontWeight: '700' }}>{u?.full_name}</Text>
-                          <Text style={{ color: '#64748B', fontSize: 11, fontWeight: '500' }}>{u?.role ?? 'Procurement'}</Text>
-                        </View>
-                      </View>
-                    );
-                  })()
-                ) : (
-                  <Text style={{ color: '#64748B', fontSize: 14, fontWeight: '600' }}>-- Select Member --</Text>
-                )}
-                <Ionicons name={showProcurementDropdown ? "chevron-up" : "chevron-expand"} size={18} color="#64748B" />
-              </TouchableOpacity>
-
-              {showProcurementDropdown && (
-                <View style={{
-                  position: 'absolute', top: 68, left: 0, right: 0, zIndex: 100,
-                  borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16,
-                  backgroundColor: '#FFFFFF', maxHeight: 200, overflow: 'hidden',
-                  shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5
-                }}>
-                  <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                    {procurementUsers.map((u, i) => (
-                      <TouchableOpacity
-                        key={u.id}
-                        style={{
-                          flexDirection: 'row', alignItems: 'center', padding: 12,
-                          borderBottomWidth: i === procurementUsers.length - 1 ? 0 : 1,
-                          borderBottomColor: '#F1F5F9',
-                          backgroundColor: selectedProcurementId === u.id ? '#F0FDF4' : 'transparent'
-                        }}
-                        onPress={() => { setSelectedProcurementId(u.id); setShowProcurementDropdown(false); }}
-                      >
-                         <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginRight: 10, overflow: 'hidden' }}>
-                          {u.user_photo_url ? (
-                            <Image source={{ uri: u.user_photo_url }} style={{ width: 32, height: 32 }} />
-                          ) : (
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B' }}>{u.full_name?.charAt(0)}</Text>
-                          )}
-                        </View>
-                        <View>
-                          <Text style={{ color: selectedProcurementId === u.id ? '#10B981' : '#1A2332', fontSize: 13, fontWeight: '600' }}>{u.full_name}</Text>
-                          <Text style={{ color: '#64748B', fontSize: 10 }}>{u.role ?? 'Procurement'}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-            </View>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={{ fontSize: 15, color: '#1A2332', fontWeight: '700' }}>Material Items</Text>
-              <TouchableOpacity onPress={handleAddMaterialItem} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
-                <Text style={{ fontSize: 12, color: '#3B82F6', fontWeight: '700' }}>+ Add Item</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView style={{ maxHeight: 450, marginBottom: 16 }} showsVerticalScrollIndicator={false}>
-              {materialItems.map((item, index) => (
-                <View key={index} style={{ 
-                  borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, 
-                  padding: 16, backgroundColor: '#F8FAFC', marginBottom: 12 
-                }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center' }}>
-                      <Ionicons name="options-outline" size={20} color="#3B82F6" />
-                    </View>
-                    <TouchableOpacity onPress={() => handleRemoveMaterialItem(index)}>
-                      <Ionicons name="trash-outline" size={20} color="#94A3B8" />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4, textTransform: 'uppercase' }}>Item Name / Code</Text>
-                    <TextInput
-                      style={{
-                        borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, 
-                        color: '#1A2332', backgroundColor: '#FFFFFF', fontSize: 14
-                      }}
-                      placeholder="e.g. HVAC Filter Grade-A"
-                      placeholderTextColor="#CBD5E1"
-                      value={item.name}
-                      onChangeText={(val) => updateMaterialItem(index, 'name', val)}
-                    />
-                  </View>
-
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4, textTransform: 'uppercase' }}>Qty</Text>
-                    <TextInput
-                      style={{
-                        borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, 
-                        color: '#1A2332', backgroundColor: '#FFFFFF', fontSize: 14
-                      }}
-                      keyboardType="numeric"
-                      value={item.qty}
-                      onChangeText={(val) => updateMaterialItem(index, 'qty', val)}
-                    />
-                  </View>
-
-                  <View>
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4, textTransform: 'uppercase' }}>Notes</Text>
-                    <TextInput
-                      style={{
-                        borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, 
-                        color: '#1A2332', backgroundColor: '#FFFFFF', fontSize: 13, height: 60, textAlignVertical: 'top'
-                      }}
-                      multiline
-                      placeholder="Specific brand requirements or delivery instructions..."
-                      placeholderTextColor="#CBD5E1"
-                      value={item.notes}
-                      onChangeText={(val) => updateMaterialItem(index, 'notes', val)}
-                    />
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity
-                style={{ flex: 1, paddingVertical: 16, alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 16 }}
-                onPress={() => { setShowMaterialModal(false); setMaterialItems([{ name: '', qty: '1', notes: '' }]); setSelectedProcurementId(null); setShowProcurementDropdown(false); }}
-              >
-                <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 13, letterSpacing: 0.5 }}>CANCEL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{ flex: 1.5, paddingVertical: 16, alignItems: 'center', backgroundColor: '#69D2A4', borderRadius: 16, shadowColor: '#69D2A4', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}
-                onPress={handleAddMaterial}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="cube-outline" size={18} color="#FFF" />
-                  <View>
-                    <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 13, letterSpacing: 0.5 }}>SUBMIT</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontWeight: '600', fontSize: 9, letterSpacing: 0.5 }}>REQUEST</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      {/* Procurement Catalog Modal */}
+      <ProcurementCatalogModal
+        isOpen={showMaterialModal}
+        onClose={() => setShowMaterialModal(false)}
+        ticketId={id as string}
+        propertyId={propertyId as string}
+        organizationId={ticket?.organization_id}
+        onSuccess={fetchTicket}
+      />
 
       {/* Assignee Picker Modal */}
       <Modal visible={showAssigneePicker} transparent animationType="fade" onRequestClose={() => setShowAssigneePicker(false)}>
@@ -2150,59 +1873,6 @@ export default function TicketDetailScreen() {
       />
 
       {/* Loggers Modal */}
-      {/* SLA Pause Reason Modal */}
-      <Modal visible={showPauseModal} transparent animationType="slide" onRequestClose={() => { setShowPauseModal(false); setPauseReason(null); }}>
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
-          activeOpacity={1}
-          onPress={() => { setShowPauseModal(false); setPauseReason(null); }}
-        >
-          <View style={{
-            backgroundColor: cardBg,
-            borderTopLeftRadius: 32,
-            borderTopRightRadius: 32,
-            padding: 24,
-            paddingBottom: Math.max(insets.bottom, 40),
-            width: '100%',
-          }}>
-            <View style={{ width: 40, height: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderRadius: 2, alignSelf: 'center', marginBottom: 20 }} />
-            <Text style={{ fontSize: 18, fontWeight: '800', color: textPrimary, marginBottom: 6 }}>Pause SLA</Text>
-            <Text style={{ fontSize: 13, color: textSecondary, marginBottom: 20 }}>Select a reason for pausing the SLA clock:</Text>
-            {(['Waiting for Parts', 'Pending Approval'] as const).map(reason => (
-              <TouchableOpacity
-                key={reason}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 12,
-                  paddingVertical: 14, paddingHorizontal: 16, borderRadius: 14, marginBottom: 10,
-                  borderWidth: 1.5,
-                  borderColor: pauseReason === reason ? '#F59E0B' : borderColor,
-                  backgroundColor: pauseReason === reason ? 'rgba(245,158,11,0.1)' : 'transparent',
-                }}
-                onPress={() => setPauseReason(reason)}
-              >
-                <Ionicons name={pauseReason === reason ? 'radio-button-on' : 'radio-button-off'} size={20} color={pauseReason === reason ? '#F59E0B' : textSecondary} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: pauseReason === reason ? '#F59E0B' : textPrimary }}>{reason}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={{
-                marginTop: 8, borderRadius: 14, paddingVertical: 15,
-                backgroundColor: pauseReason ? '#F59E0B' : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'),
-                alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8,
-              }}
-              onPress={() => pauseReason && handleTogglePause(pauseReason)}
-              disabled={!pauseReason || updatingPause}
-            >
-              {updatingPause
-                ? <ActivityIndicator size="small" color="#FFF" />
-                : <Ionicons name="pause-circle" size={20} color={pauseReason ? '#FFF' : textSecondary} />
-              }
-              <Text style={{ fontSize: 15, fontWeight: '700', color: pauseReason ? '#FFF' : textSecondary }}>Confirm Pause</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
       <Modal visible={showLoggersMenu} transparent animationType="slide" onRequestClose={() => setShowLoggersMenu(false)}>
         <TouchableOpacity 
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} 
@@ -2264,14 +1934,21 @@ export default function TicketDetailScreen() {
             isOpen={showMediaActions}
             mediaType={selectedMediaSlot || 'before'}
             fileType={fileType}
+            onClose={() => {
+              setShowMediaActions(false);
+            }}
             onViewFullScreen={() => {
-              if (fileType === 'photo' && url) {
-                setPreviewMediaUrl(url);
-                setShowImagePreview(true);
-              } else if (fileType === 'video' && url) {
-                setPreviewMediaUrl(url);
-                setShowVideoPreview(true);
-              }
+              // Close the sheet first, then open preview
+              setShowMediaActions(false);
+              setTimeout(() => {
+                if (fileType === 'photo' && url) {
+                  setPreviewMediaUrl(url);
+                  setShowImagePreview(true);
+                } else if (fileType === 'video' && url) {
+                  setPreviewMediaUrl(url);
+                  setShowVideoPreview(true);
+                }
+              }, 300);
             }}
             onReplace={() => {
               // Close the sheet, then open camera after a short delay
@@ -2305,6 +1982,108 @@ export default function TicketDetailScreen() {
         onClose={() => setShowVideoPreview(false)}
         videoUrl={previewMediaUrl}
       />
+
+      {/* Edit Ticket Modal */}
+      <Modal visible={isEditing} transparent animationType="fade" onRequestClose={() => setIsEditing(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.pickerCard, { backgroundColor: isDark ? '#1E2633' : '#FFF', borderColor, width: '92%', padding: 20, borderRadius: 24, maxHeight: '85%' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ color: textPrimary, fontSize: 18, fontWeight: '800' }}>Edit Request</Text>
+              <TouchableOpacity onPress={() => setIsEditing(false)}>
+                <Ionicons name="close" size={22} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Title</Text>
+                <TextInput
+                  style={{
+                    borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12,
+                    paddingHorizontal: 14, paddingVertical: 12,
+                    color: textPrimary, backgroundColor: isDark ? '#2D3748' : '#F8FAFC', fontSize: 15
+                  }}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholder="Request title"
+                  placeholderTextColor="#CBD5E1"
+                />
+              </View>
+
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Description</Text>
+                <TextInput
+                  style={{
+                    borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12,
+                    paddingHorizontal: 14, paddingVertical: 12,
+                    color: textPrimary, backgroundColor: isDark ? '#2D3748' : '#F8FAFC', fontSize: 15,
+                    height: 120, textAlignVertical: 'top'
+                  }}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  placeholder="Describe the issue..."
+                  placeholderTextColor="#CBD5E1"
+                  multiline
+                />
+              </View>
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 14, alignItems: 'center', backgroundColor: isDark ? '#2D3748' : '#F1F5F9', borderRadius: 14 }}
+                onPress={() => setIsEditing(false)}
+              >
+                <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 14 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1.5, paddingVertical: 14, alignItems: 'center', backgroundColor: '#3B82F6', borderRadius: 14 }}
+                onPress={async () => {
+                  if (!editTitle.trim()) {
+                    Alert.alert('Error', 'Title is required');
+                    return;
+                  }
+                  setIsUpdatingContent(true);
+                  try {
+                    const updateRes = await serverApi.query({
+                      table: 'tickets',
+                      action: 'update',
+                      values: {
+                        title: editTitle.trim(),
+                        description: editDescription.trim(),
+                      },
+                      filters: [
+                        { op: 'eq', column: 'id', value: id },
+                        { op: 'eq', column: 'property_id', value: propertyId },
+                      ],
+                    });
+                    if (updateRes.error) {
+                      throw new Error(updateRes.error.message ?? 'Update failed');
+                    }
+                    setIsEditing(false);
+                    await fetchTicket();
+                    Alert.alert('Success', 'Request updated successfully.');
+                  } catch (err: any) {
+                    console.error('Edit error:', err);
+                    Alert.alert('Update Failed', err.message ?? 'Could not update request.');
+                  } finally {
+                    setIsUpdatingContent(false);
+                  }
+                }}
+                disabled={isUpdatingContent || !editTitle.trim()}
+              >
+                {isUpdatingContent ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 14 }}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
     </View>
   );
@@ -3232,12 +3011,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.5,
   },
-  bellButton: {
+  headerActionBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
-    alignItems: 'flex-end',
+    alignItems: 'center',
   },
   bottomNav: {
     flexDirection: 'row',
