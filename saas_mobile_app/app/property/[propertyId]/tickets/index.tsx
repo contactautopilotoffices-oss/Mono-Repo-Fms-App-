@@ -90,9 +90,10 @@ interface Ticket {
   property_id: string;
   organization_id: string;
   assignee: { id: string; full_name: string; user_photo_url?: string | null } | null;
-  creator:  { id: string; full_name: string } | null;
+  creator:  { id: string; full_name: string; property_memberships?: { role: string }[] } | null;
   photo_before_url?: string | null;
   is_internal?: boolean | null;
+  raised_by?: string | null;
   ticket_escalation_logs?: TicketEscalationLog[];
 }
 
@@ -139,7 +140,7 @@ export default function TicketsScreen() {
                property_id, organization_id, photo_before_url, is_internal, raised_by, assigned_to,
                skill_group:skill_groups(name, code),
                assignee:users!assigned_to(id, full_name, user_photo_url),
-               creator:users!raised_by(id, full_name),
+               creator:users!raised_by(id, full_name, property_memberships(role)),
                ticket_escalation_logs(from_level, to_level, escalated_at,
                  from_employee:users!from_employee_id(full_name, user_photo_url),
                  to_employee:users!to_employee_id(full_name, user_photo_url))`);
@@ -330,9 +331,17 @@ const displayedTickets = useMemo(() => {
     let source: Ticket[] = data?.tickets ?? [];
     if (isNeedsAttentionMode) {
       source = source.filter((t: Ticket) => {
+        // Critical priority always needs attention
         if (t.priority === 'critical') return true;
+        // High priority + active status
         if (t.priority === 'high' && !['resolved', 'closed'].includes(t.status)) return true;
-        if (t.is_internal === false && !['resolved', 'closed'].includes(t.status)) return true;
+        // Client-raised ticket: creator is a tenant user (cross-referenced via property_memberships.role)
+        // Only tickets where is_internal=false AND creator.role='tenant' are client-raised.
+        // Property admin/staff tickets have is_internal=true or creator.role != 'tenant'.
+        const creatorRoles = t.creator?.property_memberships;
+        const isTenantCreator = creatorRoles?.some(m => m.role === 'tenant') ?? false;
+        if (t.is_internal === false && isTenantCreator && !['resolved', 'closed'].includes(t.status)) return true;
+        // Stale ticket (>3 days open with active status)
         const daysOpen = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60 * 24);
         if (daysOpen > 3 && ['open', 'assigned', 'in_progress'].includes(t.status)) return true;
         return false;

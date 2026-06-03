@@ -51,6 +51,12 @@ export default function Index() {
     return <Redirect href={`/property/${firstProperty.id}`} />;
   }
 
+  // Org-level admin with no property memberships yet — show "Select Property" instead of an error
+  // This handles new super admins who have org_memberships but no property_memberships yet
+  if (membership.org_id && membership.org_role) {
+    return <Redirect href="/(auth)/property-selection" />;
+  }
+
   // User is authenticated but has no property access — show loading instead of login
   // (they may need to be invited, but we shouldn't log them out)
   return (

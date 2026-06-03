@@ -45,7 +45,7 @@ export default function PropertySelectionScreen() {
   const theme = Colors[colorScheme];
   const router = useRouter();
   const params = useLocalSearchParams<{ properties?: string }>();
-  const { signOut } = useAuth();
+  const { signOut, membership } = useAuth();
   const supabase = createClient();
 
   const [properties, setProperties] = useState<PropertyItem[]>([]);
@@ -53,26 +53,48 @@ export default function PropertySelectionScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Parse properties from route params
+  // Parse properties from route params OR self-fetch for org-level admins
   useEffect(() => {
     if (params.properties) {
-        try {
-          const parsed: PropertyItem[] = JSON.parse(params.properties);
-          setProperties(parsed);
-          if (parsed.length === 1) {
-            setSelectedId(parsed[0].id);
-            // Clear any cached dashboard data for the previous property
-            const { clearCache } = useDashboardStore.getState();
-            clearCache();
-            router.push(`/property/${parsed[0].id}`);
-          } else if (parsed.length > 0) {
-            setSelectedId(parsed[0].id);
-          }
-        } catch {
-          console.error('Failed to parse properties from route params');
+      try {
+        const parsed: PropertyItem[] = JSON.parse(params.properties);
+        setProperties(parsed);
+        if (parsed.length === 1) {
+          setSelectedId(parsed[0].id);
+          const { clearCache } = useDashboardStore.getState();
+          clearCache();
+          router.push(`/property/${parsed[0].id}`);
+        } else if (parsed.length > 0) {
+          setSelectedId(parsed[0].id);
         }
+      } catch {
+        console.error('Failed to parse properties from route params');
+      }
+    } else if (membership?.org_id && membership?.org_role) {
+      // No properties param — org-level admin with no property memberships yet
+      // Fetch ALL properties from this org so they can pick one
+      setLoading(true);
+      supabase
+        .from('properties')
+        .select('id, name')
+        .eq('organization_id', membership.org_id)
+        .then(({ data, error }) => {
+          if (!error && data) {
+            const orgProps: PropertyItem[] = data.map(p => ({ id: p.id, role: membership.org_role }));
+            setProperties(orgProps);
+            if (orgProps.length === 1) {
+              setSelectedId(orgProps[0].id);
+              const { clearCache } = useDashboardStore.getState();
+              clearCache();
+              router.push(`/property/${orgProps[0].id}`);
+            } else if (orgProps.length > 0) {
+              setSelectedId(orgProps[0].id);
+            }
+          }
+          setLoading(false);
+        });
     }
-  }, [params.properties]);
+  }, [params.properties, membership?.org_id, membership?.org_role]);
 
   // Fetch property names for display
   useEffect(() => {
