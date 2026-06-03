@@ -69,6 +69,32 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "classify_ticket",
+            "description": (
+                "Classify a maintenance ticket to determine the appropriate priority level "
+                "(critical/urgent/high/medium/low) and suggest a category. Call this BEFORE "
+                "create_ticket to ensure correct priority assignment. Returns: priority, "
+                "priority_reason, suggested_category, category_id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Ticket title/issue description",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of the issue (optional)",
+                    },
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_ticket",
             "description": (
                 "Create a maintenance ticket in the Facility Management System (FMS). "
@@ -384,10 +410,17 @@ FUNCTION CALLING — EXACT RULES:
    - For open tickets: you CANNOT pass multiple statuses to query_tickets.
      Instead use sql_query: SELECT * FROM tickets WHERE organization_id='<org_id>' AND status IN ('assigned','waitlist','pending_validation') LIMIT 20
 
-3. "create/report/raise a ticket" → create_ticket
-   - When the user describes a problem (e.g. "leakage in cafeteria"), CALL create_ticket IMMEDIATELY.
-   - Do NOT ask "Shall I proceed?" or "Would you like to set priority?" — just create it with sensible defaults (medium priority, appropriate title/description from the user's message).
-   - Only ask follow-up questions if critical info is truly missing (no property context, completely vague description).
+3. "create/report/raise a ticket" → classify_ticket THEN create_ticket
+   - When the user describes a problem (e.g. "leakage in cafeteria"), FIRST call classify_ticket to detect priority and category.
+   - Use the classification results to set priority and category in create_ticket.
+   - AI CLASSIFICATION RULES:
+     * Fire, smoke, gas leak, medical emergency → priority: critical
+     * Water leak, flooding, no power, ac not working, elevator stuck → priority: urgent
+     * Security concerns, repeated issues → priority: high
+     * Minor cosmetic issues → priority: low
+     * Everything else → priority: medium (default)
+   - Example flow: "water leak in bathroom" → classify_ticket → returns priority=urgent → create_ticket with priority="urgent"
+   - Do NOT hardcode priority. ALWAYS classify first.
 
 4. "aggregation / group by / who has most..." → sql_query with GROUP BY
 

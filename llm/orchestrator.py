@@ -34,6 +34,7 @@ from cassandra.llm.openai_client import (
 )
 from cassandra.orchestrator import ToolResult  # Shared type
 from cassandra.tools.calculate_date import CalculateDateTool
+from cassandra.tools.classify_ticket import ClassifyTicketTool
 from cassandra.tools.create_ticket import CreateTicketTool
 from cassandra.tools.fetch_context import FetchContextTool
 from cassandra.tools.health_score import HealthScoreTool
@@ -91,6 +92,7 @@ class LLMOrchestrator:
         # Initialize tools
         self._tools: dict[str, Any] = {
             "calculate_date": CalculateDateTool(),
+            "classify_ticket": ClassifyTicketTool(),  # AI priority/category detection
             "create_ticket": CreateTicketTool(),
             "fetch_context": FetchContextTool(),
             "health_score": HealthScoreTool(),
@@ -437,15 +439,43 @@ class LLMOrchestrator:
         all_tool_calls = llm_result.tool_calls
 
         # Execute tool calls (up to MAX_TOOL_CALLS)
+        classify_result: dict[str, Any] | None = None
+        pending_create_ticket_args: dict[str, Any] | None = None
+
         for i, tc in enumerate(all_tool_calls[: self.MAX_TOOL_CALLS]):
             tool_name = tc["name"]
             tool_args = tc.get("arguments", {})
 
             self._logger.info(f"[ORCH] Tool call {i+1}: {tool_name}({list(tool_args.keys())})")
 
-            # Inject photo_url into create_ticket if present
-            if tool_name == "create_ticket" and photo_url:
-                tool_args = {**tool_args, "photo_url": photo_url}
+            # Handle classify_ticket → create_ticket chaining
+            if tool_name == "classify_ticket":
+                result = self._execute_tool(tool_name, tool_args, context)
+                tool_results.append(result)
+                if result.success and result.result:
+                    classify_result = result.result
+                    # Store create_ticket args for the next iteration
+                    pending_create_ticket_args = {
+                        "title": tool_args.get("title", ""),
+                        "description": tool_args.get("description", ""),
+                        "priority": classify_result.get("apply_priority", "medium"),
+                        "category": classify_result.get("category_id") or classify_result.get("apply_category", ""),
+                        "property_id": context.get("property_id", ""),
+                    }
+                continue  # Skip to next tool call
+
+            if tool_name == "create_ticket":
+                # If we just classified, use the classified priority/category
+                if classify_result and pending_create_ticket_args:
+                    tool_args = {**tool_args, **pending_create_ticket_args}
+                    # Remove empty values
+                    tool_args = {k: v for k, v in tool_args.items() if v}
+                    self._logger.info(f"[ORCH] Injecting classification: priority={pending_create_ticket_args.get('priority')}")
+                    classify_result = None  # Reset after use
+                    pending_create_ticket_args = None
+                # Inject photo_url if available
+                if photo_url:
+                    tool_args = {**tool_args, "photo_url": photo_url}
 
             result = self._execute_tool(tool_name, tool_args, context)
             tool_results.append(result)
@@ -697,21 +727,62 @@ class LLMOrchestrator:
         )
 
         tool_results: list[ToolResult] = []
+        classify_result: dict[str, Any] | None = None
+        pending_create_ticket_args: dict[str, Any] | None = None
 
         # Execute tool calls with streaming events
         for i, tc in enumerate(llm_result.tool_calls[: self.MAX_TOOL_CALLS]):
             tool_name = tc["name"]
             tool_args = tc.get("arguments", {})
 
-            yield StreamChunk("tool_start", {
-                "step": i + 1,
-                "tool": tool_name,
-                "message": f"Running {tool_name}...",
-            })
+            # Handle classify_ticket → create_ticket chaining
+            if tool_name == "classify_ticket":
+                yield StreamChunk("tool_start", {
+                    "step": i + 1,
+                    "tool": tool_name,
+                    "message": "Analyzing ticket...",
+                })
+                result = self._execute_tool(tool_name, tool_args, context)
+                tool_results.append(result)
+                if result.success and result.result:
+                    classify_result = result.result
+                    pending_create_ticket_args = {
+                        "title": tool_args.get("title", ""),
+                        "description": tool_args.get("description", ""),
+                        "priority": classify_result.get("apply_priority", "medium"),
+                        "category": classify_result.get("category_id") or classify_result.get("apply_category", ""),
+                        "property_id": context.get("property_id", ""),
+                    }
+                yield StreamChunk("tool_result", {
+                    "tool": tool_name,
+                    "success": result.success,
+                    "message": f"Priority: {classify_result.get('priority', 'medium')}" if result.success else "Failed",
+                    "execution_ms": result.execution_ms,
+                })
+                continue
 
-            # Inject photo_url
-            if tool_name == "create_ticket" and photo_url:
-                tool_args = {**tool_args, "photo_url": photo_url}
+            if tool_name == "create_ticket":
+                yield StreamChunk("tool_start", {
+                    "step": i + 1,
+                    "tool": tool_name,
+                    "message": "Creating ticket...",
+                })
+                # If we just classified, use the classified priority/category
+                if classify_result and pending_create_ticket_args:
+                    tool_args = {**tool_args, **pending_create_ticket_args}
+                    tool_args = {k: v for k, v in tool_args.items() if v}
+                    self._logger.info(f"[ORCH] Injecting classification: priority={pending_create_ticket_args.get('priority')}")
+                    classify_result = None
+                    pending_create_ticket_args = None
+                # Inject photo_url
+                if photo_url:
+                    tool_args = {**tool_args, "photo_url": photo_url}
+            else:
+                yield StreamChunk("tool_start", {
+                    "step": i + 1,
+                    "tool": tool_name,
+                    "message": f"Running {tool_name}...",
+                })
 
             result = self._execute_tool(tool_name, tool_args, context)
             tool_results.append(result)
