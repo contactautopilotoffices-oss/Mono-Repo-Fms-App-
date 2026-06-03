@@ -5,7 +5,7 @@
  * Base URL from EXPO_PUBLIC_CASSANDRA_API_URL.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { fetchWithAuth } from '@/lib/cassandra';
 import { writeMemory } from '@/lib/cassandra';
 import {

@@ -51,6 +51,7 @@ import {
 import { format, addDays, isSameDay, parseISO } from 'date-fns';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import { RoomBookingTab } from '@/components/tenant/tabs/RoomBookingTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -572,29 +573,15 @@ export default function RoomsScreen() {
       )}
 
       {/* Content List */}
-      {isLoading ? (
+      {isLoading && activeTab !== 'rooms' ? (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color="#708F96" />
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       ) : activeTab === 'rooms' ? (
-        <FlatList
-          data={rooms}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <RoomCard room={item} onPress={() => handleRoomPress(item)} />}
-          style={{ flex: 1 }}
-          contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 12) + 160 }]}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <SafeBlurView intensity={40} tint="dark" style={styles.emptyIconWrap}>
-                <Armchair size={32} color="#708F96" />
-              </SafeBlurView>
-              <Text style={styles.emptyTitle}>No meeting rooms</Text>
-              <Text style={styles.emptySubtitle}>No meeting rooms are set up for this property yet.</Text>
-            </View>
-          }
-        />
+        <View style={{ flex: 1, paddingTop: 8 }}>
+            <RoomBookingTab propertyId={propertyId} userId={user?.id || ''} />
+        </View>
       ) : (
         <FlatList
           data={bookings}

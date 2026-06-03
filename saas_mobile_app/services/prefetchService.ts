@@ -23,7 +23,7 @@ import { useDashboardStore } from '@/stores/dashboardStore';
 // Dashboard Counts Fetcher
 // ---------------------------------------------------------------------------
 
-export async function fetchDashboardCounts(propertyId: string): Promise<void> {
+export async function fetchDashboardCounts(propertyId: string): Promise<boolean> {
   const today = new Date().toISOString().split('T')[0];
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     .toISOString()
@@ -98,8 +98,10 @@ export async function fetchDashboardCounts(propertyId: string): Promise<void> {
       hasLoadedInitialData: true,
       lastUpdatedAt: Date.now(),
     });
+    return true;
   } catch (err) {
     console.warn('[prefetchService] fetchDashboardCounts failed:', err);
+    return false;
   }
 }
 
@@ -107,7 +109,7 @@ export async function fetchDashboardCounts(propertyId: string): Promise<void> {
 // Ticket List Fetcher
 // ---------------------------------------------------------------------------
 
-export async function fetchTicketList(propertyId: string): Promise<void> {
+export async function fetchTicketList(propertyId: string): Promise<boolean> {
   try {
     const { data, error } = await serverApi.query<any[]>({
       table: 'tickets',
@@ -125,8 +127,10 @@ export async function fetchTicketList(propertyId: string): Promise<void> {
     useDashboardStore.getState().setDashboardData({
       tickets: (data ?? []) as any,
     });
+    return true;
   } catch (err) {
     console.warn('[prefetchService] fetchTicketList failed:', err);
+    return false;
   }
 }
 
@@ -134,7 +138,7 @@ export async function fetchTicketList(propertyId: string): Promise<void> {
 // Attention Items Fetcher
 // ---------------------------------------------------------------------------
 
-export async function fetchAttentionItems(propertyId: string): Promise<void> {
+export async function fetchAttentionItems(propertyId: string): Promise<boolean> {
   try {
     const { data } = await serverApi.query<any[]>({
       table: 'attention_items',
@@ -150,8 +154,10 @@ export async function fetchAttentionItems(propertyId: string): Promise<void> {
     useDashboardStore.getState().setDashboardData({
       attentionItems: (data ?? []) as any,
     });
+    return true;
   } catch (err) {
     console.warn('[prefetchService] fetchAttentionItems failed:', err);
+    return false;
   }
 }
 
@@ -159,7 +165,7 @@ export async function fetchAttentionItems(propertyId: string): Promise<void> {
 // Tenant User IDs Fetcher
 // ---------------------------------------------------------------------------
 
-export async function fetchTenantUserIds(propertyId: string): Promise<void> {
+export async function fetchTenantUserIds(propertyId: string): Promise<boolean> {
   try {
     const { data } = await serverApi.query<any[]>({
       table: 'property_memberships',
@@ -174,8 +180,10 @@ export async function fetchTenantUserIds(propertyId: string): Promise<void> {
     useDashboardStore.getState().setDashboardData({
       tenantUserIds: (data ?? []).map((m: any) => m.user_id),
     });
+    return true;
   } catch (err) {
     console.warn('[prefetchService] fetchTenantUserIds failed:', err);
+    return false;
   }
 }
 

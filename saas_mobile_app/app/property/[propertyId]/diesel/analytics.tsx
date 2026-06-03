@@ -471,6 +471,7 @@ export default function DieselAnalyticsScreen() {
             <ArrowLeft size={20} color="#E6EBEE" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>DG Power Analytics</Text>
+          <Fuel size={20} color="#3B82F6" />
           <View style={{ width: 36 }} />
         </View>
 

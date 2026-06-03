@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 
 const PERMISSIONS_STORAGE_KEY = '@autopilot_permissions_requested';
 

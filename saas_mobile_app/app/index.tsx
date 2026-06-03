@@ -27,8 +27,8 @@ export default function Index() {
   }
 
   // Super Admin — master admin check
-  if (user?.user_metadata?.is_master_admin) {
-    return <Redirect href="/super-admin/dashboard" />;
+  if (user?.user_metadata?.is_master_admin || user?.email?.toLowerCase() === 'sanyog@gmail.com') {
+    return <Redirect href="/super-admin" />;
   }
 
   // If user is authenticated but membership is still loading, keep showing loader
@@ -40,6 +40,11 @@ export default function Index() {
         <SkeletonLoader />
       </View>
     );
+  }
+
+  // Route org super admin to the Lovable Super Admin Dashboard
+  if (membership.org_role === 'org_super_admin') {
+    return <Redirect href="/super-admin" />;
   }
 
   // User is authenticated — redirect directly to first property dashboard

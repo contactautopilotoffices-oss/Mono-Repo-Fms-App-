@@ -18,7 +18,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { EnrichedTranscriptSegment } from '@/types/cassandra-room';
 import { correctTranscript, stageLocalCorrection } from '@/services/cassandra/cassandraRoomService';
 import { Colors, Typography, Spacing, Radius } from '@/constants/cassandra-theme';

@@ -231,6 +231,11 @@ export default function LoginScreen() {
         return ai - bi;
       })[0];
 
+      if (['org_super_admin'].includes(best.role)) {
+        router.replace('/super-admin' as any);
+        return;
+      }
+
       // Fetch org properties to pass to property selection
       const { data: orgProps } = await supabase
         .from('properties')

@@ -126,8 +126,10 @@ export default function TicketsScreen() {
 
   const hasActiveFilters = categoryFilter !== 'all' || searchQuery.trim() !== '' || sortBy !== 'newest' || raisedByFilter !== 'all' || assignedToFilter !== 'all';
 
+  const isValidProperty = Boolean(propertyId && propertyId !== 'undefined' && propertyId !== 'null');
+
   const buildQueryParams = useCallback((offset: number, limit: number) => {
-    if (!propertyId) return null;
+    if (!isValidProperty) return null;
     
     const propIds = propertyId === 'all' 
       ? (membership?.properties?.map(p => p.id) ?? [])
@@ -216,7 +218,7 @@ const defaultCounts: Record<StatusFilter, number> = {
 };
 
 const getStatusCounts = useCallback(async () => {
-  if (!propertyId) return defaultCounts;
+  if (!isValidProperty) return defaultCounts;
   try {
     const counts: Record<StatusFilter, number> = { ...defaultCounts };
 
@@ -273,7 +275,7 @@ const getStatusCounts = useCallback(async () => {
 }, [propertyId, dateRange, authUser?.id, membership?.properties]);
 
 const fetchTickets = useCallback(async () => {
-  if (!propertyId) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+  if (!isValidProperty) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
   try {
     const qParams = buildQueryParams(0, limit + 1);
     if (!qParams) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
@@ -299,7 +301,10 @@ const fetchTickets = useCallback(async () => {
 const { data, isLoading, isFetching, refetch } = useServerQuery(
   [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, String(isNeedsAttentionMode), String(limit)],
   fetchTickets,
-  { staleTime: 1000 * 60 * 5 }
+  { 
+    staleTime: 1000 * 60 * 5,
+    enabled: isValidProperty,
+  }
 );
 
 const displayedTickets = useMemo(() => {
@@ -348,7 +353,7 @@ const onRefresh = () => {
 
   // Fetch users for Raised By / Assigned To filters
   const fetchFilterOptions = useCallback(async () => {
-    if (!propertyId) return;
+    if (!isValidProperty || propertyId === 'all') return;
     try {
       const res = await serverApi.query<{ user_id: string; users?: { id: string; full_name: string } }>({
         table: 'property_memberships',

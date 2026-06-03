@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { zustandStorage } from '@/utils/storage';
 
 // ---------------------------------------------------------------------------
 // Super Admin Dashboard State — cached for instant load
@@ -75,7 +75,7 @@ export const useSuperAdminStore = create<SuperAdminState>()(
     }),
     {
       name: 'autopilot-super-admin-store',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => zustandStorage),
       partialize: (state) => ({
         properties: state.properties,
         organizations: state.organizations,

@@ -65,8 +65,13 @@ export default function GlobalBottomNav() {
   }, [pathname, propertyId]);
 
   const navigate = (route: string) => {
-    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId}`);
-    router.push(`/property/${propertyId}/${route}` as any);
+    // Ensure we don't navigate to /property/undefined/tickets
+    const validPropId = (propertyId && propertyId !== 'undefined' && propertyId !== 'null') 
+      ? propertyId 
+      : (membership?.properties?.[0]?.id ?? 'all');
+      
+    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId} | Final: ${validPropId}`);
+    router.push(`/property/${validPropId}/${route}` as any);
   };
 
   return (

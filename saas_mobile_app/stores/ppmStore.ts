@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { zustandStorage } from '@/utils/storage';
 import { PPMSchedule } from '@/services/ppmService';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ export const usePpmStore = create<PPMState>()(
     }),
     {
       name: 'autopilot-ppm-store',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => zustandStorage),
       partialize: (state) => ({
         schedules: state.schedules,
         hasLoadedInitialData: state.hasLoadedInitialData,

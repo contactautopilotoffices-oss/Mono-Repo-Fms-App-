@@ -8,7 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { User, Session } from '@supabase/supabase-js';
 
 import { createClient } from '@/utils/supabase/client';

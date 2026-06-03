@@ -514,6 +514,7 @@ export default function ElectricityAnalyticsScreen() {
             <ArrowLeft size={20} color="#E6EBEE" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Grid Power Analytics</Text>
+          <Zap size={20} color="#F59E0B" />
           <View style={{ width: 36 }} />
         </View>
 

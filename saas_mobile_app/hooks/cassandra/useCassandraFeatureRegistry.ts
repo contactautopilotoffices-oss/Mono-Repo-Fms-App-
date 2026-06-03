@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { fetchWithAuth } from '@/lib/cassandra';
 
 // ─── Feature definitions ─────────────────────────────────────────────────────

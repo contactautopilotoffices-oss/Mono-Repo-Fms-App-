@@ -4,6 +4,10 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform }
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useAuth } from '@/hooks/useAuth';
+import { createClient } from '@/utils/supabase/client';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { queryKeys } from '@/utils/queryKeys';
+import { Image } from 'react-native';
 
 interface ProfileTabProps {
   onSignOut?: () => void;
@@ -27,9 +31,34 @@ function SettingRow({ label, value, icon }: { label: string; value: string; icon
 export function ProfileTab({ onSignOut }: ProfileTabProps) {
   const { user, signOut } = useAuth();
 
-  const userName = user?.full_name ?? user?.user_metadata?.full_name ?? 'User';
-  const email = user?.email ?? '';
-  const phone = user?.user_metadata?.phone ?? '';
+  const supabase = React.useMemo(() => createClient(), []);
+
+  const fetchProfile = React.useCallback(async () => {
+    if (!user) return null;
+    try {
+      const { data, error } = await (supabase as any)
+        .from('users')
+        .select('id, full_name, email, phone, user_photo_url, role, designation')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data || null;
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      return null;
+    }
+  }, [user, supabase]);
+
+  const { data: profile } = useServerQuery<any | null>(
+    queryKeys.user.profile(user?.id ?? 'none'),
+    fetchProfile,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const userName = profile?.full_name ?? user?.full_name ?? user?.user_metadata?.full_name ?? 'User';
+  const email = profile?.email ?? user?.email ?? '';
+  const phone = profile?.phone ?? user?.user_metadata?.phone ?? '';
   const initials = userName
     .split(' ')
     .map((n: string) => n[0])
@@ -61,7 +90,11 @@ export function ProfileTab({ onSignOut }: ProfileTabProps) {
       <Animated.View entering={FadeInDown.delay(50).springify()} style={styles.avatarCard}>
         <View style={styles.avatarGlow} />
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
+          {profile?.user_photo_url ? (
+            <Image source={{ uri: profile.user_photo_url }} style={{ width: '100%', height: '100%', borderRadius: 40 }} />
+          ) : (
+            <Text style={styles.avatarText}>{initials}</Text>
+          )}
         </View>
         <Text style={styles.userName}>{userName}</Text>
         <Text style={styles.userEmail}>{email}</Text>

@@ -73,7 +73,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
 
               <Text style={[styles.drawerSectionLabel, { marginTop: 20 }]}>UTILITIES</Text>
               {[
-                { label: 'Diesel Manager', route: 'diesel', icon: 'fuel-outline' },
+                { label: 'Diesel', route: 'diesel', icon: 'fuel-outline' },
                 { label: 'Electricity', route: 'electricity', icon: 'flash-outline' },
                 { label: 'Stock / Inventory', route: 'stock', icon: 'cube-outline' },
                 { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },

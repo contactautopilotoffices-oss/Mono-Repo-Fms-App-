@@ -23,7 +23,7 @@ import { Colors, DASHBOARD_BACKGROUNDS, type DashboardBgKey } from '@/constants/
 import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
@@ -173,6 +173,10 @@ export default function SettingsScreen() {
   const requestCamera = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.camera === 'granted') {
+        Alert.alert('Permission Settings', 'To disable Camera access, please change this in your device Settings.');
+        return;
+      }
       const { status } = await CameraModule.requestCameraPermissionsAsync();
       setPerms(p => ({ ...p, camera: status }));
       if (status !== 'granted') {
@@ -186,6 +190,10 @@ export default function SettingsScreen() {
   const requestAudio = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.audio === 'granted') {
+        Alert.alert('Permission Settings', 'To disable Microphone access, please change this in your device Settings.');
+        return;
+      }
       const { status } = await AudioModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, audio: status }));
       if (status !== 'granted') {
@@ -199,6 +207,10 @@ export default function SettingsScreen() {
   const requestNotifications = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.notifications === 'granted') {
+        Alert.alert('Permission Settings', 'To disable Push Notifications, please change this in your device Settings.');
+        return;
+      }
       const { status } = await NotificationsModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, notifications: status }));
       if (status !== 'granted') {
@@ -421,13 +433,8 @@ export default function SettingsScreen() {
             title="Camera"
             subtitle={permLabel(perms.camera)}
             onPress={requestCamera}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.camera) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.camera) }]}>
-                  {perms.camera === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.camera === 'granted'}
           />
 
           <MenuRow
@@ -435,13 +442,8 @@ export default function SettingsScreen() {
             title="Microphone"
             subtitle={permLabel(perms.audio)}
             onPress={requestAudio}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.audio) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.audio) }]}>
-                  {perms.audio === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.audio === 'granted'}
           />
 
           <MenuRow
@@ -449,13 +451,8 @@ export default function SettingsScreen() {
             title="Push Notifications"
             subtitle={permLabel(perms.notifications)}
             onPress={requestNotifications}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.notifications) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.notifications) }]}>
-                  {perms.notifications === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.notifications === 'granted'}
           />
         </GlassCard>
 

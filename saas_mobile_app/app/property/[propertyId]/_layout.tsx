@@ -101,7 +101,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Visitors',          route: 'visitors',     icon: UserCheck,       domain: 'visitors' },
   { label: 'Security',          route: 'security',     icon: Shield,          domain: 'security' },
   { label: 'Meeting Rooms',     route: 'rooms',        icon: DoorOpen,        domain: 'properties' },
-  { label: 'Diesel Manager',    route: 'diesel',       icon: Fuel,            domain: 'assets' },
+  { label: 'Diesel',           route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
   { label: 'Stock / Inventory', route: 'stock',        icon: Package,         domain: 'stock' },
   { label: 'SOPs & Checklists', route: 'checklist',    icon: ClipboardList,   domain: 'sop' },

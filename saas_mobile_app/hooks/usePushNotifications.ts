@@ -20,16 +20,21 @@ let firebaseModules:
 function getFirebaseMessagingModules() {
   if (Platform.OS === 'web') return null;
   if (!firebaseModules) {
-    const messaging = require('@react-native-firebase/messaging');
-    const app = require('@react-native-firebase/app');
-    firebaseModules = {
-      AuthorizationStatus: messaging.AuthorizationStatus,
-      getApp: app.getApp,
-      getMessaging: messaging.getMessaging,
-      getToken: messaging.getToken,
-      onTokenRefresh: messaging.onTokenRefresh,
-      requestPermission: messaging.requestPermission,
-    };
+    try {
+      const messaging = require('@react-native-firebase/messaging');
+      const app = require('@react-native-firebase/app');
+      firebaseModules = {
+        AuthorizationStatus: messaging.AuthorizationStatus,
+        getApp: app.getApp,
+        getMessaging: messaging.getMessaging,
+        getToken: messaging.getToken,
+        onTokenRefresh: messaging.onTokenRefresh,
+        requestPermission: messaging.requestPermission,
+      };
+    } catch {
+      // Firebase native module not linked — skip FCM, fall back to expo-notifications only
+      return null;
+    }
   }
   return firebaseModules;
 }
