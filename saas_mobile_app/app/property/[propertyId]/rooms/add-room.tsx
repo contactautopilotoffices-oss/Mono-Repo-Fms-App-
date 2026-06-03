@@ -420,6 +420,7 @@ export default function AddRoomScreen() {
           </TouchableOpacity>
         </SafeBlurView>
       </ScrollView>
+      </View>
 
       {/* Capacity Modal */}
       <Modal
@@ -509,6 +510,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    flexGrow: 1,
   },
   formCard: {
     borderRadius: 20,

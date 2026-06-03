@@ -1854,6 +1854,7 @@ export default function TicketDetailScreen() {
         ticketId={id as string}
         propertyId={propertyId as string}
         organizationId={ticket?.organization_id}
+        allowCustomItems={false}
         onSuccess={fetchTicket}
       />
 
