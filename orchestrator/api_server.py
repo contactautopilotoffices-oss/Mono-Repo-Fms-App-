@@ -519,9 +519,11 @@ async def chat_stream(request: Request):
         max_wait = 120
         waited = 0.0
 
+        # Adaptive polling: fast at start (100ms), backs off to 500ms after 5s
         while waited < max_wait:
-            await asyncio.sleep(0.5)
-            waited += 0.5
+            poll_interval = 0.1 if waited < 5.0 else 0.5
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
 
             job = query_queue.get_job(job_id)
             if not job:
@@ -558,9 +560,11 @@ async def chat_stream(request: Request):
                         "success": tr.get("success", False),
                     })
 
-                # Done
+                # Done — strip reasoning from response before returning to client
+                # This ensures conversation history stored on client is clean (no CoT bloat)
+                clean_response = re.sub(r"<reasoning>.*?</reasoning>", "", response, flags=re.DOTALL).strip()
                 yield sse_format("done", {
-                    "response": response,
+                    "response": clean_response,
                     "tool_results": result.get("tool_results", []),
                     "confidence": result.get("confidence", 0.0),
                 })
