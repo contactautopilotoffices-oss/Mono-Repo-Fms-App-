@@ -1,94 +1,109 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  TextInput,
-  Modal,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  StatusBar,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
+  Modal, Alert, ActivityIndicator, RefreshControl, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
+import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
-import { Colors } from '@/constants/Colors';
 import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
-  ArrowUpCircle,
-  Plus,
-  ChevronRight,
-  X,
-  ArrowUp,
-  Clock,
-  Users,
-  Save,
-  Trash2,
-  AlertCircle,
-  ChevronLeft,
-  Shield,
-  Zap,
-  Timer,
-  User,
+  ArrowUpCircle, Plus, ChevronRight, X, ArrowUp, Clock, Users,
+  Save, Trash2, ChevronLeft, Shield, Zap, Timer, User,
 } from 'lucide-react-native';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import {
+  fetchEscalationHierarchies, createEscalationHierarchy,
+  updateEscalationHierarchy, deleteEscalationHierarchy,
+  EscalationHierarchy, EscalationLevel,
+} from '@/services/escalationService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface EscalationLevel {
-  id: string;
-  level: number;
-  role?: string;
-  user_id?: string;
-  response_time_minutes: number;
-  user_name?: string;
-}
-
-interface EscalationHierarchy {
-  id: string;
-  name: string;
-  description?: string;
-  property_id: string;
-  levels: EscalationLevel[];
-  created_at: string;
-}
-
-interface UserOption {
-  id: string;
-  full_name: string;
-  email: string;
-  role?: string;
-}
+interface UserOption { id: string; full_name: string; email: string; role?: string }
 
 // ─── Utility ───────────────────────────────────────────────────────────────────
 
 function formatResponseTime(minutes: number): string {
   if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (mins === 0) return `${hours}h`;
-  return `${hours}h ${mins}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
-const LEVEL_GRADIENT_COLORS: [string, string][] = [
-  ['#6366F1', '#818CF8'],
-  ['#0EA5E9', '#38BDF8'],
-  ['#F59E0B', '#FCD34D'],
-  ['#10B981', '#34D399'],
-  ['#F43F5E', '#FB7185'],
+// ─── Role Options ─────────────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = [
+  { label: 'Staff', value: 'staff' },
+  { label: 'Manager', value: 'property_manager' },
+  { label: 'Admin', value: 'property_admin' },
+  { label: 'Org Admin', value: 'org_admin' },
+  { label: 'Super Admin', value: 'master_admin' },
+  { label: 'Vendor', value: 'vendor' },
 ];
 
-// ─── Main Screen ───────────────────────────────────────────────────────────────
+const TIME_OPTIONS = [15, 30, 60, 120, 240, 480];
+
+// ─── Level Row ─────────────────────────────────────────────────────────────────
+
+function LevelRow({
+  level, users, onUpdate, onRemove, isOnly,
+}: {
+  level: { employee_id: string; escalation_time_minutes: number };
+  users: UserOption[];
+  onUpdate: (updates: Partial<typeof level>) => void;
+  onRemove: () => void;
+  isOnly: boolean;
+}) {
+  const selectedUser = users.find((u) => u.id === level.employee_id);
+
+  return (
+    <View style={styles.levelRow}>
+      <View style={styles.levelLeft}>
+        <View style={styles.levelNum}>
+          <Text style={styles.levelNumText}>{'L'}</Text>
+        </View>
+        <View style={styles.levelContent}>
+          <TouchableOpacity style={styles.userPicker} onPress={() => {}}>
+            <User size={14} color="#708F96" />
+            <Text style={styles.userPickerText}>
+              {selectedUser?.full_name || 'Select employee...'}
+            </Text>
+            <ChevronRight size={14} color="#708F96" />
+          </TouchableOpacity>
+          <View style={styles.timeRow}>
+            <Clock size={12} color="#708F96" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginLeft: 6 }}>
+              {TIME_OPTIONS.map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.timeChip, level.escalation_time_minutes === t && styles.timeChipActive]}
+                  onPress={() => onUpdate({ escalation_time_minutes: t })}
+                >
+                  <Text style={[styles.timeChipText, level.escalation_time_minutes === t && styles.timeChipTextActive]}>
+                    {formatResponseTime(t)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </View>
+      {!isOnly && (
+        <TouchableOpacity style={styles.removeBtn} onPress={onRemove}>
+          <X size={16} color="#EF4444" />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function EscalationScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
@@ -99,689 +114,430 @@ export default function EscalationScreen() {
   const insets = useSafeAreaInsets();
   const isDark = theme === 'dark';
 
-
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedHierarchy, setSelectedHierarchy] = useState<EscalationHierarchy | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
-  const [formLevels, setFormLevels] = useState<{
-    role: string; user_id: string; user_name: string; response_time_minutes: number;
-  }[]>([{ role: '', user_id: '', user_name: '', response_time_minutes: 30 }]);
+  const [formLevels, setFormLevels] = useState<{ employee_id: string; escalation_time_minutes: number }[]>([
+    { employee_id: '', escalation_time_minutes: 30 },
+  ]);
 
   const isAdmin = useMemo(() => {
     if (!membership || !propertyId) return false;
-    const prop = membership.properties.find((p) => p.id === propertyId);
-    return prop ? ['property_admin', 'org_admin', 'org_super_admin', 'master_admin'].includes(prop.role.toLowerCase()) : false;
+    const prop = membership.properties.find((p: any) => p.id === propertyId);
+    return prop ? ['property_admin', 'org_admin', 'org_super_admin', 'master_admin'].includes(prop.role?.toLowerCase()) : false;
   }, [membership, propertyId]);
 
-  const ROLE_OPTIONS = [
-    { label: 'Staff', value: 'staff' },
-    { label: 'Manager', value: 'property_manager' },
-    { label: 'Admin', value: 'property_admin' },
-    { label: 'Org Admin', value: 'org_admin' },
-    { label: 'Super Admin', value: 'master_admin' },
-    { label: 'Vendor', value: 'vendor' },
-  ];
-
   const fetchAll = useCallback(async () => {
-    try {
-      if (!propertyId) return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
-      const [hRes, mRes] = await Promise.all([
-        serverApi.query<EscalationHierarchy[]>({
-          table: 'escalation_hierarchies',
-          action: 'select',
-          select: '*',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'created_at', ascending: false }]
-        }),
-        serverApi.query<{ users: any }[]>({
-          table: 'property_memberships',
-          action: 'select',
-          select: 'users:user_id(id, full_name, email, role)',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }]
-        }),
-      ]);
+    if (!propertyId) return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
+    const [hRes, mRes] = await Promise.all([
+      fetchEscalationHierarchies(propertyId, membership?.org_id ?? undefined),
+      serverApi.query<any[]>({
+        table: 'property_memberships',
+        action: 'select',
+        select: 'users:user_id(id, full_name, email, role)',
+        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+      }),
+    ]);
+    const hierarchies = (hRes.hierarchies || []) as EscalationHierarchy[];
+    const users = ((mRes.data || []) as any[])
+      .map((m) => m.users)
+      .filter(Boolean) as UserOption[];
+    return { hierarchies, users };
+  }, [propertyId, membership?.org_id]);
 
-      if (hRes.error) throw new Error(hRes.error.message);
-      if (mRes.error) throw new Error(mRes.error.message);
-
-      return {
-        hierarchies: (hRes.data || []) as EscalationHierarchy[],
-        users: ((mRes.data || [])
-          .map((m: any) => m.users)
-          .filter(Boolean) as UserOption[]),
-      };
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      return { hierarchies: [] as EscalationHierarchy[], users: [] as UserOption[] };
-    }
-  }, [propertyId]);
-
-  const { data, isLoading, isFetching, refetch } = useServerQuery<{ hierarchies: EscalationHierarchy[]; users: UserOption[] }>(
+  const { data, isLoading, isFetching, refetch } = useServerQuery(
     queryKeys.property.escalation(propertyId),
     fetchAll,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5 },
   );
 
   const hierarchies = data?.hierarchies ?? [];
   const users = data?.users ?? [];
 
-  const handleHierarchyPress = (hierarchy: EscalationHierarchy) => {
-    setSelectedHierarchy(hierarchy);
-    setFormName(hierarchy.name);
-    setFormDescription(hierarchy.description || '');
-    setFormLevels(hierarchy.levels.map((l) => ({
-      role: l.role || '', user_id: l.user_id || '', user_name: l.user_name || '', response_time_minutes: l.response_time_minutes,
-    })));
-    setShowEditModal(true);
-  };
+  // ── Stats ────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => ({
+    total: hierarchies.length,
+    active: hierarchies.filter((h) => h.is_active !== false).length,
+    levels: hierarchies.reduce((sum, h) => sum + (h.levels?.length ?? 0), 0),
+  }), [hierarchies]);
 
-  const handleCreateHierarchy = async () => {
+  // ── Create ──────────────────────────────────────────────────────────────
+  const handleCreate = async () => {
     if (!formName.trim() || !propertyId) { Alert.alert('Error', 'Hierarchy name is required'); return; }
-    if (formLevels.length === 0 || !formLevels.some((l) => l.role || l.user_id)) { Alert.alert('Error', 'Add at least one escalation level'); return; }
+    if (!formLevels.some((l) => l.employee_id)) { Alert.alert('Error', 'Add at least one escalation level'); return; }
     setIsSaving(true);
     try {
-      const res = await serverApi.query({
-        table: 'escalation_hierarchies',
-        action: 'insert',
-        values: {
-          property_id: propertyId,
-          name: formName.trim(),
-          description: formDescription.trim() || null,
-          levels: formLevels.filter((l) => l.role || l.user_id).map((l, idx) => ({
-            level: idx + 1,
-            role: l.role || null,
-            user_id: l.user_id || null,
-            user_name: l.user_name || null,
-            response_time_minutes: l.response_time_minutes,
-          })),
-        }
+      const res = await createEscalationHierarchy({
+        propertyId,
+        organizationId: membership?.org_id || '',
+        name: formName.trim(),
+        description: formDescription.trim() || null,
+        levels: formLevels.map((l) => ({
+          employee_id: l.employee_id || null,
+          escalation_time_minutes: l.escalation_time_minutes,
+        })),
       });
-      if (res.error) throw new Error(res.error.message || 'Failed to create hierarchy');
-      
-      setShowCreateModal(false); resetForm(); await refetch();
-      Alert.alert('✅ Created', 'Escalation hierarchy created successfully');
-    } catch (err: any) { Alert.alert('Error', err.message || 'Failed to create hierarchy'); }
+      if (res.error) throw new Error(res.error);
+      setShowCreateModal(false);
+      setFormName(''); setFormDescription('');
+      setFormLevels([{ employee_id: '', escalation_time_minutes: 30 }]);
+      await refetch();
+      Alert.alert('✅ Created', 'Escalation hierarchy created');
+    } catch (err: any) { Alert.alert('Error', err.message); }
     finally { setIsSaving(false); }
   };
 
-  const handleUpdateHierarchy = async () => {
-    if (!selectedHierarchy || !formName.trim()) { Alert.alert('Error', 'Hierarchy name is required'); return; }
+  // ── Update ──────────────────────────────────────────────────────────────
+  const handleUpdate = async () => {
+    if (!selectedHierarchy || !formName.trim()) { Alert.alert('Error', 'Name is required'); return; }
     setIsSaving(true);
     try {
-      const res = await serverApi.query({
-        table: 'escalation_hierarchies',
-        action: 'update',
-        values: {
-          name: formName.trim(),
-          description: formDescription.trim() || null,
-          levels: formLevels.filter((l) => l.role || l.user_id).map((l, idx) => ({
-            level: idx + 1,
-            role: l.role || null,
-            user_id: l.user_id || null,
-            user_name: l.user_name || null,
-            response_time_minutes: l.response_time_minutes,
-          })),
-        },
-        filters: [
-          { op: 'eq', column: 'id', value: selectedHierarchy.id },
-          { op: 'eq', column: 'property_id', value: propertyId }
-        ]
+      const res = await updateEscalationHierarchy({
+        hierarchyId: selectedHierarchy.id,
+        propertyId,
+        name: formName.trim(),
+        description: formDescription.trim() || null,
+        levels: formLevels.map((l) => ({
+          employee_id: l.employee_id || null,
+          escalation_time_minutes: l.escalation_time_minutes,
+        })),
       });
-      if (res.error) throw new Error(res.error.message || 'Failed to update hierarchy');
-      
-      setShowEditModal(false); resetForm(); setSelectedHierarchy(null); await refetch();
+      if (res.error) throw new Error(res.error);
+      setShowEditModal(false); setSelectedHierarchy(null);
+      setFormName(''); setFormDescription('');
+      setFormLevels([{ employee_id: '', escalation_time_minutes: 30 }]);
+      await refetch();
       Alert.alert('✅ Updated', 'Escalation hierarchy updated');
-    } catch (err: any) { Alert.alert('Error', err.message || 'Failed to update hierarchy'); }
+    } catch (err: any) { Alert.alert('Error', err.message); }
     finally { setIsSaving(false); }
   };
 
-  const handleDeleteHierarchy = async (hierarchy: EscalationHierarchy) => {
-    Alert.alert('Delete Hierarchy', `Delete "${hierarchy.name}"? This cannot be undone.`, [
+  // ── Delete ──────────────────────────────────────────────────────────────
+  const handleDelete = (h: EscalationHierarchy) => {
+    Alert.alert('Delete', `Delete "${h.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
-          try {
-            const res = await serverApi.query({
-              table: 'escalation_hierarchies',
-              action: 'delete',
-              filters: [
-                { op: 'eq', column: 'id', value: hierarchy.id },
-                { op: 'eq', column: 'property_id', value: propertyId }
-              ]
-            });
-            if (res.error) throw new Error(res.error.message || 'Failed to delete hierarchy');
-            setHierarchies((prev) => prev.filter((h) => h.id !== hierarchy.id));
-          } catch (err: any) { Alert.alert('Error', err.message || 'Failed to delete'); }
+          const res = await deleteEscalationHierarchy(h.id, propertyId);
+          if (res.error) { Alert.alert('Error', res.error); return; }
+          await refetch();
+          Alert.alert('✅ Deleted', 'Hierarchy deleted');
         },
       },
     ]);
   };
 
-  const resetForm = () => {
-    setFormName(''); setFormDescription('');
-    setFormLevels([{ role: '', user_id: '', user_name: '', response_time_minutes: 30 }]);
+  const openEdit = (h: EscalationHierarchy) => {
+    setSelectedHierarchy(h);
+    setFormName(h.name);
+    setFormDescription(h.description || '');
+    setFormLevels(h.levels?.map((l) => ({
+      employee_id: l.employee_id || '',
+      escalation_time_minutes: l.escalation_time_minutes,
+    })) ?? [{ employee_id: '', escalation_time_minutes: 30 }]);
+    setShowEditModal(true);
   };
 
-  const addLevel = () => {
-    if (formLevels.length >= 5) { Alert.alert('Limit reached', 'Maximum 5 levels allowed'); return; }
-    setFormLevels((prev) => [...prev, { role: '', user_id: '', user_name: '', response_time_minutes: 60 }]);
-  };
-
-  const removeLevel = (index: number) => {
-    if (formLevels.length <= 1) { Alert.alert('Cannot remove', 'At least one level required'); return; }
-    setFormLevels((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const updateLevel = (index: number, field: string, value: any) => {
-    setFormLevels((prev) => prev.map((l, i) => i === index ? { ...l, [field]: value } : l));
-  };
-
-  const selectUserForLevel = (index: number) => {
-    if (users.length === 0) { Alert.alert('No users', 'No property members found'); return; }
-    Alert.alert('Select User', 'Choose a user for this escalation level', [
-      ...users.slice(0, 8).map((u) => ({
-        text: u.full_name,
-        onPress: () => { updateLevel(index, 'user_id', u.id); updateLevel(index, 'user_name', u.full_name); },
-      })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
-  };
-
-  // ─── Form ─────────────────────────────────────────────────────────────────────
-
-  const renderHierarchyForm = (isEdit: boolean) => {
-    const totalResponseTime = formLevels.reduce((sum, l) => sum + (l.response_time_minutes || 0), 0);
-
-    return (
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView style={styles.formScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-
-          {/* Name */}
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>HIERARCHY NAME *</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="e.g. Critical Ticket Escalation"
-            placeholderTextColor={colors.textTertiary}
-            value={formName}
-            onChangeText={setFormName}
-          />
-
-          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>DESCRIPTION</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
-            placeholder="Optional — what triggers this escalation?"
-            placeholderTextColor={colors.textTertiary}
-            value={formDescription}
-            onChangeText={setFormDescription}
-          />
-
-          {/* Total time banner */}
-          <View style={[styles.totalTimeBanner, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '30' }]}>
-            <Timer size={14} color={colors.primary} />
-            <Text style={[styles.totalTimeText, { color: colors.primary }]}>
-              Total escalation window: {formatResponseTime(totalResponseTime)}
-            </Text>
-          </View>
-
-          {/* Levels header */}
-          <View style={styles.levelsSectionHeader}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary, marginTop: 0 }]}>ESCALATION LEVELS</Text>
-            <TouchableOpacity style={[styles.addLevelBtn, { backgroundColor: colors.primary }]} onPress={addLevel}>
-              <Plus size={12} color="#FFFFFF" />
-              <Text style={styles.addLevelBtnText}>Add Level</Text>
-            </TouchableOpacity>
-          </View>
-
-          {formLevels.map((level, idx) => {
-            const [c1, c2] = LEVEL_GRADIENT_COLORS[idx % LEVEL_GRADIENT_COLORS.length];
-            return (
-              <View key={idx} style={[styles.levelCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                {/* Level header bar */}
-                <View style={styles.levelCardHeader}>
-                  <LinearGradient colors={[c1, c2]} style={styles.levelNumberBadge} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                    <Text style={styles.levelNumberText}>L{idx + 1}</Text>
-                  </LinearGradient>
-                  <Text style={[styles.levelTitle, { color: colors.text }]}>Level {idx + 1}</Text>
-                  <TouchableOpacity onPress={() => removeLevel(idx)} style={styles.removeLevelBtn}>
-                    <Trash2 size={14} color={colors.error} />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Role chips */}
-                <Text style={[styles.levelInputLabel, { color: colors.textSecondary }]}>ASSIGN ROLE</Text>
-                <View style={styles.roleChipRow}>
-                  {ROLE_OPTIONS.map((r) => (
-                    <TouchableOpacity
-                      key={r.value}
-                      style={[styles.roleChip,
-                        level.role === r.value
-                          ? { backgroundColor: c1 + '22', borderColor: c1 }
-                          : { backgroundColor: colors.card, borderColor: colors.border }
-                      ]}
-                      onPress={() => updateLevel(idx, 'role', r.value)}
-                    >
-                      <Text style={[styles.roleChipText, { color: level.role === r.value ? c1 : colors.textSecondary }]}>{r.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* User selector */}
-                <Text style={[styles.levelInputLabel, { color: colors.textSecondary }]}>SPECIFIC USER (OPTIONAL)</Text>
-                <TouchableOpacity
-                  style={[styles.userSelectBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-                  onPress={() => selectUserForLevel(idx)}
-                >
-                  <User size={14} color={level.user_name ? c1 : colors.textTertiary} />
-                  <Text style={[styles.userSelectText, { color: level.user_name ? colors.text : colors.textTertiary }]}>
-                    {level.user_name || 'Select user...'}
-                  </Text>
-                  <ChevronRight size={14} color={colors.textTertiary} />
-                </TouchableOpacity>
-
-                {/* Response time */}
-                <Text style={[styles.levelInputLabel, { color: colors.textSecondary }]}>RESPONSE TIME</Text>
-                <View style={styles.responseTimeRow}>
-                  {[15, 30, 60, 120, 240].map((mins) => (
-                    <TouchableOpacity
-                      key={mins}
-                      style={[styles.timeChip,
-                        level.response_time_minutes === mins
-                          ? { backgroundColor: c1 + '22', borderColor: c1 }
-                          : { backgroundColor: colors.card, borderColor: colors.border }
-                      ]}
-                      onPress={() => updateLevel(idx, 'response_time_minutes', mins)}
-                    >
-                      <Text style={[styles.timeChipText, { color: level.response_time_minutes === mins ? c1 : colors.textSecondary }]}>
-                        {formatResponseTime(mins)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Arrow connector */}
-                {idx < formLevels.length - 1 && (
-                  <View style={[styles.arrowConnector, { borderTopColor: colors.border }]}>
-                    <ArrowUp size={12} color={c1} />
-                    <Text style={[styles.arrowConnectorText, { color: colors.textTertiary }]}>
-                      Escalates after {formatResponseTime(level.response_time_minutes)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
-
-        <TouchableOpacity
-          style={[styles.submitBtn, { backgroundColor: colors.primary }, isSaving && { opacity: 0.6 }]}
-          onPress={isEdit ? handleUpdateHierarchy : handleCreateHierarchy}
-          disabled={isSaving}
-        >
-          {isSaving ? <ActivityIndicator size="small" color="#FFFFFF" /> : (
-            <>
-              <Save size={18} color="#FFFFFF" />
-              <Text style={styles.submitBtnText}>{isEdit ? 'Update Hierarchy' : 'Save Hierarchy'}</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </KeyboardAvoidingView>
-    );
-  };
-
-  // ─── Loading ──────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   if (isLoading && hierarchies.length === 0) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <LinearGradient colors={isDark ? ['#0f172a', '#1e1b4b', '#0f172a'] : ['#eef2f6', '#f8fafc', '#ffffff']} style={StyleSheet.absoluteFillObject} />
-        <View style={styles.loadingContainer}>
+        <LinearGradient colors={isDark ? ['#0f172a', '#1e1b4b'] : ['#eef2f6', '#f8fafc']} style={StyleSheet.absoluteFillObject} />
+        <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading escalation matrix...</Text>
+          <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </View>
     );
   }
 
-  // ─── Main ─────────────────────────────────────────────────────────────────────
-
   return (
-    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) + 70 }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={isDark ? ['#0f172a', '#1e1b4b', '#0f172a'] : ['#eef2f6', '#f8fafc', '#ffffff']}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <View style={styles.container}>
+      <LinearGradient colors={isDark ? ['#0f172a', '#1e1b4b', '#0f172a'] : ['#eef2f6', '#f8fafc', '#ffffff']} style={StyleSheet.absoluteFillObject} />
 
-      {/* ── Header ── */}
-      <SafeBlurView
-        intensity={80}
-        tint={isDark ? 'dark' : 'light'}
-        style={[styles.header, { paddingTop: insets.top + 16, borderBottomColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', overflow: 'hidden' }]}
-      >
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: isDark ? 'rgba(22,27,40,0.65)' : 'rgba(255,255,255,0.7)' }]} />
+      {/* Header */}
+      <SafeBlurView intensity={80} tint="dark" style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
-            <ChevronLeft size={24} color={isDark ? '#FFFFFF' : '#0f172a'} />
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <ChevronLeft size={22} color="#FFFFFF" />
           </TouchableOpacity>
-          <View style={styles.headerTitleWrap}>
-            <Text style={[styles.headerTitle, { color: isDark ? '#FFFFFF' : '#0f172a' }]}>Escalation Matrix</Text>
-            <Text style={[styles.headerSubtitle, { color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B' }]}>
-              {hierarchies.length} {hierarchies.length === 1 ? 'hierarchy' : 'hierarchies'} configured
-            </Text>
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={styles.headerTitle}>Escalation</Text>
+            <Text style={styles.headerSub}>{stats.total} hierarchy, {stats.active} active</Text>
           </View>
-          {isAdmin && (
-            <TouchableOpacity
-              style={[styles.addBtn, { backgroundColor: colors.primary }]}
-              onPress={() => { resetForm(); setShowCreateModal(true); }}
-            >
-              <Plus size={22} color="#FFFFFF" />
-            </TouchableOpacity>
-          )}
+          <View style={{ width: 40 }} />
         </View>
       </SafeBlurView>
 
-      {/* ── Summary strip ── */}
-      {hierarchies.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, gap: 12 }}
-        >
-          {[
-            { label: 'Total Hierarchies', value: hierarchies.length, icon: Shield, color: '#6366F1' },
-            { label: 'Total Levels', value: hierarchies.reduce((s, h) => s + h.levels.length, 0), icon: Zap, color: '#F59E0B' },
-            { label: 'Avg. Window', value: hierarchies.length ? formatResponseTime(Math.round(hierarchies.reduce((s, h) => s + h.levels.reduce((ls, l) => ls + l.response_time_minutes, 0), 0) / hierarchies.length)) : '-', icon: Timer, color: '#10B981' },
-          ].map((stat, i) => (
-            <View key={i} style={[styles.statCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)' }]}>
-              <View style={[styles.statIconWrap, { backgroundColor: stat.color + '20' }]}>
-                <stat.icon size={16} color={stat.color} />
-              </View>
-              <Text style={[styles.statValue, { color: isDark ? '#FFFFFF' : '#0f172a' }]}>{stat.value}</Text>
-              <Text style={[styles.statLabel, { color: colors.textTertiary }]}>{stat.label}</Text>
+      {/* Stats Row */}
+      <View style={styles.statsRow}>
+        {[
+          { label: 'Total', value: stats.total, icon: Shield, color: '#708F96' },
+          { label: 'Active', value: stats.active, icon: Zap, color: '#10B981' },
+          { label: 'Levels', value: stats.levels, icon: ArrowUp, color: '#F59E0B' },
+        ].map((s) => (
+          <View key={s.label} style={[styles.statCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)' }]}>
+            <View style={[styles.statIcon, { backgroundColor: s.color + '20' }]}>
+              <s.icon size={16} color={s.color} />
             </View>
-          ))}
-        </ScrollView>
-      )}
+            <Text style={styles.statValue}>{s.value}</Text>
+            <Text style={styles.statLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
 
-      {/* ── List ── */}
+      {/* List */}
       <FlatList
         data={hierarchies}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }]}>
-              <ArrowUpCircle size={40} color={colors.textTertiary} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: isDark ? '#FFFFFF' : '#0f172a' }]}>No escalation hierarchies</Text>
-            <Text style={[styles.emptySubtitle, { color: colors.textTertiary }]}>
-              {isAdmin ? 'Define who gets alerted at each level' : 'No escalation configured yet'}
-            </Text>
-            {isAdmin && (
-              <TouchableOpacity style={[styles.createFirstBtn, { backgroundColor: colors.primary }]} onPress={() => { resetForm(); setShowCreateModal(true); }}>
-                <Plus size={16} color="#FFFFFF" />
-                <Text style={styles.createFirstBtnText}>Create First Hierarchy</Text>
-              </TouchableOpacity>
-            )}
+            <ArrowUpCircle size={48} color="rgba(255,255,255,0.15)" />
+            <Text style={styles.emptyTitle}>No Escalation Hierarchies</Text>
+            <Text style={styles.emptySub}>Define who gets alerted at each level</Text>
           </View>
         }
-        renderItem={({ item: hierarchy }) => {
-          const totalTime = hierarchy.levels.reduce((s, l) => s + (l.response_time_minutes || 0), 0);
-          const sortedLevels = [...(hierarchy.levels || [])].sort((a, b) => a.level - b.level);
-
-          return (
-            <TouchableOpacity
-              style={[styles.hierarchyCard, {
-                backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.9)',
-                borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-              }]}
-              onPress={() => handleHierarchyPress(hierarchy)}
-              activeOpacity={0.8}
-            >
-              {/* Card header */}
-              <View style={styles.cardHeader}>
-                <View style={[styles.cardIconWrap, { backgroundColor: colors.primary + '18' }]}>
-                  <Shield size={20} color={colors.primary} />
-                </View>
-                <View style={styles.cardHeaderContent}>
-                  <Text style={[styles.cardName, { color: isDark ? '#FFFFFF' : '#0f172a' }]} numberOfLines={1}>{hierarchy.name}</Text>
-                  {hierarchy.description ? (
-                    <Text style={[styles.cardDesc, { color: colors.textSecondary }]} numberOfLines={1}>{hierarchy.description}</Text>
-                  ) : null}
-                </View>
-                <View style={styles.cardHeaderRight}>
-                  <View style={[styles.levelCountPill, { backgroundColor: colors.primary + '18' }]}>
-                    <Text style={[styles.levelCountText, { color: colors.primary }]}>{hierarchy.levels.length}</Text>
-                    <Text style={[styles.levelCountLabel, { color: colors.primary }]}>LVL</Text>
+        renderItem={({ item }) => (
+          <TouchableOpacity activeOpacity={0.75} onPress={() => isAdmin && openEdit(item)}>
+            <SafeBlurView intensity={40} tint="dark" style={styles.hCard}>
+              <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(0,0,0,0.15)']} style={StyleSheet.absoluteFillObject} />
+              <View style={styles.hCardTop}>
+                <View style={styles.hCardLeft}>
+                  <View style={[styles.hCardIcon, { backgroundColor: item.is_active !== false ? '#10B98120' : '#EF444420' }]}>
+                    <ArrowUpCircle size={20} color={item.is_active !== false ? '#10B981' : '#EF4444'} />
+                  </View>
+                  <View>
+                    <Text style={styles.hCardName}>{item.name}</Text>
+                    {item.description && <Text style={styles.hCardDesc}>{item.description}</Text>}
                   </View>
                 </View>
+                {isAdmin && (
+                  <TouchableOpacity onPress={() => handleDelete(item)} style={{ padding: 8 }}>
+                    <Trash2 size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                )}
               </View>
-
-              {/* Visual escalation chain */}
-              {sortedLevels.length > 0 && (
-                <View style={styles.chainContainer}>
-                  {sortedLevels.map((level, idx) => {
-                    const [c1] = LEVEL_GRADIENT_COLORS[idx % LEVEL_GRADIENT_COLORS.length];
-                    const label = level.role
-                      ? level.role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-                      : level.user_name || 'Unassigned';
-                    return (
-                      <View key={level.id || idx} style={styles.chainItem}>
-                        <View style={styles.chainLeft}>
-                          <View style={[styles.chainDot, { backgroundColor: c1 }]}>
-                            <Text style={styles.chainDotText}>{idx + 1}</Text>
-                          </View>
-                          {idx < sortedLevels.length - 1 && (
-                            <View style={[styles.chainLine, { backgroundColor: c1 + '40' }]} />
-                          )}
-                        </View>
-                        <View style={[styles.chainCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', borderColor: c1 + '30' }]}>
-                          <Text style={[styles.chainLabel, { color: isDark ? '#FFFFFF' : '#0f172a' }]} numberOfLines={1}>{label}</Text>
-                          <View style={[styles.chainTimePill, { backgroundColor: c1 + '20' }]}>
-                            <Clock size={10} color={c1} />
-                            <Text style={[styles.chainTimeText, { color: c1 }]}>{formatResponseTime(level.response_time_minutes)}</Text>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })}
+              {/* Levels preview */}
+              {item.levels && item.levels.length > 0 && (
+                <View style={styles.levelsPreview}>
+                  {item.levels.slice(0, 4).map((lvl, i) => (
+                    <View key={lvl.id || i} style={styles.levelPreview}>
+                      <View style={[styles.levelDot, { backgroundColor: ['#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'][i % 4] }]} />
+                      <Text style={styles.levelPreviewText}>
+                        {lvl.employee?.full_name || 'Unassigned'} · {formatResponseTime(lvl.escalation_time_minutes)}
+                      </Text>
+                    </View>
+                  ))}
+                  {item.levels.length > 4 && (
+                    <Text style={styles.levelMoreText}>+{item.levels.length - 4} more</Text>
+                  )}
                 </View>
               )}
-
-              {/* Footer */}
-              <View style={[styles.cardFooter, { borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }]}>
-                <View style={styles.footerLeft}>
-                  <Timer size={12} color={colors.textTertiary} />
-                  <Text style={[styles.footerText, { color: colors.textTertiary }]}>Window: {formatResponseTime(totalTime)}</Text>
-                </View>
-                <View style={styles.footerRight}>
-                  {isAdmin && (
-                    <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDeleteHierarchy(hierarchy)}>
-                      <Trash2 size={14} color={colors.error} />
-                    </TouchableOpacity>
-                  )}
-                  <View style={[styles.editBtn, { backgroundColor: colors.primary + '18' }]}>
-                    <ChevronRight size={16} color={colors.primary} />
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
+            </SafeBlurView>
+          </TouchableOpacity>
+        )}
       />
 
-      {/* ── Create Modal ── */}
-      <Modal visible={showCreateModal} animationType="slide" transparent>
+      {/* FAB */}
+      {isAdmin && (
+        <TouchableOpacity style={styles.fab} onPress={() => { setFormName(''); setFormDescription(''); setFormLevels([{ employee_id: '', escalation_time_minutes: 30 }]); setShowCreateModal(true); }}>
+          <Plus size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
+
+      {/* Create Modal */}
+      <Modal visible={showCreateModal} animationType="slide" transparent onRequestClose={() => setShowCreateModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.formSheet, { backgroundColor: colors.card }]}>
-            <LinearGradient
-              colors={isDark ? ['rgba(99,102,241,0.08)', 'transparent'] : ['rgba(99,102,241,0.04)', 'transparent']}
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 80, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
-            />
-            <View style={styles.modalHandle} />
-            <View style={styles.modalHeaderRow}>
-              <View style={styles.modalHeaderLeft}>
-                <View style={[styles.modalIconWrap, { backgroundColor: colors.primary + '18' }]}>
-                  <Plus size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>New Hierarchy</Text>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
+            <View style={[styles.modalSheet, { backgroundColor: '#1E293B' }]}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>New Escalation Hierarchy</Text>
+                <TouchableOpacity onPress={() => setShowCreateModal(false)}><X size={20} color="#94A3B8" /></TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => { setShowCreateModal(false); resetForm(); }} style={[styles.closeBtn, { backgroundColor: colors.surface }]}>
-                <X size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <ScrollView style={{ maxHeight: '70%' }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                <Text style={styles.inputLabel}>NAME *</Text>
+                <TextInput style={styles.input} placeholder="e.g. Critical Ticket Escalation" placeholderTextColor="#64748B" value={formName} onChangeText={setFormName} />
+                <Text style={styles.inputLabel}>DESCRIPTION</Text>
+                <TextInput style={[styles.input, { height: 60 }]} placeholder="Optional description" placeholderTextColor="#64748B" value={formDescription} onChangeText={setFormDescription} multiline />
+                <Text style={[styles.inputLabel, { marginTop: 12 }]}>LEVELS</Text>
+                {formLevels.map((lvl, i) => (
+                  <View key={i} style={styles.formLevel}>
+                    <View style={styles.formLevelHeader}>
+                      <Text style={styles.formLevelNum}>Level {i + 1}</Text>
+                      {formLevels.length > 1 && (
+                        <TouchableOpacity onPress={() => setFormLevels((p) => p.filter((_, j) => j !== i))}>
+                          <X size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <View style={styles.userPickerRow}>
+                      <Users size={14} color="#708F96" />
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                        {users.map((u) => (
+                          <TouchableOpacity key={u.id} style={[styles.userChip, lvl.employee_id === u.id && styles.userChipActive]} onPress={() => setFormLevels((p) => p.map((l, j) => j === i ? { ...l, employee_id: u.id } : l))}>
+                            <Text style={[styles.userChipText, lvl.employee_id === u.id && styles.userChipTextActive]}>{u.full_name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                    <View style={styles.timeRow}>
+                      <Clock size={14} color="#708F96" />
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginLeft: 8 }}>
+                        {TIME_OPTIONS.map((t) => (
+                          <TouchableOpacity key={t} style={[styles.timeChip, lvl.escalation_time_minutes === t && styles.timeChipActive]} onPress={() => setFormLevels((p) => p.map((l, j) => j === i ? { ...l, escalation_time_minutes: t } : l))}>
+                            <Text style={[styles.timeChipText, lvl.escalation_time_minutes === t && styles.timeChipTextActive]}>{formatResponseTime(t)}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.addLevelBtn} onPress={() => setFormLevels((p) => [...p, { employee_id: '', escalation_time_minutes: 30 }])}>
+                  <Plus size={16} color="#708F96" /><Text style={styles.addLevelText}>Add Level</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.submitBtn, { opacity: isSaving ? 0.6 : 1 }]} onPress={handleCreate} disabled={isSaving}>
+                  {isSaving ? <ActivityIndicator color="#FFF" size="small" /> : <><Save size={18} color="#FFF" /><Text style={styles.submitText}>Create Hierarchy</Text></>}
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-            {renderHierarchyForm(false)}
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
-      {/* ── Edit Modal ── */}
-      <Modal visible={showEditModal} animationType="slide" transparent>
+      {/* Edit Modal */}
+      <Modal visible={showEditModal} animationType="slide" transparent onRequestClose={() => setShowEditModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.formSheet, { backgroundColor: colors.card }]}>
-            <LinearGradient
-              colors={isDark ? ['rgba(99,102,241,0.08)', 'transparent'] : ['rgba(99,102,241,0.04)', 'transparent']}
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 80, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
-            />
-            <View style={styles.modalHandle} />
-            <View style={styles.modalHeaderRow}>
-              <View style={styles.modalHeaderLeft}>
-                <View style={[styles.modalIconWrap, { backgroundColor: colors.primary + '18' }]}>
-                  <Shield size={18} color={colors.primary} />
-                </View>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Hierarchy</Text>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, justifyContent: 'flex-end' }}>
+            <View style={[styles.modalSheet, { backgroundColor: '#1E293B' }]}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Hierarchy</Text>
+                <TouchableOpacity onPress={() => setShowEditModal(false)}><X size={20} color="#94A3B8" /></TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => { setShowEditModal(false); resetForm(); setSelectedHierarchy(null); }} style={[styles.closeBtn, { backgroundColor: colors.surface }]}>
-                <X size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
+              <ScrollView style={{ maxHeight: '70%' }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+                <Text style={styles.inputLabel}>NAME *</Text>
+                <TextInput style={styles.input} placeholder="Hierarchy name" placeholderTextColor="#64748B" value={formName} onChangeText={setFormName} />
+                <Text style={styles.inputLabel}>DESCRIPTION</Text>
+                <TextInput style={[styles.input, { height: 60 }]} placeholder="Optional" placeholderTextColor="#64748B" value={formDescription} onChangeText={setFormDescription} multiline />
+                <Text style={[styles.inputLabel, { marginTop: 12 }]}>LEVELS</Text>
+                {formLevels.map((lvl, i) => (
+                  <View key={i} style={styles.formLevel}>
+                    <View style={styles.formLevelHeader}>
+                      <Text style={styles.formLevelNum}>Level {i + 1}</Text>
+                      {formLevels.length > 1 && (
+                        <TouchableOpacity onPress={() => setFormLevels((p) => p.filter((_, j) => j !== i))}>
+                          <X size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <View style={styles.userPickerRow}>
+                      <Users size={14} color="#708F96" />
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                        {users.map((u) => (
+                          <TouchableOpacity key={u.id} style={[styles.userChip, lvl.employee_id === u.id && styles.userChipActive]} onPress={() => setFormLevels((p) => p.map((l, j) => j === i ? { ...l, employee_id: u.id } : l))}>
+                            <Text style={[styles.userChipText, lvl.employee_id === u.id && styles.userChipTextActive]}>{u.full_name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                    <View style={styles.timeRow}>
+                      <Clock size={14} color="#708F96" />
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginLeft: 8 }}>
+                        {TIME_OPTIONS.map((t) => (
+                          <TouchableOpacity key={t} style={[styles.timeChip, lvl.escalation_time_minutes === t && styles.timeChipActive]} onPress={() => setFormLevels((p) => p.map((l, j) => j === i ? { ...l, escalation_time_minutes: t } : l))}>
+                            <Text style={[styles.timeChipText, lvl.escalation_time_minutes === t && styles.timeChipTextActive]}>{formatResponseTime(t)}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.addLevelBtn} onPress={() => setFormLevels((p) => [...p, { employee_id: '', escalation_time_minutes: 30 }])}>
+                  <Plus size={16} color="#708F96" /><Text style={styles.addLevelText}>Add Level</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.submitBtn, { opacity: isSaving ? 0.6 : 1 }]} onPress={handleUpdate} disabled={isSaving}>
+                  {isSaving ? <ActivityIndicator color="#FFF" size="small" /> : <><Save size={18} color="#FFF" /><Text style={styles.submitText}>Update Hierarchy</Text></>}
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-            {renderHierarchyForm(true)}
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  loadingText: { fontSize: 14, fontFamily: 'Urbanist-Medium' },
-
-  // Header
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 18,
-    borderBottomWidth: 1,
-    zIndex: 10,
-  },
+  loadingState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { color: '#94A3B8', marginTop: 12, fontFamily: 'Urbanist-Medium' },
+  header: { paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1.5, borderBottomColor: 'rgba(255,255,255,0.12)', zIndex: 10 },
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  headerTitleWrap: { flex: 1 },
-  headerTitle: { fontSize: 22, fontFamily: 'Poppins-Bold', letterSpacing: -0.5 },
-  headerSubtitle: { fontSize: 12, fontFamily: 'Urbanist-Medium', marginTop: 1 },
-  addBtn: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-
-  // Stat strip
-  statCard: {
-    alignItems: 'center', borderRadius: 16, borderWidth: 1,
-    paddingHorizontal: 18, paddingVertical: 14, gap: 4, minWidth: 110,
-  },
-  statIconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  statValue: { fontSize: 20, fontFamily: 'Poppins-Bold' },
-  statLabel: { fontSize: 10, fontFamily: 'Urbanist-Medium', textAlign: 'center' },
-
-  // List
-  listContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 },
-
-  // Empty state
-  emptyState: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyIconWrap: { width: 80, height: 80, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 18, fontFamily: 'Poppins-Bold' },
-  emptySubtitle: { fontSize: 13, fontFamily: 'Urbanist-Regular', textAlign: 'center', maxWidth: 240 },
-  createFirstBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, marginTop: 8 },
-  createFirstBtnText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'Poppins-Bold' },
-
-  // Hierarchy card
-  hierarchyCard: { borderRadius: 20, borderWidth: 1, padding: 16, marginBottom: 14, overflow: 'hidden' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  cardIconWrap: { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
-  cardHeaderContent: { flex: 1 },
-  cardName: { fontSize: 16, fontFamily: 'Poppins-Bold', marginBottom: 2 },
-  cardDesc: { fontSize: 11, fontFamily: 'Urbanist-Regular' },
-  cardHeaderRight: {},
-  levelCountPill: { alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  levelCountText: { fontSize: 18, fontFamily: 'Poppins-Bold', lineHeight: 22 },
-  levelCountLabel: { fontSize: 8, fontFamily: 'Urbanist-Bold', letterSpacing: 0.5 },
-
-  // Chain
-  chainContainer: { marginBottom: 14 },
-  chainItem: { flexDirection: 'row', gap: 10, marginBottom: 0 },
-  chainLeft: { alignItems: 'center', width: 28 },
-  chainDot: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
-  chainDotText: { fontSize: 11, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
-  chainLine: { width: 2, flex: 1, marginVertical: 2, minHeight: 12 },
-  chainCard: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
-  chainLabel: { fontSize: 12, fontFamily: 'Urbanist-Bold', flex: 1 },
-  chainTimePill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  chainTimeText: { fontSize: 10, fontFamily: 'Urbanist-Bold' },
-
-  // Card footer
-  cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, marginTop: 4, borderTopWidth: 1 },
-  footerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  footerText: { fontSize: 11, fontFamily: 'Urbanist-Medium' },
-  footerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  deleteBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  editBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  formSheet: { maxHeight: '92%', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingBottom: 20, overflow: 'hidden' },
-  modalHandle: { width: 40, height: 4, backgroundColor: 'rgba(150,150,150,0.4)', borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 16 },
-  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  modalIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  modalTitle: { fontSize: 18, fontFamily: 'Poppins-Bold' },
-  closeBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  formScroll: { flex: 1 },
-
-  // Form
-  inputLabel: { fontSize: 11, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
-  input: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Urbanist-Regular' },
-  totalTimeBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginTop: 16, borderWidth: 1 },
-  totalTimeText: { fontSize: 13, fontFamily: 'Poppins-Bold' },
-  levelsSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 },
-  addLevelBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
-  addLevelBtnText: { color: '#FFFFFF', fontSize: 12, fontFamily: 'Urbanist-Bold' },
-
-  levelCard: { borderRadius: 16, borderWidth: 1, padding: 14, marginBottom: 12 },
-  levelCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  levelNumberBadge: { width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  levelNumberText: { color: '#FFFFFF', fontSize: 13, fontFamily: 'Poppins-Bold' },
-  levelTitle: { flex: 1, fontSize: 15, fontFamily: 'Poppins-Bold' },
-  removeLevelBtn: { padding: 4 },
-  levelInputLabel: { fontSize: 10, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8, marginTop: 10 },
-  roleChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  roleChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
-  roleChipText: { fontSize: 11, fontFamily: 'Urbanist-Bold' },
-  userSelectBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },
-  userSelectText: { flex: 1, fontSize: 13, fontFamily: 'Urbanist-Regular' },
-  responseTimeRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  timeChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
-  timeChipText: { fontSize: 11, fontFamily: 'Urbanist-Bold' },
-  arrowConnector: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, paddingTop: 10, borderTopWidth: 1 },
-  arrowConnectorText: { fontSize: 11, fontFamily: 'Urbanist-Regular' },
-
-  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 14, paddingVertical: 15, marginTop: 10 },
-  submitBtnText: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Poppins-Bold' },
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 20, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  headerSub: { fontSize: 12, fontFamily: 'Urbanist-Medium', color: '#94A3B8', marginTop: 2 },
+  statsRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
+  statCard: { flex: 1, padding: 12, borderRadius: 14, borderWidth: 1, alignItems: 'center' },
+  statIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  statValue: { fontSize: 20, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  statLabel: { fontSize: 11, fontFamily: 'Urbanist-Medium', color: '#94A3B8', marginTop: 2 },
+  listContent: { padding: 16 },
+  emptyState: { alignItems: 'center', paddingTop: 60 },
+  emptyTitle: { fontSize: 18, fontFamily: 'Poppins-Bold', color: '#FFFFFF', marginTop: 16 },
+  emptySub: { fontSize: 14, fontFamily: 'Urbanist-Medium', color: '#94A3B8', marginTop: 4 },
+  hCard: { borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginBottom: 12 },
+  hCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14 },
+  hCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  hCardIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  hCardName: { fontSize: 16, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  hCardDesc: { fontSize: 12, fontFamily: 'Urbanist-Medium', color: '#94A3B8', marginTop: 2 },
+  levelsPreview: { paddingHorizontal: 14, paddingBottom: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  levelPreview: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  levelDot: { width: 6, height: 6, borderRadius: 3 },
+  levelPreviewText: { fontSize: 12, fontFamily: 'Urbanist-Medium', color: '#94A3B8' },
+  levelMoreText: { fontSize: 12, fontFamily: 'Urbanist-Medium', color: '#64748B' },
+  fab: { position: 'absolute', bottom: 30, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#708F96', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.3 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%' },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#475569', alignSelf: 'center', marginTop: 12 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  modalTitle: { fontSize: 18, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  inputLabel: { fontSize: 12, fontFamily: 'Urbanist-SemiBold', color: '#94A3B8', marginBottom: 8, marginTop: 12 },
+  input: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 14, paddingVertical: 12, color: '#FFFFFF', fontFamily: 'Urbanist-Medium' },
+  formLevel: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 12, marginBottom: 10 },
+  formLevelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  formLevelNum: { fontSize: 14, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  userPickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  userChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', marginRight: 6 },
+  userChipActive: { backgroundColor: '#708F96' },
+  userChipText: { fontSize: 12, fontFamily: 'Urbanist-SemiBold', color: '#94A3B8' },
+  userChipTextActive: { color: '#FFFFFF' },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  timeChip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.06)', marginRight: 6 },
+  timeChipActive: { backgroundColor: '#F59E0B' },
+  timeChipText: { fontSize: 12, fontFamily: 'Urbanist-SemiBold', color: '#94A3B8' },
+  timeChipTextActive: { color: '#FFFFFF' },
+  addLevelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 12, borderStyle: 'dashed', marginTop: 8 },
+  addLevelText: { fontSize: 14, fontFamily: 'Urbanist-SemiBold', color: '#708F96' },
+  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#708F96', borderRadius: 12, paddingVertical: 16, marginTop: 16 },
+  submitText: { fontSize: 16, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  // unused
+  levelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  levelLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  levelNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
+  levelNumText: { fontSize: 12, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
+  levelContent: { flex: 1 },
+  userPicker: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  userPickerText: { flex: 1, fontSize: 13, fontFamily: 'Urbanist-Medium', color: '#94A3B8' },
+  removeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(239,68,68,0.1)', alignItems: 'center', justifyContent: 'center' },
 });

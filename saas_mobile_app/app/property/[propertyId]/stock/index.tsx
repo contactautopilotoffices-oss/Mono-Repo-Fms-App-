@@ -24,6 +24,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import SafeBlurView from "@/components/ui/SafeBlurView";
+import BulkImportModal from "@/components/stock/BulkImportModal";
 
 import {
   STATUS_COLORS,
@@ -47,6 +48,7 @@ import {
   Scan,
   RefreshCw,
   Download,
+  Upload,
 } from "lucide-react-native";
 import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from '@/utils/queryKeys';
@@ -158,6 +160,7 @@ export default function StockScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [showDetailSheet, setShowDetailSheet] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
@@ -263,6 +266,11 @@ export default function StockScreen() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleRefresh = () => refetch();
+
+  const handleBulkImportSuccess = (count: number) => {
+    refetch();
+    Alert.alert('Success', `Imported ${count} items successfully!`);
+  };
 
   const handleItemPress = (item: StockItem) => {
     setSelectedItem(item);
@@ -470,6 +478,13 @@ export default function StockScreen() {
               activeOpacity={0.7}
             >
               <History size={18} color="rgba(255,255,255,0.8)" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={() => setShowBulkImportModal(true)}
+              activeOpacity={0.7}
+            >
+              <Upload size={18} color="rgba(255,255,255,0.8)" />
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -1166,6 +1181,14 @@ export default function StockScreen() {
     </View>
   );
 }
+
+// ─── Bulk Import Modal ─────────────────────────────────────────────────────────
+<BulkImportModal
+  visible={showBulkImportModal}
+  onClose={() => setShowBulkImportModal(false)}
+  onSuccess={handleBulkImportSuccess}
+  propertyId={propertyId as string}
+/>
 
 // ─── Stock Item Card (memoized for FlashList) ─────────────────────────────────
 

@@ -585,6 +585,107 @@ export const stockService = {
     // Treat as item_code
     return { type: 'item_code', value: scannedValue };
   },
+
+  // ── Scan barcode (for stock scan screen) ─────────────────────────────────
+  async scanBarcode(propertyId: string, barcode: string): Promise<ApiResponse<{ item: StockItem }>> {
+    try {
+      // Try to find by barcode, item_code, or parsed QR data
+      let item: StockItem | null = null;
+
+      // First try direct barcode lookup
+      const byBarcode = await this.getItemByBarcode(propertyId, barcode);
+      if (byBarcode.success && byBarcode.data) {
+        item = byBarcode.data;
+      }
+
+      // If not found, try parsing QR code data
+      if (!item) {
+        const parsed = this.parseScannedCode(barcode);
+        if (parsed) {
+          if (parsed.type === 'id') {
+            const res = await serverApi.query<StockItem[]>({
+              table: 'stock_items',
+              action: 'select',
+              filters: [
+                { op: 'eq', column: 'id', value: parsed.value },
+                { op: 'eq', column: 'property_id', value: propertyId },
+              ],
+              limit: 1,
+            });
+            if (res.data && res.data.length > 0) {
+              item = res.data[0];
+            }
+          } else if (parsed.type === 'item_code') {
+            const res = await serverApi.query<StockItem[]>({
+              table: 'stock_items',
+              action: 'select',
+              filters: [
+                { op: 'eq', column: 'item_code', value: parsed.value },
+                { op: 'eq', column: 'property_id', value: propertyId },
+              ],
+              limit: 1,
+            });
+            if (res.data && res.data.length > 0) {
+              item = res.data[0];
+            }
+          }
+        }
+      }
+
+      if (!item) {
+        return { success: false, data: null, error: 'Item not found', status: 404 };
+      }
+
+      return { success: true, data: { item }, status: 200 };
+    } catch (err: any) {
+      return { success: false, data: null, error: err.message, status: 500 };
+    }
+  },
+
+  // ── Record movement (for stock scan screen) ──────────────────────────────
+  async recordMovement(params: {
+    propertyId: string;
+    itemId: string;
+    action: 'add' | 'remove' | 'adjust';
+    quantityChange: number;
+    quantityBefore: number;
+    quantityAfter: number;
+    notes?: string;
+    userId?: string;
+  }): Promise<ApiResponse<{ quantityAfter: number }>> {
+    try {
+      // Record movement
+      await serverApi.query({
+        table: 'stock_movements',
+        action: 'insert',
+        values: {
+          item_id: params.itemId,
+          property_id: params.propertyId,
+          action: params.action,
+          quantity_change: params.quantityChange,
+          quantity_before: params.quantityBefore,
+          quantity_after: params.quantityAfter,
+          notes: params.notes ?? null,
+          user_id: params.userId ?? null,
+        },
+      });
+
+      return {
+        success: true,
+        data: { quantityAfter: params.quantityAfter },
+        status: 200,
+      };
+    } catch (err: any) {
+      return { success: false, data: null, error: err.message, status: 500 };
+    }
+  },
+
+  // ── Generate item code ──────────────────────────────────────────────────
+  generateItemCode(propertyCode: string): string {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${propertyCode}-${timestamp}${random}`;
+  },
 };
 
 export default stockService;

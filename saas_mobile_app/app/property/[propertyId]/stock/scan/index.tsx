@@ -59,7 +59,7 @@ export default function StockScanScreen() {
     if (!propertyId || !code) return;
     setIsLoading(true);
     try {
-      const res = await stockService.scanBarcode(code, propertyId);
+      const res = await stockService.scanBarcode(propertyId as string, code);
 
       if (res.success && res.data?.item) {
         setItem(res.data.item as StockItem);
