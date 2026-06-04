@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
   const limitParam = searchParams.get("limit");
   const offsetParam = searchParams.get("offset");
   const internalOnly = searchParams.get("internalOnly") === "true";
+  const excludeInternal = searchParams.get("excludeInternal") === "true";
   const materialsRequired = searchParams.get("materialsRequired") === "true";
   const slaBreached = searchParams.get("slaBreached");
   const dateFrom = searchParams.get("dateFrom");
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
   if (assignedTo) query = query.eq("assigned_to", assignedTo);
   if (raisedBy) query = query.eq("raised_by", raisedBy);
   if (internalOnly) query = query.eq("internal", true);
+  if (excludeInternal) query = query.neq("internal", true);
   
   if (slaBreached === 'true') {
     query = query
