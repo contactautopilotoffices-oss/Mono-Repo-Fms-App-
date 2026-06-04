@@ -137,11 +137,13 @@ export function LineChart({ data, title }: { data: LineChartData; title?: string
           </G>
         ))}
         {/* X labels */}
-        {labels.filter((_, i) => i % Math.ceil(labels.length / 6) === 0).map((label, li, arr) => {
-          const idx = li * Math.ceil(labels.length / 6);
-          const x = 20 + idx * stepX;
+        {labels
+          .map((label, i) => ({ label, i }))
+          .filter(({ i }) => i % Math.ceil(labels.length / 6) === 0)
+          .map(({ label, i }) => {
+          const x = 20 + i * stepX;
           return (
-            <SvgText key={li} x={x} y={CHART_HEIGHT - 4} fontSize={8} fill="#708F96" textAnchor="middle">
+            <SvgText key={`x-${i}`} x={x} y={CHART_HEIGHT - 4} fontSize={8} fill="#708F96" textAnchor="middle">
               {label}
             </SvgText>
           );
