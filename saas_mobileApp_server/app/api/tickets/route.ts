@@ -130,20 +130,20 @@ export async function GET(request: NextRequest) {
         .select('user_id')
         .eq('property_id', propertyId)
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     } else if (organizationId) {
       membershipQuery = supabase
         .from('property_memberships')
         .select('user_id, properties!inner(organization_id)')
         .eq('properties.organization_id', organizationId)
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     } else {
       membershipQuery = supabase
         .from('property_memberships')
         .select('user_id')
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     }
 
     const { data: members, error: memberError } = await membershipQuery;

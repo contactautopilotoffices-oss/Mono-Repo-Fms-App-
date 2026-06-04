@@ -96,7 +96,7 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
       .select("role")
       .eq("user_id", userId)
       .eq("organization_id", property.organization_id)
-      .eq("is_active", true)
+      .or("is_active.eq.true,is_active.is.null")
       .maybeSingle();
 
     // Org admins get access to ALL properties in the org
@@ -131,7 +131,7 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .select("role")
     .eq("user_id", userId)
     .eq("property_id", propertyId)
-    .eq("is_active", true)
+    .or("is_active.eq.true,is_active.is.null")
     .maybeSingle();
 
   if (propertyMembership) {
