@@ -36,7 +36,6 @@ import {
   GestureDetector,
 } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
@@ -44,6 +43,7 @@ import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryClient } from '@/utils/queryClient';
 import { invalidate } from '@/utils/queryInvalidation';
+import SkeletonLoader from './lovable/SkeletonLoader';
 
 // WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -479,8 +479,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const { weather } = useWeather();
   const router = useRouter();
 
-  const supabase = useMemo(() => createClient(), []);
-
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
@@ -502,6 +500,9 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   // Gamification
   const { leaderboard: gamifyLb, myStats, loading: gamifyLoading } = useGamification(propertyId);
 
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(true);
+
   // ── Server Query ──
   const {
     data,
@@ -516,22 +517,52 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   }>(
     queryKeys.property.mstDashboardLovable(propertyId),
     async () => {
-      const [{ data: propData }, { data: ticketData }, { data: shiftData }] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', propertyId).maybeSingle(),
-        supabase.from('tickets')
-          .select(`*, assignee:users!assigned_to(id, full_name, email, user_photo_url), creator:users!raised_by(id, full_name)`)
-          .eq('property_id', propertyId)
-          .order('created_at', { ascending: false }),
-        supabase.from('resolver_stats').select('is_checked_in').eq('property_id', propertyId).eq('user_id', user?.id ?? '').maybeSingle(),
+      const [propRes, ticketRes, shiftRes] = await Promise.all([
+        serverApi.query<{ name: string }[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.query<Ticket[]>({
+          table: 'tickets',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+        }),
+        serverApi.query<{ is_checked_in: boolean }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'is_checked_in',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+          ],
+          limit: 1,
+        }),
       ]);
       return {
-        property: propData ?? null,
-        tickets: (ticketData as Ticket[]) ?? [],
-        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+        property: propRes.data?.[0] ?? null,
+        tickets: ticketRes.data ?? [],
+        isCheckedIn: shiftRes.data?.[0]?.is_checked_in ?? false,
       };
     },
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Minimum skeleton duration effect
+  useEffect(() => {
+    // hasValidDashboardData is true when data is loaded and valid
+    const isValid = !!data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as any)?.tickets);
+    if (isValid) {
+      const timer = setTimeout(() => setShowSkeleton(false), 600);
+      return () => clearTimeout(timer);
+    } else if (!isLoading) {
+      setShowSkeleton(true);
+    }
+  }, [data, isLoading]);
 
   const hasValidDashboardData =
     !!data &&
@@ -716,7 +747,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       </Animated.View>
 
       {/* Stats card matching Property Admin */}
-      <GlassTile label="Tickets" icon="ticket" delay={80}>
+      <GlassTile label="Tickets" icon="ticket" delay={80} style={{ marginHorizontal: 0 }}>
         <View style={{ gap: 8, marginBottom: 16 }}>
           {/* Scope filter */}
           <View style={styles.timeToggleRow}>
@@ -753,7 +784,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           </View>
         </View>
 
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <View style={{ alignItems: 'flex-start' }}>
             <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
             <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
@@ -767,18 +798,18 @@ export default function LovableMstDashboard({ propertyId }: Props) {
             <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
           </View>
         </View>
-
-        <View style={{ marginTop: 20 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', marginBottom: 12, letterSpacing: 1 }}>RECENT TICKETS</Text>
-          {shuffledTickets.length > 0 ? (
-            <TicketStack tickets={shuffledTickets.slice(0, 5)} />
-          ) : (
-            <View style={styles.ticketStackEmpty}>
-              <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
-            </View>
-          )}
-        </View>
       </GlassTile>
+
+      <View style={{ marginTop: 24 }}>
+        <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', marginBottom: 12, letterSpacing: 1 }}>RECENT TICKETS</Text>
+        {shuffledTickets.length > 0 ? (
+          <TicketStack tickets={shuffledTickets.slice(0, 5)} />
+        ) : (
+          <View style={styles.ticketStackEmpty}>
+            <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+          </View>
+        )}
+      </View>
 
       <ChecklistProgressCard completed={stats.closed} total={stats.total} delay={280} />
     </>
@@ -929,16 +960,12 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading || (isFetching && !hasValidDashboardData)) {
+  if (showSkeleton || isLoading || (isFetching && !hasValidDashboardData)) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
         <DashboardBackground />
-        {/* WeatherBackground removed — DashboardBackground handles theming */}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
+        <SkeletonLoader />
       </View>
     );
   }

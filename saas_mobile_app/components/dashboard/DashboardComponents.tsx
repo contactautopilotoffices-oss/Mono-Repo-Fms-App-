@@ -7,6 +7,7 @@ import {
   Platform,
   Dimensions,
   Image,
+  ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -48,13 +49,14 @@ export function GlassTile({
   delay?: number;
   status?: 'optimal' | 'watch' | 'critical';
   onPress?: () => void;
+  style?: ViewStyle;
 }) {
   const statusColor = status ? STATUS_COLORS[status].bg : null;
 
   return (
     <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={{ width: '100%' }}>
       <TouchableOpacity activeOpacity={0.9} onPress={onPress} disabled={!onPress}>
-        <SafeBlurView intensity={45} style={styles.tile} tint="dark">
+        <SafeBlurView intensity={45} style={[styles.tile, style]} tint="dark">
           <LinearGradient
             colors={[
               'rgba(255,255,255,0.08)',

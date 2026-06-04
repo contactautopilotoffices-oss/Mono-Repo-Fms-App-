@@ -36,7 +36,7 @@ const FONT_BODY = Platform.select({
   default: "Urbanist",
 });
 
-type FilterStatus = "all" | "open" | "in_progress" | "resolved";
+type FilterStatus = "all" | "open" | "in_progress" | "resolved" | "closed" | "pending_validation" | "assigned";
 
 export default function TenantRequestsPage() {
   const router = useRouter();
@@ -53,11 +53,13 @@ export default function TenantRequestsPage() {
   const filteredTickets = React.useMemo(() => {
     if (filter === "all") return tickets;
     return tickets.filter((t: any) => {
-      if (filter === "open")
-        return t.status === "open" || t.status === "assigned";
+      if (filter === "all") return true;
+      if (filter === "open") return t.status === "open" || t.status === "waitlist";
+      if (filter === "assigned") return t.status === "assigned";
       if (filter === "in_progress") return t.status === "in_progress";
-      if (filter === "resolved")
-        return t.status === "resolved" || t.status === "closed";
+      if (filter === "pending_validation") return t.status === "pending_validation";
+      if (filter === "resolved") return t.status === "resolved";
+      if (filter === "closed") return t.status === "closed";
       return true;
     });
   }, [tickets, filter]);
@@ -74,8 +76,11 @@ export default function TenantRequestsPage() {
   const filters: { key: FilterStatus; label: string }[] = [
     { key: "all", label: "All" },
     { key: "open", label: "Open" },
+    { key: "assigned", label: "Assigned" },
     { key: "in_progress", label: "In Progress" },
+    { key: "pending_validation", label: "Pending" },
     { key: "resolved", label: "Resolved" },
+    { key: "closed", label: "Closed" },
   ];
 
   return (

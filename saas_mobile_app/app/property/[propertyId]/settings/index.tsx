@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
   Platform,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
@@ -173,14 +174,20 @@ export default function SettingsScreen() {
   const requestCamera = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.camera === 'granted') {
-        Alert.alert('Permission Settings', 'To disable Camera access, please change this in your device Settings.');
+      if (perms.camera === 'granted' || perms.camera === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
         return;
       }
       const { status } = await CameraModule.requestCameraPermissionsAsync();
       setPerms(p => ({ ...p, camera: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera access is needed for scanning and photo features. Please enable it in device settings.');
+        Alert.alert('Permission Required', 'Camera access is needed for scanning and photo features.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Camera permission error:', e);
@@ -190,14 +197,20 @@ export default function SettingsScreen() {
   const requestAudio = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.audio === 'granted') {
-        Alert.alert('Permission Settings', 'To disable Microphone access, please change this in your device Settings.');
+      if (perms.audio === 'granted' || perms.audio === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
         return;
       }
       const { status } = await AudioModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, audio: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Microphone access is needed for voice features. Please enable it in device settings.');
+        Alert.alert('Permission Required', 'Microphone access is needed for voice features.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Audio permission error:', e);
@@ -207,14 +220,20 @@ export default function SettingsScreen() {
   const requestNotifications = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.notifications === 'granted') {
-        Alert.alert('Permission Settings', 'To disable Push Notifications, please change this in your device Settings.');
+      if (perms.notifications === 'granted' || perms.notifications === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
         return;
       }
       const { status } = await NotificationsModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, notifications: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Push notifications are needed for alerts. Please enable them in device settings.');
+        Alert.alert('Permission Required', 'Push notifications are needed for alerts.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Notification permission error:', e);

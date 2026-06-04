@@ -374,111 +374,16 @@ export interface MyStatsResponse {
 }
 
 export async function getLeaderboard(propertyId: string, period = 'daily'): Promise<LeaderboardResponse> {
-  try {
-    const supabase = createClient();
-    const today = new Date().toISOString().split('T')[0];
-    const scoreDate = period === 'daily' ? today : (() => {
-      const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().split('T')[0];
-    })();
-
-    const { data, error } = await supabase
-      .from('mst_daily_scores')
-      .select(`
-        user_id,
-        total_points,
-        tickets_resolved,
-        sla_met_count,
-        first_time_fixes,
-        streak_days,
-        score_date,
-        users!inner(full_name, user_photo_url)
-      `)
-      .eq('property_id', propertyId)
-      .gte('score_date', scoreDate)
-      .order('total_points', { ascending: false })
-      .limit(20);
-
-    if (error || !data) return { period: period as 'daily' | 'weekly', score_date: today, leaderboard: [], total: 0, error: error?.message };
-
-    const leaderboard: LeaderboardEntry[] = data.map((row: any, idx: number) => ({
-      rank: idx + 1,
-      user_id: row.user_id,
-      name: row.users?.full_name ?? 'Unknown',
-      photo_url: row.users?.user_photo_url ?? null,
-      score: row.total_points ?? 0,
-      tickets_resolved: row.tickets_resolved ?? 0,
-      sla_met_count: row.sla_met_count ?? 0,
-      first_time_fixes: row.first_time_fixes ?? 0,
-      streak_days: row.streak_days ?? 0,
-      badges: [],
-    }));
-
-    return { period: period as 'daily' | 'weekly', score_date: today, leaderboard, total: leaderboard.length };
-  } catch (err) {
-    return { period: period as 'daily' | 'weekly', score_date: '', leaderboard: [], total: 0, error: String(err) };
-  }
+  const params = new URLSearchParams();
+  if (propertyId) params.set('property_id', propertyId);
+  params.set('period', period);
+  return apiFetch<LeaderboardResponse>(`/api/mst/gamification/leaderboard?${params.toString()}`);
 }
 
 export async function getMyGamificationStats(propertyId: string): Promise<MyStatsResponse> {
-  try {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { property_id: propertyId, user_id: '', today: { total_points: 0, tickets_resolved: 0, sla_met_count: 0, first_time_fixes: 0, avg_resolution_minutes: null, rank: null, total_in_rank: 0 }, all_time: { total_points: 0, tickets_resolved: 0, sla_met_count: 0 }, streak: { current: 0, longest: 0 }, badges: [], next_achievements: [], error: 'Not authenticated' };
-
-    const today = new Date().toISOString().split('T')[0];
-    const { data: todayRow } = await supabase
-      .from('mst_daily_scores')
-      .select('*')
-      .eq('property_id', propertyId)
-      .eq('user_id', user.id)
-      .eq('score_date', today)
-      .maybeSingle();
-
-    const { data: allTimeRows } = await supabase
-      .from('mst_daily_scores')
-      .select('total_points, tickets_resolved, sla_met_count')
-      .eq('property_id', propertyId)
-      .eq('user_id', user.id);
-
-    const allTime = (allTimeRows ?? []).reduce((acc: any, r: any) => ({
-      total_points: acc.total_points + (r.total_points ?? 0),
-      tickets_resolved: acc.tickets_resolved + (r.tickets_resolved ?? 0),
-      sla_met_count: acc.sla_met_count + (r.sla_met_count ?? 0),
-    }), { total_points: 0, tickets_resolved: 0, sla_met_count: 0 });
-
-    // Determine rank
-    const { count: betterCount } = await supabase
-      .from('mst_daily_scores')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('property_id', propertyId)
-      .eq('score_date', today)
-      .gt('total_points', todayRow?.total_points ?? 0);
-    const { count: totalCount } = await supabase
-      .from('mst_daily_scores')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('property_id', propertyId)
-      .eq('score_date', today);
-
-    return {
-      property_id: propertyId,
-      user_id: user.id,
-      today: {
-        total_points: todayRow?.total_points ?? 0,
-        tickets_resolved: todayRow?.tickets_resolved ?? 0,
-        sla_met_count: todayRow?.sla_met_count ?? 0,
-        first_time_fixes: todayRow?.first_time_fixes ?? 0,
-        avg_resolution_minutes: todayRow?.avg_resolution_minutes ?? null,
-        rank: (betterCount ?? 0) + 1,
-        total_in_rank: totalCount ?? 1,
-      },
-      all_time: allTime,
-      streak: { current: todayRow?.streak_days ?? 0, longest: todayRow?.streak_days ?? 0 },
-      badges: [],
-      next_achievements: [],
-    };
-  } catch (err) {
-    return { property_id: propertyId, user_id: '', today: { total_points: 0, tickets_resolved: 0, sla_met_count: 0, first_time_fixes: 0, avg_resolution_minutes: null, rank: null, total_in_rank: 0 }, all_time: { total_points: 0, tickets_resolved: 0, sla_met_count: 0 }, streak: { current: 0, longest: 0 }, badges: [], next_achievements: [], error: String(err) };
-  }
+  const params = new URLSearchParams();
+  if (propertyId) params.set('property_id', propertyId);
+  return apiFetch<MyStatsResponse>(`/api/mst/gamification/my-stats?${params.toString()}`);
 }
 
 // ---------------------------------------------------------------------

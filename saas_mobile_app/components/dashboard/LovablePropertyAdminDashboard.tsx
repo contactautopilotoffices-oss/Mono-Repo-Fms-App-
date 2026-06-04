@@ -112,6 +112,25 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     lastUpdatedAt ? new Date(lastUpdatedAt) : null
   );
 
+  // Minimum skeleton duration - don't flash if data loads too fast
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(true);
+
+  // Effect to handle minimum skeleton duration
+  useEffect(() => {
+    if (hasLoadedInitialData && loadedPropertyId === propertyId) {
+      // Data is loaded, but keep skeleton for minimum 600ms for smooth UX
+      const timer = setTimeout(() => {
+        setShowSkeleton(false);
+        setIsFirstLoad(false);
+      }, 600);
+      return () => clearTimeout(timer);
+    } else if (!hasLoadedInitialData) {
+      // Still loading
+      setShowSkeleton(true);
+    }
+  }, [hasLoadedInitialData, loadedPropertyId, propertyId]);
+
   // PPM stats (local)
   const [ppmTotal, setPpmTotal]   = useState(0);
   const [ppmDone, setPpmDone]     = useState(0);
@@ -700,7 +719,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     },
   };
 
-  const shouldShowLoading = !hasLoadedInitialData || loadedPropertyId !== propertyId;
+  const shouldShowLoading = showSkeleton || (!hasLoadedInitialData || loadedPropertyId !== propertyId);
 
   if (shouldShowLoading) {
     return (

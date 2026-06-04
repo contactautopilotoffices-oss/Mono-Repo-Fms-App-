@@ -6,6 +6,7 @@ import Constants from 'expo-constants';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from './useAuth';
 import { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
+import { mmkvAsyncStorage } from '@/utils/storage';
 let firebaseModules:
   | {
       AuthorizationStatus: any;
@@ -155,11 +156,11 @@ async function storePushToken(
       values: {
         user_id: userId,
         token,
-        provider: 'expo',
+        provider: 'fcm',
         platform: Platform.OS,
         app_type: 'mobile',
         device_info: `${Platform.OS} ${Device.modelName || 'unknown'}`,
-        browser: `expo-${Platform.OS}`,
+        browser: `fcm-${Platform.OS}`,
         is_active: true,
         updated_at: new Date().toISOString(),
       },
@@ -274,6 +275,24 @@ export function usePushNotifications() {
         tokenRef.current = token;
         registeredRef.current = true;
         console.log('[Push] Token registered:', token.slice(0, 20) + '...');
+
+        // Trigger welcome notification for the first time
+        const hasSentWelcome = await mmkvAsyncStorage.getItem('welcome_push_sent');
+        if (!hasSentWelcome) {
+          try {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Welcome to Autopilot! 🚀',
+                body: 'Push notifications are successfully enabled. You will now receive important updates here.',
+                sound: true,
+              },
+              trigger: null, // Send immediately
+            });
+            await mmkvAsyncStorage.setItem('welcome_push_sent', 'true');
+          } catch (notifErr) {
+            console.warn('[Push] Could not send welcome notification:', notifErr);
+          }
+        }
       }
     } catch (err) {
       console.error('[Push] Registration failed:', err);

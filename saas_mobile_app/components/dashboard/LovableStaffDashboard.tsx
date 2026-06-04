@@ -36,7 +36,6 @@ import {
   GestureDetector,
 } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
@@ -45,6 +44,7 @@ import { queryKeys } from '@/utils/queryKeys';
 import { useDashboardFetch } from '@/hooks/useDashboardFetch';
 import { GlassTile } from './DashboardComponents';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import SkeletonLoader from './lovable/SkeletonLoader';
 
 // WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -53,6 +53,7 @@ import { XPBar } from '@/components/gamification/XPBar';
 import { StreakChip } from '@/components/gamification/StreakChip';
 import { Leaderboard } from '@/components/gamification/Leaderboard';
 import { AchievementBadge } from '@/components/gamification/AchievementBadge';
+import MobilePropertySelector from '../shared/MobilePropertySelector';
 import {
   defaultMstUser,
   defaultAchievements,
@@ -426,8 +427,6 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const { weather } = useWeather();
   const router = useRouter();
 
-  const supabase = useMemo(() => createClient(), []);
-
   // Use property role to determine dashboard features (matching Web App logic)
   const propRole = useMemo(() => {
     const prop = membership?.properties?.find(p => p.id === propertyId);
@@ -437,6 +436,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const STAFF_TECHNICAL_ROLES = ['mst', 'technician', 'fe', 'se', 'bms_operator'];
   const isTechnical = STAFF_TECHNICAL_ROLES.includes(propRole) || propRole.includes('technical');
   const isSoftServices = propRole.includes('soft_service') || propRole.includes('housekeeping');
+  const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
 
   // AsyncStorage cache for instant dashboard load on app reopen
   const { cachedData: staffCache, hasCache: hasStaffCache, saveCache: saveStaffCache } = useAsyncStorageCache<{
@@ -475,7 +475,18 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const [ppmOverdue, setPpmOverdue] = useState(staffCache?.ppmOverdue ?? 0);
   const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
 
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(true);
 
+  // Minimum skeleton duration effect
+  useEffect(() => {
+    if (hasStaffCache) {
+      const timer = setTimeout(() => setShowSkeleton(false), 600);
+      return () => clearTimeout(timer);
+    } else {
+      setShowSkeleton(true);
+    }
+  }, [hasStaffCache]);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -508,89 +519,115 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const fetchData = useCallback(async () => {
     if (!propertyId) return;
     try {
-      const { data: propData } = await supabase
-        .from('properties')
-        .select('name')
-        .eq('id', propertyId)
-        .maybeSingle();
+      // Fetch all data in parallel using serverApi
+      const [propRes, ticketRes, shiftRes, skillsRes, resolverStatsRes, ppmRes] = await Promise.allSettled([
+        serverApi.query<{ name: string }[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.query<Ticket[]>({
+          table: 'tickets',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+        }),
+        serverApi.query<{ is_checked_in: boolean }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'is_checked_in',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+          ],
+          limit: 1,
+        }),
+        serverApi.query<{ skill_group_code: string }[]>({
+          table: 'mst_skills',
+          action: 'select',
+          select: 'skill_group_code',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+            { op: 'eq', column: 'property_id', value: propertyId },
+          ],
+          limit: 1,
+        }),
+        serverApi.query<{ skills: string[]; specialization: string }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'skills, specialization',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+            { op: 'eq', column: 'property_id', value: propertyId },
+          ],
+          limit: 1,
+        }),
+        ppmService.fetchStats(propertyId).catch(() => null),
+      ]);
+
+      // Helper to get data from PromiseSettledResult
+      const getData = (result: PromiseSettledResult<any>): any => {
+        return result.status === 'fulfilled' ? result.value : null;
+      };
+
+      // Update state
+      const propData = getData(propRes)?.data?.[0];
       if (propData) setProperty(propData);
 
-      const { data: ticketData } = await supabase
-        .from('tickets')
-        .select(`
-          *,
-          assignee:users!assigned_to(id, full_name, email, user_photo_url),
-          creator:users!raised_by(id, full_name)
-        `)
-        .eq('property_id', propertyId)
-        .order('created_at', { ascending: false });
-      if (ticketData) setTickets(ticketData as Ticket[]);
+      const ticketData = getData(ticketRes)?.data ?? [];
+      if (ticketData) setTickets(ticketData);
 
-      // Shift status
-      const { data: shiftData } = await supabase
-        .from('resolver_stats')
-        .select('is_checked_in')
-        .eq('property_id', propertyId)
-        .eq('user_id', user?.id as string)
-        .maybeSingle();
-      if (shiftData) setIsCheckedIn(!!(shiftData as any).is_checked_in);
+      const shiftData = getData(shiftRes)?.data?.[0];
+      if (shiftData) setIsCheckedIn(!!shiftData.is_checked_in);
 
       // Fetch specialization
       let cachedUserSkills = userSkills;
       let cachedSpecialization = specialization;
-      const { data: skills } = await ((supabase
-        .from('mst_skills') as any)
-        .select('skill_group_code')
-        .eq('user_id', user?.id as string)
-        .eq('property_id', propertyId)
-        .single() as any);
 
+      const skills = getData(skillsRes)?.data?.[0];
       if (skills?.skill_group_code) {
+        const spec = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
         setUserSkills([skills.skill_group_code]);
-        setSpecialization(skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
+        setSpecialization(spec);
         cachedUserSkills = [skills.skill_group_code];
-        cachedSpecialization = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+        cachedSpecialization = spec;
       } else {
-        const { data: resolverStats } = await (supabase
-          .from('resolver_stats')
-          .select('skills, specialization')
-          .eq('user_id', user?.id as string)
-          .eq('property_id', propertyId)
-          .single() as any);
-
+        const resolverStats = getData(resolverStatsRes)?.data?.[0];
         if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
           setUserSkills(resolverStats.skills);
           cachedUserSkills = resolverStats.skills;
           if (resolverStats.skills.length > 0) {
-            setSpecialization(resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-            cachedSpecialization = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            const spec = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            setSpecialization(spec);
+            cachedSpecialization = spec;
           }
         }
       }
 
       // PPM stats
       let cachedPpmTotal = 0, cachedPpmDone = 0, cachedPpmPending = 0, cachedPpmOverdue = 0, cachedPpmPostponed = 0;
-      try {
-        const ppmRes = await ppmService.fetchStats(propertyId);
-        if (ppmRes.success && ppmRes.data) {
-          cachedPpmTotal = ppmRes.data.total ?? 0;
-          cachedPpmDone = ppmRes.data.done ?? 0;
-          cachedPpmPending = ppmRes.data.pending ?? 0;
-          cachedPpmOverdue = ppmRes.data.overdue ?? 0;
-          cachedPpmPostponed = ppmRes.data.postponed ?? 0;
-          setPpmTotal(cachedPpmTotal);
-          setPpmDone(cachedPpmDone);
-          setPpmPending(cachedPpmPending);
-          setPpmOverdue(cachedPpmOverdue);
-          setPpmPostponed(cachedPpmPostponed);
-        }
-      } catch (_e) { /* ignore */ }
+      const ppmResult = getData(ppmRes);
+      if (ppmResult?.success && ppmResult?.data) {
+        cachedPpmTotal = ppmResult.data.total ?? 0;
+        cachedPpmDone = ppmResult.data.done ?? 0;
+        cachedPpmPending = ppmResult.data.pending ?? 0;
+        cachedPpmOverdue = ppmResult.data.overdue ?? 0;
+        cachedPpmPostponed = ppmResult.data.postponed ?? 0;
+        setPpmTotal(cachedPpmTotal);
+        setPpmDone(cachedPpmDone);
+        setPpmPending(cachedPpmPending);
+        setPpmOverdue(cachedPpmOverdue);
+        setPpmPostponed(cachedPpmPostponed);
+      }
 
       // Save to AsyncStorage cache so next app open is instant
       saveStaffCache({
         property: propData ?? property,
-        tickets: (ticketData as Ticket[]) ?? tickets,
-        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+        tickets: ticketData ?? tickets,
+        isCheckedIn: !!shiftData?.is_checked_in,
         userSkills: cachedUserSkills,
         specialization: cachedSpecialization,
         ppmTotal: cachedPpmTotal,
@@ -921,30 +958,34 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </View>
 
       <View style={styles.flowGrid}>
-        {/* Always visible modules */}
-        <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
-          <View style={styles.flowTileInner}>
-            <View style={styles.flowTileHeader}>
-              <Ionicons name="people" size={20} color="#60A5FA" />
+        {/* Conditionally visible modules */}
+        {!isSoftServices && (
+          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
+            <View style={styles.flowTileInner}>
+              <View style={styles.flowTileHeader}>
+                <Ionicons name="people" size={20} color="#60A5FA" />
+              </View>
+              <Text style={styles.flowTileName}>Visitors</Text>
+              <View style={styles.flowTileStatus}>
+                <Text style={styles.flowTileStatusText}>Visitor Management</Text>
+              </View>
             </View>
-            <Text style={styles.flowTileName}>Visitors</Text>
-            <View style={styles.flowTileStatus}>
-              <Text style={styles.flowTileStatusText}>Visitor Management</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
-        <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
-          <View style={styles.flowTileInner}>
-            <View style={styles.flowTileHeader}>
-              <Ionicons name="cube" size={20} color="#34D399" />
+        {(!isSoftServices || isManager) && (
+          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
+            <View style={styles.flowTileInner}>
+              <View style={styles.flowTileHeader}>
+                <Ionicons name="cube" size={20} color="#34D399" />
+              </View>
+              <Text style={styles.flowTileName}>Stock</Text>
+              <View style={styles.flowTileStatus}>
+                <Text style={styles.flowTileStatusText}>Inventory & Scans</Text>
+              </View>
             </View>
-            <Text style={styles.flowTileName}>Stock</Text>
-            <View style={styles.flowTileStatus}>
-              <Text style={styles.flowTileStatusText}>Inventory & Scans</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
         {/* Technical Modules */}
         {isTechnical && (
@@ -1061,16 +1102,12 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading) {
+  if (showSkeleton || isLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
         <DashboardBackground />
-        {/* WeatherBackground removed — DashboardBackground handles theming */}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
+        <SkeletonLoader />
       </View>
     );
   }
@@ -1111,9 +1148,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
                 <Text style={styles.greetingName} numberOfLines={1}>
                   Hey, {(user?.user_metadata?.full_name || mstUser.name).split(' ')[0]}
                 </Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
-                  {property?.name || 'MST Portal'}
-                </Text>
+                <MobilePropertySelector currentPropertyId={propertyId} />
               </View>
             </TouchableOpacity>
           </View>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, ActivityIndicator, Image, Dimensions } from 'react-native';
-import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
+import Svg, { Path, Circle, Rect, G, Defs, Pattern, Line } from 'react-native-svg';
 import { Camera } from 'lucide-react-native';
 
 export interface Room {
@@ -41,6 +41,21 @@ function ClockIcon({ color, size = 12 }: { color: string, size?: number }) {
       <Circle cx="12" cy="12" r="10" />
       <Path d="M12 6v6l4 2" />
     </Svg>
+  );
+}
+
+function StripedBackground() {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <Svg width="100%" height="100%">
+        <Defs>
+          <Pattern id="stripes" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <Line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.15)" strokeWidth="4" />
+          </Pattern>
+        </Defs>
+        <Rect width="100%" height="100%" fill="url(#stripes)" />
+      </Svg>
+    </View>
   );
 }
 
@@ -287,14 +302,20 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
                                 <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
                                     <View style={{ 
                                         flex: 1, 
-                                        backgroundColor: avail.position === 'left' ? 'rgba(255,255,255,0.05)' : 'rgba(212,160,23,0.1)',
+                                        backgroundColor: avail.position === 'left' ? 'transparent' : 'rgba(212,160,23,0.1)',
                                         borderRightWidth: avail.position === 'left' ? 0 : 1,
-                                        borderColor: 'rgba(212,160,23,0.3)'
-                                    }} />
+                                        borderColor: 'rgba(212,160,23,0.3)',
+                                        overflow: 'hidden'
+                                    }}>
+                                        {avail.position === 'left' && <StripedBackground />}
+                                    </View>
                                     <View style={{ 
                                         flex: 1, 
-                                        backgroundColor: avail.position === 'right' ? 'rgba(255,255,255,0.05)' : 'rgba(212,160,23,0.1)' 
-                                    }} />
+                                        backgroundColor: avail.position === 'right' ? 'transparent' : 'rgba(212,160,23,0.1)',
+                                        overflow: 'hidden'
+                                    }}>
+                                        {avail.position === 'right' && <StripedBackground />}
+                                    </View>
                                 </View>
                             )}
                             <View style={{ zIndex: 1, alignItems: 'center' }}>
