@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { createAnonClient } from "@/lib/supabase/client";
-import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const buffer = Buffer.from(arrayBuffer);
 
     // Upload to Supabase Storage
-    const supabase = createSupabaseClient();
+    const supabase = createAdminClient();
     const { error: uploadError } = await supabase.storage
       .from("user-photos")
       .upload(filePath, buffer, {

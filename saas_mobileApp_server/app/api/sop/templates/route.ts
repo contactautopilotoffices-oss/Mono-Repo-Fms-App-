@@ -15,10 +15,9 @@ export async function GET(request: NextRequest) {
     const supabase = createAnonClient(auth.token);
 
     let query = supabase
-      .from("sop_completions")
+      .from("sop_templates")
       .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50);
+      .order("created_at", { ascending: false });
 
     if (propertyId) {
       query = query.eq("property_id", propertyId);
@@ -27,13 +26,13 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      console.error("[sop/completions] error:", error);
-      return NextResponse.json({ error: "Failed to fetch completions" }, { status: 500 });
+      console.error("[sop/templates] error:", error);
+      return NextResponse.json({ error: "Failed to fetch templates" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data: data ?? [] });
   } catch (error) {
-    console.error("[sop/completions] error:", error);
+    console.error("[sop/templates] error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
