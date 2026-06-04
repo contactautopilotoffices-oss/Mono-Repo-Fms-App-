@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, Platform }
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'expo-router';
+import { queryClient } from '@/utils/queryClient';
 
 export default function MobilePropertySelector({ currentPropertyId }: { currentPropertyId: string }) {
   const { membership } = useAuth();
@@ -29,6 +30,9 @@ export default function MobilePropertySelector({ currentPropertyId }: { currentP
   const handleSelect = (propId: string) => {
     setIsOpen(false);
     if (propId === currentPropertyId) return;
+
+    // Invalidate ALL queries for the OLD property to prevent data contamination
+    queryClient.invalidateQueries({ queryKey: ['property', currentPropertyId] });
 
     // Replace the current propertyId in the pathname
     // Pathname looks like /property/123/something
