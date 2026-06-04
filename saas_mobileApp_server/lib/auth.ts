@@ -131,7 +131,6 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .select("role")
     .eq("user_id", userId)
     .eq("property_id", propertyId)
-    .or("is_active.eq.true,is_active.is.null")
     .maybeSingle();
 
   if (propertyMembership) {
