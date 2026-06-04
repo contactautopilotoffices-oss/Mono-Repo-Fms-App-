@@ -92,10 +92,10 @@ export default function PPMScanScreen() {
           id: s.id,
           asset_name: s.system_name,
           schedule_type: s.frequency,
-          next_due: s.planned_date,
+          next_due: s.planned_date || '',
           last_completed: s.done_date,
           status: s.status,
-          description: s.description,
+          description: s.scope_of_work || s.detail_name || s.description,
         })) as PPMSchedule[]);
         setState('found');
       } else {

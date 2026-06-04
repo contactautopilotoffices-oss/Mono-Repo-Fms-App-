@@ -307,10 +307,13 @@ export async function ppmRoutes(fastify: FastifyInstance) {
   // ── DELETE /api/ppm/:id/attachments — remove attachment URL ──────────────
   fastify.delete('/api/ppm/:id/attachments', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const { url, attach_type: attachType } = req.query as { url?: string; attach_type?: string };
+    const body = req.body as { url?: string; attach_type?: string } | undefined;
+    // Support both query params and body
+    const url = (req.query as any)?.url as string | undefined ?? body?.url;
+    const attachType = (req.query as any)?.attach_type as string | undefined ?? body?.attach_type;
 
     if (!url) {
-      return reply.status(400).send({ error: 'Bad Request', message: 'url query param required' });
+      return reply.status(400).send({ error: 'Bad Request', message: 'url is required' });
     }
 
     const { data: existing, error: fetchErr } = await supabaseAdmin

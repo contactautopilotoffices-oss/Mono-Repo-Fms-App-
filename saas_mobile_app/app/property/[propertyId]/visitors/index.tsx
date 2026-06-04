@@ -1077,7 +1077,7 @@ export default function VisitorsScreen() {
     if (!selectedVisitor) return;
     setCheckoutLoading(true);
     try {
-      const res = await vmsService.checkOut(selectedVisitor.visitor_id, propertyId);
+      const res = await vmsService.checkOut(selectedVisitor.id, propertyId);
       if (res.success) {
         toast.success(`${selectedVisitor.name} checked out`);
         setIsVisitorDetailVisible(false);

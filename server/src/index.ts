@@ -9,6 +9,7 @@ import { authRoutes } from './routes/auth.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { propertyRoutes } from './routes/properties.js';
 import { ppmRoutes } from './routes/ppm.js';
+import { vmsRoutes } from './routes/vms.js';
 import { contextPlugin } from './plugins/context.js';
 import { authPlugin } from './plugins/auth.js';
 import { queryRoutes } from './routes/query.js';
@@ -42,6 +43,7 @@ export function buildServer(opts: { logger?: boolean } = {}) {
   fastify.register(queryRoutes);
   fastify.register(ticketRoutes);
   fastify.register(ppmRoutes);
+  fastify.register(vmsRoutes);
   fastify.register(contextPlugin);
 
   // ---------------------------------------------------------------------------
