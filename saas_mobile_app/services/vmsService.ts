@@ -6,6 +6,7 @@
 
 import { serverApi } from '@/lib/serverApi';
 import { ApiResponse } from '@/types';
+import { whatsappService } from './whatsappService';
 
 // ---------------------------------------------------------------------------
 // Types — mirror DB columns exactly
@@ -123,6 +124,17 @@ export const vmsService = {
       if (result.error) throw new Error(result.error.message);
 
       const visitor = result.data!;
+
+      // Send WhatsApp notification to host
+      if (payload.whom_to_meet_uid) {
+        whatsappService.notifyHostOnVisitorCheckIn({
+          visitorName: payload.name,
+          checkInTime: new Date().toLocaleString(),
+          purpose: payload.purpose,
+          hostUserId: payload.whom_to_meet_uid,
+        }).catch(err => console.warn('[VMS] WhatsApp notification failed:', err));
+      }
+
       return {
         success: true,
         data: { visitor, visitorId: visitor.id, visitor_id: visitor.visitor_id },
@@ -172,33 +184,14 @@ export const vmsService = {
   // ── Search Hosts (property members) ──────────────────────────────────────────
   async searchHosts(propertyId: string, query: string): Promise<ApiResponse<HostResult[]>> {
     try {
-      const res = await serverApi.query<any[]>({
-        table: 'property_memberships',
-        action: 'select',
-        select: 'users:user_id(id, full_name, email, role)',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        limit: 20,
+      const result = await serverApi.get<{ hosts: HostResult[] }>('/api/visitors/hosts', {
+        propertyId,
+        query,
       });
 
-      if (res.error) throw new Error(res.error.message);
+      if (result.error) throw new Error(result.error.message);
 
-      const lq = query.toLowerCase();
-      const hosts = (res.data ?? [])
-        .map((m: any) => m.users as any)
-        .filter(
-          (u: any) =>
-            u &&
-            (u.full_name?.toLowerCase().includes(lq) || u.email?.toLowerCase().includes(lq))
-        )
-        .map((h: any) => ({
-          id: h.id,
-          name: h.full_name || 'Unknown',
-          full_name: h.full_name || 'Unknown',
-          email: h.email || '',
-          role: h.role || '',
-        }));
-
-      return { success: true, data: hosts, status: 200 };
+      return { success: true, data: result.data?.hosts ?? [], status: 200 };
     } catch (err: any) {
       return { success: false, data: [], error: err.message, status: 500 };
     }

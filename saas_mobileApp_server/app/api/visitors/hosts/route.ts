@@ -16,25 +16,32 @@ export async function GET(request: NextRequest) {
     if (!access.authorized) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const admin = createAdminClient();
-    let hostQuery = admin
-      .from("property_memberships")
-      .select("user_id, user:users(id, full_name, email)")
-      .eq("property_id", propertyId)
-      .eq("is_active", true)
-      .limit(5);
-    if (query.length >= 2) {
-      hostQuery = hostQuery.ilike("user.full_name", `%${query}%`);
-    }
 
-    const { data, error } = await hostQuery;
-    if (error) return NextResponse.json({ error: "Failed to fetch hosts" }, { status: 500 });
+    // Fetch all active property members with user details
+    const { data, error } = await admin
+      .from("property_memberships")
+      .select("user_id, role, users!inner(id, full_name, email)")
+      .eq("property_id", propertyId)
+      .eq("is_active", true);
+
+    if (error) return NextResponse.json({ error: "Failed to fetch hosts: " + error.message }, { status: 500 });
+
+    // Filter and transform in JS
+    const lq = query.toLowerCase();
     const hosts = (data ?? [])
       .map((row: any) => ({
         id: row.user_id,
-        full_name: row.user?.full_name ?? "Unknown",
-        email: row.user?.email ?? "",
+        full_name: row.users?.full_name ?? "Unknown",
+        email: row.users?.email ?? "",
+        role: row.role || "",
+        name: row.users?.full_name ?? "Unknown",
       }))
-      .filter((row: any) => row.id);
+      .filter((row: any) => {
+        if (!row.id) return false;
+        if (query.length < 2) return true;
+        return row.full_name?.toLowerCase().includes(lq) || row.email?.toLowerCase().includes(lq);
+      })
+      .slice(0, 20);
 
     return NextResponse.json({ hosts });
   } catch (error) {
