@@ -1,6 +1,5 @@
 import * as ImageManipulator from 'expo-image-manipulator';
-
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 
 const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const lookup = new Uint8Array(256);
@@ -41,14 +40,15 @@ export const decodeBase64ToArrayBuffer = (base64: string): ArrayBuffer => {
 
 /**
  * Reads a local file URI and returns its contents as an ArrayBuffer.
- * This is the correct approach for React Native using Expo FileSystem
- * and Base64 decoding, as XHR fails on some Android local files.
+ * Uses FileSystem.readAsStringAsync + base64 decode — reliable on all RN / Expo versions.
+ * The old File.bytes() API was fragile on Android and certain Expo SDK versions.
  */
 export async function readFileAsArrayBuffer(uri: string): Promise<ArrayBuffer> {
   try {
-    const file = new File(uri);
-    const bytes = await file.bytes();
-    return bytes.buffer as ArrayBuffer;
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return decodeBase64ToArrayBuffer(base64);
   } catch (err: any) {
     console.error('[readFileAsArrayBuffer] Error reading file:', err);
     throw new Error(`Failed to read file from ${uri}: ${err.message}`);

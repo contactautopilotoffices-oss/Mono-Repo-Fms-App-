@@ -472,14 +472,44 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
   // ── Image helpers ─────────────────────────────────────────────────────────
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      setAttachedImage(result.assets[0].uri);
-    }
+    Alert.alert(
+      'Attach Photo',
+      'Choose a source for the issue photo',
+      [
+        {
+          text: '📷  Take Photo',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              toast.error('Camera permission is required to take photos.');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ['images'],
+              quality: 0.85,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets?.[0]) {
+              setAttachedImage(result.assets[0].uri);
+            }
+          },
+        },
+        {
+          text: '🖼  Choose from Library',
+          onPress: async () => {
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              quality: 0.85,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets?.[0]) {
+              setAttachedImage(result.assets[0].uri);
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const uploadImageToStorage = useCallback(async (localUri: string): Promise<string | null> => {
@@ -490,7 +520,11 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
       );
       const arrayBuffer = await readFileAsArrayBuffer(compressed.uri);
-      const path = `cassandra-chat/${user?.id ?? 'anon'}/${Date.now()}.jpg`;
+      // Store under the same bucket/path structure the FMS uses for ticket before-photos:
+      // ticket_photos/{propertyId}/{userId}/{timestamp}.jpg
+      const propId = selectedPropertyId ?? 'no-property';
+      const uid = user?.id ?? 'anon';
+      const path = `before-photos/${propId}/${uid}/${Date.now()}.jpg`;
       const { error } = await supabase.storage.from('ticket_photos').upload(path, arrayBuffer, {
         contentType: 'image/jpeg',
         upsert: true,
@@ -503,7 +537,7 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       toast.error('Failed to upload image: ' + (err?.message ?? 'unknown error'));
       return null;
     }
-  }, [user?.id]);
+  }, [user?.id, selectedPropertyId]);
 
   // ── Response parsers ──────────────────────────────────────────────────────
   const parseToolCall = (text: string): { isToolCall: boolean; toolData?: ChatMessage['toolData']; cleanText?: string } => {
