@@ -21,10 +21,24 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "SENTRY_AUTH_TOKEN": "SENTRY_AUTH_TOKEN"
+      }
     }
   },
   "submit": {
     "production": {}
+  },
+  "hooks": {
+    "postPublish": [
+      {
+        "file": "sentry-expo/upload-sourcemaps",
+        "config": {
+          "organization": "YOUR_SENTRY_ORG",
+          "project": "autopilot-mobile"
+        }
+      }
+    ]
   }
 }
