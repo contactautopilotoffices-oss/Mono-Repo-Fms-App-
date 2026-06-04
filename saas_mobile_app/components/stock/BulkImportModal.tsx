@@ -142,7 +142,7 @@ export default function BulkImportModal({ visible, onClose, onSuccess, propertyI
       row.id === id
         ? { ...row, [field]: value, error: field === 'name' && !value ? 'Name required' : row.error }
         : row
-    );
+    ));
   };
 
   const removeRow = (id: string) => {

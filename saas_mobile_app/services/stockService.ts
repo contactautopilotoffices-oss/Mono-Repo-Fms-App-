@@ -686,6 +686,107 @@ export const stockService = {
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     return `${propertyCode}-${timestamp}${random}`;
   },
+
+  // ── Get barcode info for an item ─────────────────────────────────────────
+  async getBarcode(itemId: string): Promise<ApiResponse<{
+    barcode: string;
+    barcode_format: string | null;
+    qr_code_data: QRCodeData | null;
+    item_name: string;
+    item_code: string;
+  }>> {
+    try {
+      const res = await serverApi.query<StockItem[]>({
+        table: 'stock_items',
+        action: 'select',
+        select: 'id, name, item_code, barcode, barcode_format, qr_code_data',
+        filters: [{ op: 'eq', column: 'id', value: itemId }],
+        limit: 1,
+      });
+
+      if (res.error) throw new Error(res.error.message);
+      if (!res.data || res.data.length === 0) {
+        return { success: false, data: null, error: 'Item not found', status: 404 };
+      }
+
+      const item = res.data[0];
+      return {
+        success: true,
+        data: {
+          barcode: item.barcode || item.item_code || item.id,
+          barcode_format: item.barcode_format,
+          qr_code_data: item.qr_code_data,
+          item_name: item.name,
+          item_code: item.item_code,
+        },
+        status: 200,
+      };
+    } catch (err: any) {
+      return { success: false, data: null, error: err.message, status: 500 };
+    }
+  },
+
+  // ── Regenerate barcode for an item ──────────────────────────────────────
+  async regenerateBarcode(itemId: string): Promise<ApiResponse<{
+    barcode: string;
+    barcode_format: string | null;
+    qr_code_data: QRCodeData | null;
+    item_name: string;
+    item_code: string;
+  }>> {
+    try {
+      // Get current item
+      const itemRes = await serverApi.query<StockItem[]>({
+        table: 'stock_items',
+        action: 'select',
+        select: 'id, name, item_code',
+        filters: [{ op: 'eq', column: 'id', value: itemId }],
+        limit: 1,
+      });
+
+      if (itemRes.error) throw new Error(itemRes.error.message);
+      if (!itemRes.data || itemRes.data.length === 0) {
+        return { success: false, data: null, error: 'Item not found', status: 404 };
+      }
+
+      const item = itemRes.data[0];
+
+      // Generate new barcode
+      const newBarcode = `${item.id.slice(0, 8)}-${item.item_code || item.id.slice(-8)}`;
+      const newQRData: QRCodeData = {
+        id: item.id,
+        item_code: item.item_code,
+        name: item.name,
+      };
+
+      // Update item
+      await serverApi.query({
+        table: 'stock_items',
+        action: 'update',
+        values: {
+          barcode: newBarcode,
+          barcode_format: 'CODE128',
+          qr_code_data: newQRData,
+          barcode_generated_at: new Date().toISOString(),
+        },
+        filters: [{ op: 'eq', column: 'id', value: itemId }],
+      });
+
+      return {
+        success: true,
+        data: {
+          barcode: newBarcode,
+          barcode_format: 'CODE128',
+          qr_code_data: newQRData,
+          item_name: item.name,
+          item_code: item.item_code,
+        },
+        status: 200,
+      };
+    } catch (err: any) {
+      return { success: false, data: null, error: err.message, status: 500 };
+    }
+  },
 };
 
 export default stockService;

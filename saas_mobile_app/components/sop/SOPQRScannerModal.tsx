@@ -6,7 +6,7 @@ import {
 import { X } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ScannerView from '@/components/shared/ScannerView';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { useTheme } from '@/context';
 
 interface SOPQRScannerModalProps {
@@ -57,34 +57,20 @@ export default function SOPQRScannerModal({
       }
 
       if (propertyId && organizationId) {
-        const supabase = createClient();
-        const { data: template } = await supabase
-          .from('sop_templates')
-          .select('id, title')
-          .eq('id', templateId)
-          .maybeSingle();
+        // Use server API to validate template and create completion
+        const scanRes = await apiFetch<{
+          success: boolean;
+          data: { template: { id: string; title: string }; completionId: string };
+          error?: string;
+        }>(`/api/checklist/scan?templateId=${templateId}&propertyId=${propertyId}&organizationId=${organizationId}`);
 
-        if (!template) {
-          setError('SOP template not found for this QR code.');
+        if (!scanRes.success || scanRes.error) {
+          setError(scanRes.error || 'SOP template not found for this QR code.');
           setResolving(false);
           return;
         }
 
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: completion } = await supabase
-          .from('sop_completions')
-          .insert({
-            template_id: templateId,
-            property_id: propertyId,
-            organization_id: organizationId,
-            status: 'in_progress',
-            completed_by: user?.id ?? null,
-            completion_date: new Date().toISOString().split('T')[0],
-          })
-          .select('id')
-          .single();
-
-        onScan?.(completion?.id ?? templateId, templateId);
+        onScan?.(scanRes.data.completionId, templateId);
       } else {
         onScan?.(qrData, templateId);
       }

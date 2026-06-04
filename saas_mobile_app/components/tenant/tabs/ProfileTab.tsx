@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform }
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useAuth } from '@/hooks/useAuth';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Image } from 'react-native';
@@ -31,24 +31,30 @@ function SettingRow({ label, value, icon }: { label: string; value: string; icon
 export function ProfileTab({ onSignOut }: ProfileTabProps) {
   const { user, signOut } = useAuth();
 
-  const supabase = React.useMemo(() => createClient(), []);
-
   const fetchProfile = React.useCallback(async () => {
-    if (!user) return null;
+    if (!user?.id) return null;
     try {
-      const { data, error } = await (supabase as any)
-        .from('users')
-        .select('id, full_name, email, phone, user_photo_url, role, designation')
-        .eq('id', user.id)
-        .maybeSingle();
+      // Use server API to fetch user profile
+      const response = await apiFetch<{
+        success: boolean;
+        data: {
+          id: string;
+          full_name: string;
+          email: string;
+          phone?: string;
+          user_photo_url?: string;
+          role?: string;
+          designation?: string;
+        };
+      }>(`/api/users/${user.id}`);
 
-      if (error) throw error;
-      return data || null;
+      if (!response.success || !response.data) return null;
+      return response.data;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;
     }
-  }, [user, supabase]);
+  }, [user]);
 
   const { data: profile } = useServerQuery<any | null>(
     queryKeys.user.profile(user?.id ?? 'none'),

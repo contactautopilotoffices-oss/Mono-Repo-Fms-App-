@@ -12,18 +12,20 @@ import Animated, {
 
 const { width } = Dimensions.get('window');
 
+import { LinearGradient } from 'expo-linear-gradient';
+
 /**
- * Enhanced SkeletonItem with shimmer wave effect
- * Creates a left-to-right shimmer that feels premium
+ * Enhanced SkeletonItem with Instagram-like shimmer wave effect
  */
 const SkeletonItem = ({ style, delay = 0 }: { style: any; delay?: number }) => {
-  const shimmerX = useSharedValue(-100);
+  const shimmerX = useSharedValue(0);
 
   useEffect(() => {
+    // A single continuous smooth animation loop
     shimmerX.value = withDelay(
       delay,
       withRepeat(
-        withTiming(width + 100, { duration: 1500, easing: Easing.linear }),
+        withTiming(1, { duration: 1500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) }),
         -1,
         false
       )
@@ -31,7 +33,8 @@ const SkeletonItem = ({ style, delay = 0 }: { style: any; delay?: number }) => {
   }, [shimmerX, delay]);
 
   const shimmerStyle = useAnimatedStyle(() => {
-    const translateX = interpolate(shimmerX.value, [-100, width + 100], [-50, 50]);
+    // Translate from far left (-width) to far right (+width)
+    const translateX = interpolate(shimmerX.value, [0, 1], [-width, width]);
     return {
       transform: [{ translateX }],
     };
@@ -39,8 +42,20 @@ const SkeletonItem = ({ style, delay = 0 }: { style: any; delay?: number }) => {
 
   return (
     <View style={[styles.skeletonBase, style]}>
-      {/* Shimmer overlay */}
-      <Animated.View style={[styles.shimmer, shimmerStyle]} />
+      <Animated.View style={[StyleSheet.absoluteFill, shimmerStyle, { width: width * 1.5 }]}>
+        <LinearGradient
+          colors={[
+            'rgba(255,255,255,0)',
+            'rgba(255,255,255,0.04)',
+            'rgba(255,255,255,0.12)',
+            'rgba(255,255,255,0.04)',
+            'rgba(255,255,255,0)',
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
     </View>
   );
 };

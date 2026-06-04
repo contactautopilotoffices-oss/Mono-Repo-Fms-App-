@@ -1,11 +1,8 @@
 /**
- * Tool Layer — validated Supabase tool implementations for the voice pipeline.
+ * Tool Layer — validated server API implementations for the voice pipeline.
  */
 
-import { supabase } from '@/utils/supabase/client';
-import { serverApi } from '@/lib/serverApi';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const $ = supabase as unknown as any;
+import { apiFetch } from '@/utils/api/mobileApi';
 
 // ---------------------------------------------------------------------------
 // Tool result types
@@ -27,20 +24,28 @@ export async function listTicketsTool(
     const limit = Number(params.limit ?? 10);
     const status = params.status as string | undefined;
 
-    let query = supabase
-      .from('tickets')
-      .select('id, ticket_number, title, status, priority, created_at')
-      .eq('property_id', propertyId)
-      .eq('is_internal', false)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const queryParams = new URLSearchParams({
+      propertyId,
+      limit: String(limit),
+    });
+    if (status) queryParams.set('status', status);
 
-    if (status) query = query.eq('status', status);
+    const response = await apiFetch<{
+      tickets?: Array<{
+        id: string;
+        ticket_number: string;
+        title: string;
+        status: string;
+        priority: string;
+        created_at: string;
+      }>;
+      total?: number;
+      error?: string;
+    }>(`/api/tickets?${queryParams.toString()}`);
 
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (response.error) throw new Error(response.error);
 
-    return { success: true, data: data ?? [] };
+    return { success: true, data: response.tickets ?? [] };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -54,23 +59,25 @@ export async function getTicketStatusTool(
     const ticketId = params.ticket_id as string | undefined;
     const status = params.status as string | undefined;
 
-    let query = supabase
-      .from('tickets')
-      .select('id, ticket_number, title, status, priority, created_at')
-      .eq('property_id', propertyId)
-      .eq('is_internal', false)
-      .order('created_at', { ascending: false });
+    const queryParams = new URLSearchParams({ propertyId });
+    if (ticketId) queryParams.set('ticketId', ticketId);
+    if (status) queryParams.set('status', status);
 
-    if (ticketId) {
-      query = query.eq('id', ticketId).limit(1);
-    } else if (status) {
-      query = query.eq('status', status);
-    }
+    const response = await apiFetch<{
+      tickets?: Array<{
+        id: string;
+        ticket_number: string;
+        title: string;
+        status: string;
+        priority: string;
+        created_at: string;
+      }>;
+      error?: string;
+    }>(`/api/tickets?${queryParams.toString()}`);
 
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (response.error) throw new Error(response.error);
 
-    return { success: true, data: data ?? [] };
+    return { success: true, data: response.tickets ?? [] };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -87,31 +94,30 @@ export async function createTicketTool(
     const description = String(params.description ?? '');
     const priority = String(params.priority ?? 'medium') as 'low' | 'medium' | 'high' | 'critical';
 
-    const { count } = await supabase
-      .from('tickets')
-      .select('*', { count: 'exact', head: true })
-      .eq('property_id', propertyId);
-
-    const ticketNum = `TKT-${String((count ?? 0) + 1).padStart(4, '0')}`;
-
-    const { data, error } = await $
-      .from('tickets')
-      .insert({
-        ticket_number: ticketNum,
+    const response = await apiFetch<{
+      success?: boolean;
+      ticket?: { id: string; ticket_number: string };
+      classification?: {
+        issue_code: string;
+        skill_group: string;
+        confidence: string;
+        priority?: string;
+      };
+      error?: string;
+    }>('/api/tickets', {
+      method: 'POST',
+      body: JSON.stringify({
         title,
         description,
+        propertyId,
+        organizationId,
         priority,
-        status: 'open',
-        raised_by: userId,
-        property_id: propertyId,
-        organization_id: organizationId,
-      })
-      .select('id, ticket_number')
-      .single();
+      }),
+    });
 
-    if (error) throw new Error(error.message);
+    if (response.error) throw new Error(response.error);
 
-    return { success: true, data: { id: data.id, ticket_number: data.ticket_number } };
+    return { success: true, data: { id: response.ticket?.id, ticket_number: response.ticket?.ticket_number } };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -127,18 +133,25 @@ export async function listRoomsTool(
   try {
     const capacity = Number(params.capacity ?? 0);
 
-    let query = supabase
-      .from('meeting_rooms')
-      .select('id, name, capacity, location, status')
-      .eq('property_id', propertyId)
-      .eq('status', 'active');
+    const response = await apiFetch<{
+      rooms?: Array<{
+        id: string;
+        name: string;
+        capacity: number;
+        location: string;
+        status: string;
+      }>;
+      error?: string;
+    }>(`/api/meeting-rooms/available?propertyId=${propertyId}`);
 
-    if (capacity > 0) query = query.gte('capacity', capacity);
+    if (response.error) throw new Error(response.error);
 
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    let rooms = response.rooms ?? [];
+    if (capacity > 0) {
+      rooms = rooms.filter((r: any) => r.capacity >= capacity);
+    }
 
-    return { success: true, data: data ?? [] };
+    return { success: true, data: rooms };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -162,37 +175,24 @@ export async function bookRoomTool(
       return { success: false, error: 'Cannot book for a past date/time' };
     }
 
-    const { data: overlaps, error: overlapError } = await supabase
-      .from('meeting_room_bookings')
-      .select('id')
-      .eq('meeting_room_id', roomId)
-      .eq('booking_date', date)
-      .eq('status', 'confirmed')
-      .lt('start_time', endTime)
-      .gt('end_time', startTime);
+    const response = await apiFetch<{
+      success?: boolean;
+      booking?: any;
+      error?: string;
+    }>('/api/meeting-room-bookings', {
+      method: 'POST',
+      body: JSON.stringify({
+        meetingRoomId: roomId,
+        propertyId,
+        date,
+        startTime,
+        endTime,
+      }),
+    });
 
-    if (overlapError) throw new Error(overlapError.message);
-    if (overlaps && overlaps.length > 0) {
-      return { success: false, error: 'Room is already booked for this time slot' };
-    }
+    if (response.error) throw new Error(response.error);
 
-    const { data, error } = await $
-      .from('meeting_room_bookings')
-      .insert({
-        meeting_room_id: roomId,
-        property_id: propertyId,
-        user_id: userId,
-        booking_date: date,
-        start_time: startTime,
-        end_time: endTime,
-        status: 'confirmed',
-      })
-      .select()
-      .single();
-
-    if (error) throw new Error(error.message);
-
-    return { success: true, data };
+    return { success: true, data: response.booking };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -208,16 +208,23 @@ export async function listVisitorsTool(
   try {
     const limit = Number(params.limit ?? 5);
 
-    const { data, error } = await $
-      .from('visitor_logs')
-      .select('id, name, host_name, check_in_time, check_out_time, purpose')
-      .eq('property_id', propertyId)
-      .order('check_in_time', { ascending: false })
-      .limit(limit);
+    const response = await apiFetch<{
+      visitors?: Array<{
+        id: string;
+        name: string;
+        visitor_id?: string;
+        host_name?: string;
+        check_in_time?: string;
+        check_out_time?: string;
+        purpose?: string;
+        status?: string;
+      }>;
+      error?: string;
+    }>(`/api/visitors?propertyId=${propertyId}&limit=${limit}`);
 
-    if (error) throw new Error(error.message);
+    if (response.error) throw new Error(response.error);
 
-    return { success: true, data: data ?? [] };
+    return { success: true, data: response.visitors ?? [] };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
@@ -228,37 +235,42 @@ export async function listVisitorsTool(
 // ---------------------------------------------------------------------------
 export async function getPropertyInfoTool(propertyId: string): Promise<ToolResult> {
   try {
-    const { data, error } = await $
-      .from('properties')
-      .select('name, address')
-      .eq('id', propertyId)
-      .single();
+    const response = await apiFetch<{
+      property?: {
+        name: string;
+        address?: string;
+      };
+      error?: string;
+    }>(`/api/properties/${propertyId}`);
 
-    if (error) throw new Error(error.message);
+    if (response.error) throw new Error(response.error);
 
-    const [{ count: openCount }, { count: totalCount }] = await Promise.all([
-      serverApi.query({
-        table: 'tickets',
-        action: 'select',
-        select: '*',
-        selectOptions: { count: 'exact', head: true },
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'is_internal', value: false }, { op: 'not', column: 'status', operator: 'in', value: '(resolved,closed)' }],
-      }),
-      serverApi.query({
-        table: 'tickets',
-        action: 'select',
-        select: '*',
-        selectOptions: { count: 'exact', head: true },
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'is_internal', value: false }],
-      }),
-    ]);
+    // Fetch ticket stats via tickets stats API
+    let openCount = 0;
+    let totalCount = 0;
+
+    try {
+      const statsResponse = await apiFetch<{
+        stats?: {
+          open?: number;
+          total?: number;
+        };
+      }>(`/api/tickets/stats?propertyId=${propertyId}`);
+
+      if (statsResponse.stats) {
+        openCount = statsResponse.stats.open ?? 0;
+        totalCount = statsResponse.stats.total ?? 0;
+      }
+    } catch {
+      // Stats are optional, continue without them
+    }
 
     return {
       success: true,
       data: {
-        ...(data as Record<string, unknown>),
-        openTicketCount: openCount ?? 0,
-        totalTicketCount: totalCount ?? 0,
+        ...(response.property as Record<string, unknown>),
+        openTicketCount: openCount,
+        totalTicketCount: totalCount,
       },
     };
   } catch (err) {

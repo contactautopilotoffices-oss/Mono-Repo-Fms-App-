@@ -5,7 +5,7 @@ import { AlertTriangle, Clock, ArrowRight } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassCard } from '@/constants/designSystem';
 import { useTheme } from '@/context';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 export default function SOPDueAlerts() {
   const router = useRouter();
@@ -16,21 +16,15 @@ export default function SOPDueAlerts() {
 
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     if (!pid) return;
-    supabase
-      .from('sop_completions')
-      .select('id, status, created_at, template:sop_templates(title)')
-      .eq('property_id', pid)
-      .in('status', ['pending', 'in_progress', 'missed'])
-      .order('created_at', { ascending: true })
-      .limit(20)
-      .then(({ data, error }: any) => {
-        if (!error) setAlerts(data || []);
+    apiFetch<{ success: boolean; data: any[] }>(`/api/checklist/due-alerts?propertyId=${pid}`)
+      .then((res) => {
+        if (res.success) setAlerts(res.data || []);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, [pid]);
 
   return (

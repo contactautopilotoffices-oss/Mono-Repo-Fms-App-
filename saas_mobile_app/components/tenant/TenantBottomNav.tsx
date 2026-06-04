@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, usePathname } from 'expo-router';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import SidekickFace from '@/components/dashboard/SidekickFace';
+import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
+import { useCassandraStore } from '@/stores/cassandraStore';
+import { useUnreadStore } from '@/stores/unreadStore';
+import { useAuth } from '@/hooks/useAuth';
 
 const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
 
@@ -28,9 +32,23 @@ const rightItems: NavItemDef[] = [
 
 export default function TenantBottomNav() {
   const router = useRouter();
-  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
-  const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
+  const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
+  const { membership } = useAuth();
+  
+  const [showChat, setShowChat] = useState(false);
+
+  // Cassandra voice state
+  const voiceState = useCassandraStore((s) => s.voiceState);
+  const faceState: any = (() => {
+    if (voiceState === 'recording' || voiceState === 'processing' || voiceState === 'connecting') return 'listening';
+    if (voiceState === 'speaking') return 'speaking';
+    if (voiceState === 'error') return 'alert';
+    return 'idle';
+  })();
+
+  const ticketChatCount = useUnreadStore((s) => s.ticketChatCount);
 
   const activeId: NavId = (() => {
     const parts = pathname.split('/').filter(Boolean);
@@ -52,10 +70,11 @@ export default function TenantBottomNav() {
         router.navigate(`/property/${propertyId}/tenant` as any);
         break;
       case 'tickets':
-        router.navigate(`/property/${propertyId}/tenant/requests` as any);
+        router.navigate(`/property/${propertyId}/tickets` as any);
         break;
       case 'cassandra':
-        router.navigate(`/cassandra?propertyId=${propertyId}` as any);
+        setShowChat(true);
+        useUnreadStore.getState().clearTicketChat();
         break;
       case 'rooms':
         router.navigate(`/property/${propertyId}/rooms` as any);
@@ -87,29 +106,44 @@ export default function TenantBottomNav() {
   };
 
   return (
-    <SafeBlurView intensity={60} tint="dark" style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-      <View style={styles.navBar}>
-        {leftItems.map((item) => (
-          <NavItem key={item.id} item={item} />
-        ))}
+    <>
+      <SafeBlurView intensity={60} tint="dark" style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={styles.navBar}>
+          {leftItems.map((item) => (
+            <NavItem key={item.id} item={item} />
+          ))}
 
-        {/* Center Cassandra Orb — SidekickFace */}
-        <TouchableOpacity
-          style={[styles.navItem, styles.centerItem]}
-          onPress={() => handlePress('cassandra')}
-          activeOpacity={0.85}
-        >
-          <SidekickFace compact size={44} state="idle" />
-          <Text style={[styles.navLabel, activeId === 'cassandra' && styles.navLabelActive]}>
-            AI Assistant
-          </Text>
-        </TouchableOpacity>
+          {/* Center Cassandra Orb */}
+          <TouchableOpacity style={styles.navItemCenter} onPress={() => handlePress('cassandra')} activeOpacity={0.8}>
+            <View style={styles.orbWrapper}>
+              <View style={styles.orb}>
+                <SidekickFace state={faceState} size={32} onClick={() => handlePress('cassandra')} />
+              </View>
+              {ticketChatCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {ticketChatCount > 99 ? '99+' : ticketChatCount}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.navLabel}>Cassandra</Text>
+          </TouchableOpacity>
 
-        {rightItems.map((item) => (
-          <NavItem key={item.id} item={item} />
-        ))}
-      </View>
-    </SafeBlurView>
+          {rightItems.map((item) => (
+            <NavItem key={item.id} item={item} />
+          ))}
+        </View>
+      </SafeBlurView>
+
+      <CassandraSessionModal 
+        visible={showChat} 
+        onClose={() => setShowChat(false)} 
+        orgId={membership?.org_id || ''} 
+        propertyId={propertyId || ''} 
+        initialMode="text" 
+      />
+    </>
   );
 }
 
@@ -155,5 +189,46 @@ const styles = StyleSheet.create({
   },
   centerItem: {
     position: 'relative',
+  },
+  navItemCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1.2,
+    gap: 3,
+    marginTop: -6,
+  },
+  orbWrapper: {
+    position: 'relative',
+  },
+  orb: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    shadowColor: '#3B82F6',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });

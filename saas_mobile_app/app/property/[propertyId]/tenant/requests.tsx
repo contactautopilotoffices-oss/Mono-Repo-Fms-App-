@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ScrollView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,7 +19,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWeather } from "@/hooks/useWeather";
 import { useTenantTickets } from "@/hooks/tenant/useTenantTickets";
 import WeatherBackground from "@/components/dashboard/WeatherBackground";
-import TenantBottomNav from "@/components/tenant/TenantBottomNav";
+
 import { TenantTicketCard } from "@/components/tenant/TenantTicketCard";
 import { TicketCreateModal } from "@/components/tickets/TicketCreateModal";
 import { SPACING } from "@/constants/designSystem";
@@ -36,7 +37,7 @@ const FONT_BODY = Platform.select({
   default: "Urbanist",
 });
 
-type FilterStatus = "all" | "open" | "in_progress" | "resolved" | "closed" | "pending_validation" | "assigned";
+type FilterStatus = "all" | "waitlist" | "in_progress" | "pending_validation" | "completed";
 
 export default function TenantRequestsPage() {
   const router = useRouter();
@@ -48,21 +49,27 @@ export default function TenantRequestsPage() {
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [showTicketModal, setShowTicketModal] = useState(false);
 
-  const { tickets, loading, refetch } = useTenantTickets(propertyId, user?.id);
+  const statusParam = React.useMemo(() => {
+    if (filter === "all") return undefined;
+    if (filter === "completed") return "resolved,closed";
+    if (filter === "in_progress") return "open,assigned,in_progress,pending_validation";
+    if (filter === "waitlist") return "waitlist";
+    if (filter === "pending_validation") return "pending_validation";
+    return undefined;
+  }, [filter]);
 
-  const filteredTickets = React.useMemo(() => {
-    if (filter === "all") return tickets;
-    return tickets.filter((t: any) => {
-      if (filter === "all") return true;
-      if (filter === "open") return t.status === "open" || t.status === "waitlist";
-      if (filter === "assigned") return t.status === "assigned";
-      if (filter === "in_progress") return t.status === "in_progress";
-      if (filter === "pending_validation") return t.status === "pending_validation";
-      if (filter === "resolved") return t.status === "resolved";
-      if (filter === "closed") return t.status === "closed";
-      return true;
-    });
-  }, [tickets, filter]);
+  const { 
+    tickets, 
+    loading, 
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useTenantTickets(propertyId, user?.id, {
+    status: statusParam
+  });
+
+  const filteredTickets = tickets;
 
   const onRefresh = useCallback(async () => {
     await refetch();
@@ -75,12 +82,10 @@ export default function TenantRequestsPage() {
 
   const filters: { key: FilterStatus; label: string }[] = [
     { key: "all", label: "All" },
-    { key: "open", label: "Open" },
-    { key: "assigned", label: "Assigned" },
     { key: "in_progress", label: "In Progress" },
+    { key: "completed", label: "Completed" },
+    { key: "waitlist", label: "Waitlist" },
     { key: "pending_validation", label: "Pending" },
-    { key: "resolved", label: "Resolved" },
-    { key: "closed", label: "Closed" },
   ];
 
   return (
@@ -144,10 +149,36 @@ export default function TenantRequestsPage() {
         keyExtractor={(item: any) => item.id}
         refreshControl={
           <RefreshControl
-            refreshing={loading}
+            refreshing={loading && tickets.length === 0}
             onRefresh={onRefresh}
             tintColor="rgba(255,255,255,0.6)"
           />
+        }
+        onEndReached={() => {
+          if (hasNextPage && !isFetchingNextPage) {
+            fetchNextPage();
+          }
+        }}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+          isFetchingNextPage ? (
+            <View style={{ padding: 20 }}>
+              <ActivityIndicator size="small" color="#5A8A8F" />
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Ionicons
+              name="ticket-outline"
+              size={48}
+              color="rgba(255,255,255,0.2)"
+            />
+            <Text style={styles.emptyTitle}>No requests yet</Text>
+            <Text style={styles.emptySubtitle}>
+              Tap + to raise your first ticket
+            </Text>
+          </View>
         }
         contentContainerStyle={{
           paddingHorizontal: SPACING.xl,
@@ -163,22 +194,9 @@ export default function TenantRequestsPage() {
             }
           />
         )}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons
-              name="ticket-outline"
-              size={48}
-              color="rgba(255,255,255,0.2)"
-            />
-            <Text style={styles.emptyTitle}>No requests yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Tap + to raise your first ticket
-            </Text>
-          </View>
-        }
       />
 
-      <TenantBottomNav />
+      
 
       <TicketCreateModal
         isOpen={showTicketModal}

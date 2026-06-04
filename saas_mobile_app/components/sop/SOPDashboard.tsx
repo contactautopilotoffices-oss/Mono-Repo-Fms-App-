@@ -5,7 +5,7 @@ import { ClipboardList, CheckCircle2, Clock, AlertTriangle, Play } from 'lucide-
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassCard } from '@/constants/designSystem';
 import { useTheme } from '@/context';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 interface SOPDashboardProps {
   propertyId?: string;
@@ -21,24 +21,13 @@ export default function SOPDashboard({ propertyId: propId }: SOPDashboardProps) 
 
   const [stats, setStats] = useState({ total: 0, completed: 0, due: 0, missed: 0 });
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     if (!pid) return;
     const fetchStats = async () => {
-      const { data, error } = await supabase
-        .from('sop_completions')
-        .select('status, created_at')
-        .eq('property_id', pid)
-        .gte('created_at', new Date(Date.now() - 7 * 86400000).toISOString());
-
-      if (!error && data) {
-        setStats({
-          total: data.length,
-          completed: data.filter((d: any) => d.status === 'completed').length,
-          due: data.filter((d: any) => d.status === 'pending' || d.status === 'in_progress').length,
-          missed: data.filter((d: any) => d.status === 'missed').length,
-        });
+      const res = await apiFetch<{ success: boolean; data: { total: number; completed: number; due: number; missed: number } }>(`/api/checklist/stats?propertyId=${pid}`);
+      if (res.success) {
+        setStats(res.data);
       }
       setLoading(false);
     };

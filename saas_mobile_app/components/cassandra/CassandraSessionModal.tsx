@@ -60,7 +60,7 @@ import {
   deleteChatSession,
 } from '@/lib/cassandra';
 import type { ChatSession } from '@/lib/cassandra';
-import { supabase } from '@/utils/supabase';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const SendIcon = ({ size = 20, color = '#fff' }: { size?: number; color?: string }) => (
@@ -489,15 +489,28 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
         [{ resize: { width: 1200 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
       );
-      const arrayBuffer = await readFileAsArrayBuffer(compressed.uri);
-      const path = `cassandra-chat/${user?.id ?? 'anon'}/${Date.now()}.jpg`;
-      const { error } = await supabase.storage.from('ticket_photos').upload(path, arrayBuffer, {
-        contentType: 'image/jpeg',
-        upsert: true,
+
+      // Create FormData for file upload via API
+      const formData = new FormData();
+      const path = `cassandra-chat/${user?.id ?? 'anon'}/${Date.now()}`;
+      formData.append('file', {
+        uri: compressed.uri,
+        name: 'image.jpg',
+        type: 'image/jpeg',
+      } as any);
+      formData.append('path', path);
+
+      // Upload via server API
+      const res = await apiFetch<{ success: boolean; data?: { url: string }; error?: string }>('/api/upload', {
+        method: 'POST',
+        body: formData as any,
       });
-      if (error) throw error;
-      const { data: publicUrlData } = supabase.storage.from('ticket_photos').getPublicUrl(path);
-      return publicUrlData.publicUrl;
+
+      if (!res.success || !res.data?.url) {
+        throw new Error(res.error || 'Upload failed');
+      }
+
+      return res.data.url;
     } catch (err: any) {
       console.error('[uploadImageToStorage] failed:', err);
       toast.error('Failed to upload image: ' + (err?.message ?? 'unknown error'));

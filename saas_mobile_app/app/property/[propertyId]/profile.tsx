@@ -20,7 +20,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors } from '@/constants/Colors';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { readFileAsArrayBuffer, compressImage } from '@/utils/mediaUtils';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,25 +64,20 @@ export default function ProfileScreen() {
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
 
-  const supabase = React.useMemo(() => createClient(), []);
-
   // ─── Fetch profile ─────────────────────────────────────────────────────────
   const fetchProfile = useCallback(async () => {
     if (!user) return null;
     try {
-      const { data, error } = await (supabase as any)
-        .from('users')
-        .select('id, full_name, email, phone, user_photo_url, role, designation')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-      return (data as UserProfile) || null;
+      const response = await apiFetch<{ success: boolean; data: UserProfile }>(
+        `/api/users/${user.id}`
+      );
+      if (!response.success) throw new Error(response.error);
+      return response.data || null;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;
     }
-  }, [user, supabase]);
+  }, [user]);
 
   useEffect(() => {
     if (profile) {
@@ -110,16 +105,14 @@ export default function ProfileScreen() {
     }
     setIsSaving(true);
     try {
-      const { error } = await (supabase as any)
-        .from('users')
-        .update({
+      const response = await apiFetch(`/api/users/${profile.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
           full_name: editName.trim(),
           phone: editPhone.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', profile.id);
-
-      if (error) throw error;
+        }),
+      });
+      if (!response.success) throw new Error(response.error);
 
       Alert.alert('Success', 'Profile updated successfully');
       refetch();
@@ -167,20 +160,26 @@ export default function ProfileScreen() {
 
   const uploadPhoto = async (uri: string) => {
     try {
-      if (!user?.id) throw new Error('Not authenticated');
+      if (!user?.id || !profile) {
+        Alert.alert('Error', 'Not authenticated');
+        return;
+      }
+
       const compressedUri = await compressImage(uri);
-      const filename = `${user.id}/${Date.now()}.jpg`;
-      const arrayBuffer = await readFileAsArrayBuffer(compressedUri);
+      const formData = new FormData();
+      formData.append('file', {
+        uri: compressedUri,
+        name: 'photo.jpg',
+        type: 'image/jpeg',
+      } as any);
 
-      const { error: uploadError } = await supabase.storage
-        .from('user-photos')
-        .upload(filename, arrayBuffer, { contentType: 'image/jpeg' });
+      // Upload via server API
+      const response = await apiFetch(`/api/users/${profile.id}/photo`, {
+        method: 'POST',
+        body: formData as any,
+      });
 
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from('user-photos').getPublicUrl(filename);
-      const publicUrl = urlData.publicUrl + '?t=' + Date.now();
-      await (supabase as any).from('users').update({ user_photo_url: publicUrl }).eq('id', profile?.id);
+      if (!response.success) throw new Error(response.error);
 
       refetch();
     } catch (error) {

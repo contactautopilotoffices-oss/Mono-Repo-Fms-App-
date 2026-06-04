@@ -23,7 +23,7 @@ import { useWeather } from '@/hooks/useWeather';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
-import TenantBottomNav from '@/components/tenant/TenantBottomNav';
+
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { RoomBookingTab } from '@/components/tenant/tabs/RoomBookingTab';
 import {
@@ -346,7 +346,7 @@ export default function TenantRoomsPage() {
         />
       )}
 
-      <TenantBottomNav />
+      
 
       {/* Booking Modal */}
       <Modal visible={showBookingModal} transparent animationType="slide" onRequestClose={() => setShowBookingModal(false)}>

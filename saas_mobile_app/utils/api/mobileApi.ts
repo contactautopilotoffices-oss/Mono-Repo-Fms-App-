@@ -175,7 +175,7 @@ export interface SuperTenantResponse {
 // ---------------------------------------------------------------------
 // Internal fetch helper with Bearer token
 // ---------------------------------------------------------------------
-async function apiFetch<T>(
+export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -266,10 +266,14 @@ export interface ListTicketsInput {
   organizationId?: string;
   status?: string;
   isInternal?: boolean;
+  excludeInternal?: boolean;
   raisedBy?: string;
   raisedByRole?: string;
   limit?: number;
   offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
 }
 
 export async function listTickets(input: ListTicketsInput): Promise<TicketListResponse> {
@@ -277,11 +281,15 @@ export async function listTickets(input: ListTicketsInput): Promise<TicketListRe
   if (input.propertyId) params.set('property_id', input.propertyId);
   if (input.organizationId) params.set('organization_id', input.organizationId);
   if (input.status) params.set('status', input.status);
-  if (input.isInternal !== undefined) params.set('isInternal', String(input.isInternal));
+  if (input.isInternal !== undefined) params.set('internalOnly', String(input.isInternal));
+  if (input.excludeInternal !== undefined) params.set('excludeInternal', String(input.excludeInternal));
   if (input.raisedBy) params.set('raised_by', input.raisedBy);
   if (input.raisedByRole) params.set('raisedByRole', input.raisedByRole);
   if (input.limit !== undefined) params.set('limit', String(input.limit));
   if (input.offset !== undefined) params.set('offset', String(input.offset));
+  if (input.dateFrom) params.set('dateFrom', input.dateFrom);
+  if (input.dateTo) params.set('dateTo', input.dateTo);
+  if (input.search) params.set('search', input.search);
 
   const qs = params.toString();
   return apiFetch<TicketListResponse>(`/api/tickets${qs ? `?${qs}` : ''}`);
@@ -1064,24 +1072,19 @@ export interface CreateUserResponse {
 }
 
 /**
- * Fetch all users for an organization or property directly via Supabase.
- * Replaces the Vercel API call to avoid "Failed to fetch" on mobile.
+ * Fetch all users for an organization or property via server API.
  */
 export async function fetchUsersList(orgId?: string, propertyId?: string): Promise<UserListResponse> {
-  const supabase = createClient();
   try {
     if (propertyId) {
-      const { data, error } = await (supabase as any)
-        .from('property_memberships')
-        .select('role, is_active, created_at, users:user_id(id, full_name, email, user_photo_url, phone)')
-        .eq('property_id', propertyId);
-      if (error) throw error;
-      const users = (data || []).map((m: any) => ({
-        id: m.users?.id,
-        full_name: m.users?.full_name || 'Unknown',
-        email: m.users?.email || '',
-        user_photo_url: m.users?.user_photo_url,
-        phone: m.users?.phone,
+      const response = await apiFetch<{ success: boolean; data: any[] }>(`/api/properties/${propertyId}/users`);
+      if (!response.success) return { users: [] };
+      const users = (response.data || []).map((m: any) => ({
+        id: m.user_id,
+        full_name: m.full_name || 'Unknown',
+        email: m.email || '',
+        user_photo_url: m.user_photo_url,
+        phone: m.phone,
         propertyRole: m.role,
         propertyId,
         is_active: m.is_active ?? true,
@@ -1090,15 +1093,12 @@ export async function fetchUsersList(orgId?: string, propertyId?: string): Promi
       return { users };
     }
     if (orgId) {
-      const { data, error } = await (supabase as any)
-        .from('organization_memberships')
-        .select('role, is_active, created_at, users:user_id(id, full_name, email, user_photo_url, phone)')
-        .eq('organization_id', orgId);
-      if (error) throw error;
-      const users = (data || []).map((m: any) => ({
+      const response = await apiFetch<{ success: boolean; data: any[] }>(`/api/organizations/${orgId}/users`);
+      if (!response.success) return { users: [] };
+      const users = (response.data || []).map((m: any) => ({
         id: m.users?.id,
-        full_name: m.users?.full_name || 'Unknown',
-        email: m.users?.email || '',
+        full_name: m.users?.full_name || m.full_name || 'Unknown',
+        email: m.users?.email || m.email || '',
         user_photo_url: m.users?.user_photo_url,
         phone: m.users?.phone,
         orgRole: m.role,
@@ -1109,7 +1109,7 @@ export async function fetchUsersList(orgId?: string, propertyId?: string): Promi
     }
     return { users: [] };
   } catch (err: any) {
-    console.error('[fetchUsersList] Supabase error:', err);
+    console.error('[fetchUsersList] error:', err);
     return { users: [] };
   }
 }

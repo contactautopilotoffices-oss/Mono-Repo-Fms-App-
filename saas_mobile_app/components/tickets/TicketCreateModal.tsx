@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { createTicket, uploadTicketPhoto, fetchUsersList } from '@/utils/api/mobileApi';
 import MediaCaptureModal, { MediaFile } from '../shared/MediaCaptureModal';
 import { useTheme } from '@/context';
@@ -56,7 +56,6 @@ export function TicketCreateModal({
 }: TicketCreateModalProps) {
   const isAdminMode = role === 'super_admin';
   const showInternalToggle = role !== 'tenant';
-  const supabase = createClient();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -124,12 +123,8 @@ export function TicketCreateModal({
     setSelectedOrgId(orgId);
     setSelectedPropId('');
     if (orgId) {
-      const { data } = await supabase
-        .from('properties')
-        .select('id, name, code')
-        .eq('organization_id', orgId)
-        .eq('status', 'active');
-      setAvailableProperties(data || []);
+      const response = await apiFetch<{ success: boolean; data: any[] }>(`/api/organizations/${orgId}/properties`);
+      setAvailableProperties(response.success ? response.data || [] : []);
     } else {
       setAvailableProperties([]);
     }

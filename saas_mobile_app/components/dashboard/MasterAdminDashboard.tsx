@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { createClient } from '../../utils/supabase/client';
 import { useAuth } from '../../hooks/useAuth';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import WeatherBadge from '@/components/dashboard/WeatherBadge';
@@ -28,6 +27,7 @@ import { useServerQuery } from '@/hooks/useServerQuery';
 import { useTheme } from '@/context';
 import SignOutModal from '../ui/SignOutModal';
 import Skeleton from '../ui/Skeleton';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 // Types
 type Tab = 'overview' | 'organizations' | 'users' | 'tickets' | 'settings' | 'profile';
@@ -66,8 +66,6 @@ export default function MasterAdminDashboard() {
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
 
-  const supabase = useMemo(() => createClient(), []);
-
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [manualCondition, setManualCondition] = useState<import('@/hooks/useWeather').WeatherCondition | null>(null);
@@ -80,46 +78,29 @@ export default function MasterAdminDashboard() {
   const fetchData = useCallback(async () => {
     if (!user) throw new Error('Not authenticated');
 
-    const { data: userProfile } = await (supabase
-      .from('users')
-      .select('is_master_admin')
-      .eq('id', user.id)
-      .single() as any);
+    // Fetch organizations and users from server APIs
+    const [orgsRes, usersRes] = await Promise.all([
+      apiFetch<{ success: boolean; data: Organization[]; total: number }>('/api/admin/organizations'),
+      apiFetch<{ success: boolean; data: SystemUser[]; total: number }>('/api/admin/users'),
+    ]);
 
-    if (!userProfile?.is_master_admin) {
-      return { organizations: [], users: [], stats: { entities: 0, activeSessions: 0, securityAlerts: 0, pendingDeletions: 0 } };
+    if (!orgsRes.success || !usersRes.success) {
+      throw new Error('Failed to fetch data');
     }
 
-    const { data: orgData, error: orgError } = await (supabase
-      .from('organizations')
-      .select('*, properties(count)')
-      .order('created_at', { ascending: false }) as any);
-    if (orgError) throw new Error('Failed to fetch organizations');
-
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('id, full_name, email, phone, created_at, is_master_admin')
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (userError) throw new Error('Failed to fetch users');
-
-    const [{ count: orgCount }, { count: userCount }] = await Promise.all([
-      supabase.from('organizations').select('id', { count: 'exact', head: true }),
-      supabase.from('users').select('id', { count: 'exact', head: true }),
-    ]);
     const stats: DashboardStats = {
-      entities: (orgCount ?? 0) + (userCount ?? 0),
+      entities: (orgsRes.total ?? 0) + (usersRes.total ?? 0),
       activeSessions: 0,
       securityAlerts: 0,
       pendingDeletions: 0,
     };
 
     return {
-      organizations: (orgData ?? []) as Organization[],
-      users: ((userData ?? []) as SystemUser[]),
+      organizations: orgsRes.data ?? [],
+      users: usersRes.data ?? [],
       stats,
     };
-  }, [user, supabase]);
+  }, [user]);
 
   const { data, isLoading, isFetching, refetch } = useServerQuery<{
     organizations: Organization[];
@@ -142,15 +123,16 @@ export default function MasterAdminDashboard() {
 
     setIsCreatingOrg(true);
     try {
-      const { error } = await (supabase
-        .from('organizations')
-        .insert([{
+      const response = await apiFetch('/api/organizations', {
+        method: 'POST',
+        body: JSON.stringify({
           name: newOrgName.trim(),
           code: newOrgCode.trim().toLowerCase(),
           is_deleted: false,
-        }] as any));
+        }),
+      });
 
-      if (error) throw error;
+      if (!response.success) throw new Error(response.error);
 
       setShowCreateOrgModal(false);
       setNewOrgName('');
@@ -173,13 +155,14 @@ export default function MasterAdminDashboard() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await (supabase as any)
-              .from('organizations')
-              .update({
+            await apiFetch('/api/organizations', {
+              method: 'PATCH',
+              body: JSON.stringify({
+                id: orgId,
                 is_deleted: true,
                 deleted_at: new Date().toISOString()
-              })
-              .eq('id', orgId);
+              }),
+            });
             refetch();
           }
         }
@@ -188,13 +171,14 @@ export default function MasterAdminDashboard() {
   };
 
   const handleRestoreOrg = async (orgId: string) => {
-    await (supabase as any)
-      .from('organizations')
-      .update({
+    await apiFetch('/api/organizations', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        id: orgId,
         is_deleted: false,
         deleted_at: null
-      })
-      .eq('id', orgId);
+      }),
+    });
     refetch();
   };
 

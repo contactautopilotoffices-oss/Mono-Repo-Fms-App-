@@ -114,17 +114,21 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
   // Minimum skeleton duration - don't flash if data loads too fast
   const [isFirstLoad, setIsFirstLoad] = useState(true);
-  const [showSkeleton, setShowSkeleton] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(!(hasLoadedInitialData && loadedPropertyId === propertyId));
 
   // Effect to handle minimum skeleton duration
   useEffect(() => {
     if (hasLoadedInitialData && loadedPropertyId === propertyId) {
-      // Data is loaded, but keep skeleton for minimum 600ms for smooth UX
-      const timer = setTimeout(() => {
-        setShowSkeleton(false);
+      if (showSkeleton) {
+        // Data is loaded, but keep skeleton for minimum 600ms for smooth UX
+        const timer = setTimeout(() => {
+          setShowSkeleton(false);
+          setIsFirstLoad(false);
+        }, 600);
+        return () => clearTimeout(timer);
+      } else {
         setIsFirstLoad(false);
-      }, 600);
-      return () => clearTimeout(timer);
+      }
     } else if (!hasLoadedInitialData) {
       // Still loading
       setShowSkeleton(true);

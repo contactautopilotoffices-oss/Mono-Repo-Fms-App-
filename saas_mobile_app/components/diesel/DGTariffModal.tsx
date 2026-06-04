@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { useAuth } from '@/hooks/useAuth';
 
 interface DGTariff {
@@ -71,14 +71,9 @@ export default function DGTariffModal({
     if (!selectedGenId) return;
     setIsLoading(true);
     try {
-      const { data, error: fetchErr } = await supabase
-        .from('dg_tariffs')
-        .select('*')
-        .eq('generator_id', selectedGenId)
-        .order('effective_from', { ascending: false }) as any;
-      
-      if (fetchErr) throw fetchErr;
-      setTariffs(data || []);
+      // Using the existing diesel/tariffs API
+      const res = await apiFetch<{ tariffs?: DGTariff[] }>(`/api/diesel/tariffs?generatorId=${selectedGenId}`);
+      setTariffs(res.tariffs || []);
     } catch (err) {
       console.error('Error fetching DG tariffs:', err);
     } finally {
@@ -106,29 +101,17 @@ export default function DGTariffModal({
     setIsSubmitting(true);
     setError(null);
     try {
-      // 1. Close existing active tariff
-      const dayBefore = new Date(effectiveFrom);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const dayBeforeStr = dayBefore.toISOString().split('T')[0];
-
-      await (supabase as any)
-        .from('dg_tariffs')
-        .update({ effective_to: dayBeforeStr })
-        .eq('generator_id', selectedGenId)
-        .is('effective_to', null)
-        .lt('effective_from', effectiveFrom);
-
-      // 2. Insert new tariff
-      const { error: insertErr } = await supabase
-        .from('dg_tariffs')
-        .insert({
+      // Insert new tariff via API
+      const res = await apiFetch<{ success: boolean; error?: string }>('/api/diesel/tariffs', {
+        method: 'POST',
+        body: JSON.stringify({
           generator_id: selectedGenId,
           cost_per_litre: cost,
           effective_from: effectiveFrom,
-          created_by: authUser?.id
-        } as any);
+        }),
+      });
 
-      if (insertErr) throw insertErr;
+      if (!res.success) throw new Error(res.error || 'Failed to save tariff');
 
       setCostPerLitre('');
       await fetchTariffs();
@@ -147,12 +130,11 @@ export default function DGTariffModal({
         style: 'destructive',
         onPress: async () => {
           try {
-            const { error: delErr } = await supabase
-              .from('dg_tariffs')
-              .delete()
-              .eq('id', id);
-            
-            if (delErr) throw delErr;
+            const res = await apiFetch<{ success: boolean; error?: string }>(`/api/diesel/tariffs/${id}`, {
+              method: 'DELETE',
+            });
+
+            if (!res.success) throw new Error(res.error || 'Failed to delete tariff');
             await fetchTariffs();
           } catch (e: any) {
             setError(e.message || 'Failed to delete tariff');

@@ -19,7 +19,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -201,7 +200,6 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
   const { user, signOut, membership } = useAuth();
   const { weather } = useWeather();
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
 
   // ── State ──
   const [activeTab, setActiveTab] = useState<Tab>('overview');

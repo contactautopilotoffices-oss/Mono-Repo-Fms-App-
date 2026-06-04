@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import Loader from '../ui/Loader';
@@ -26,23 +26,26 @@ interface PropertySelectionViewProps {
 }
 
 export default function PropertySelectionView({ propertyIds, onSelect }: PropertySelectionViewProps) {
-  const supabase = useMemo(() => createClient(), []);
-
   const fetchProperties = useCallback(async () => {
     if (propertyIds.length === 0) {
       return [];
     }
-    const { data, error } = await supabase
-      .from('properties')
-      .select('*')
-      .in('id', propertyIds);
+    // Fetch properties through server API
+    const responses = await Promise.all(
+      propertyIds.map(id =>
+        apiFetch<{ property: { id: string; name: string; code: string; address?: string } }>(
+          `/api/properties/${id}`
+        ).catch(() => null)
+      )
+    );
 
-    if (error) throw error;
-    return (data || []).map((property: any) => ({
-      ...property,
-      address: property.address ?? undefined,
-    })) as Property[];
-  }, [propertyIds, supabase]);
+    return responses
+      .filter((r): r is { property: Property } => r !== null)
+      .map(r => ({
+        ...r.property,
+        address: r.property.address ?? undefined,
+      })) as Property[];
+  }, [propertyIds]);
 
   const { data: properties = [], isLoading } = useServerQuery<Property[]>(
     queryKeys.property.propertySelection(...propertyIds),

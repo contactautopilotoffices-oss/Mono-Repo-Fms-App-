@@ -25,6 +25,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   runOnJS,
   interpolate,
   Extrapolate,
@@ -259,7 +260,7 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
     .onEnd((e) => {
       if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
         const dest = e.translationX > 0 ? SCREEN_W : -SCREEN_W;
-        translateX.value = withSpring(dest, { velocity: e.velocityX, damping: 20, stiffness: 90 }, () => {
+        translateX.value = withTiming(dest, { duration: 150 }, () => {
           runOnJS(sendToBack)();
         });
       } else {
@@ -321,7 +322,7 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
   );
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
+const TicketCard = React.memo(function TicketCard({ ticket }: { ticket: Ticket }) {
   const priorityColors: Record<string, { bg: string; text: string; border: string }> = {
     LOW: { bg: 'rgba(100,116,139,0.20)', text: '#94A3B8', border: 'rgba(100,116,139,0.40)' },
     MEDIUM: { bg: 'rgba(251,191,36,0.15)', text: '#FDE68A', border: 'rgba(251,191,36,0.35)' },
@@ -417,7 +418,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
       </View>
     </View>
   );
-}
+});
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
@@ -476,13 +477,15 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
 
   // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(!hasStaffCache);
 
   // Minimum skeleton duration effect
   useEffect(() => {
     if (hasStaffCache) {
-      const timer = setTimeout(() => setShowSkeleton(false), 600);
-      return () => clearTimeout(timer);
+      if (showSkeleton) {
+        const timer = setTimeout(() => setShowSkeleton(false), 600);
+        return () => clearTimeout(timer);
+      }
     } else {
       setShowSkeleton(true);
     }
@@ -693,12 +696,10 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       //   setActiveShiftId(null);
       // }
 
-      await serverApi.query({
-        table: 'resolver_stats',
-        action: 'upsert',
-        values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
-        mutationOptions: { onConflict: 'user_id,property_id' },
-      });
+        // Call the shift-status endpoint which updates both resolver_stats and shift_logs
+        await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
+          is_checked_in: newStatus
+        });
 
       setIsCheckedIn(newStatus);
       
@@ -1858,7 +1859,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   ticketViewBtn: {
-    flex: 1,
     borderRadius: 999,
     backgroundColor: '#8B5CF6',
     paddingVertical: 12,

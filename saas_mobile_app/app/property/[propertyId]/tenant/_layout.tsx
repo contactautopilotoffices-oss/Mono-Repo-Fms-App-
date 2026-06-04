@@ -3,6 +3,8 @@ import { View, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useTheme } from '@/context';
 
+
+
 export default function TenantLayout() {
   const { colors } = useTheme();
 
@@ -15,6 +17,7 @@ export default function TenantLayout() {
         <Tabs.Screen name="communities" />
         <Tabs.Screen name="visitors" />
       </Tabs>
+      
     </View>
   );
 }

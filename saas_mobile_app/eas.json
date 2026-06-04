@@ -29,16 +29,5 @@
   },
   "submit": {
     "production": {}
-  },
-  "hooks": {
-    "postPublish": [
-      {
-        "file": "sentry-expo/upload-sourcemaps",
-        "config": {
-          "organization": "YOUR_SENTRY_ORG",
-          "project": "autopilot-mobile"
-        }
-      }
-    ]
   }
 }

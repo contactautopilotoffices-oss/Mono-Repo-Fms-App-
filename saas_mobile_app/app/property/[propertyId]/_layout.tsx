@@ -46,6 +46,7 @@ import AnimatedLogo from '@/components/shared/AnimatedLogo';
 
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import GlobalBottomNav from '@/components/shared/GlobalBottomNav';
+import TenantBottomNav from '@/components/tenant/TenantBottomNav';
 
 // ---- Layout Constants ----
 const SIDEBAR_WIDTH = 288;
@@ -582,7 +583,7 @@ export default function PropertyLayout() {
       <PropertyContext.Provider value={propertyInfo}>
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <Slot />
-          {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
+          {role !== 'tenant' && role !== 'super_tenant' ? <GlobalBottomNav /> : <TenantBottomNav />}
         </View>
       </PropertyContext.Provider>
     );
@@ -627,7 +628,7 @@ export default function PropertyLayout() {
             organizationId={membership?.org_id ?? ''}
             role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
           />
-          {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
+          {role !== 'tenant' && role !== 'super_tenant' ? <GlobalBottomNav /> : <TenantBottomNav />}
         </View>
       </SidebarToggleContext.Provider>
     </PropertyContext.Provider>

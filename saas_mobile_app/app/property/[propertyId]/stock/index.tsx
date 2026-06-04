@@ -28,7 +28,6 @@ import BulkImportModal from "@/components/stock/BulkImportModal";
 
 import {
   STATUS_COLORS,
-  CARD_SURFACES,
   type StatusType,
 } from "@/constants/designSystem";
 import {
@@ -53,7 +52,7 @@ import {
 import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from '@/utils/queryKeys';
 
-const { width: SCREEN_W } = Dimensions.get("window");
+Dimensions.get("window");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -177,6 +176,21 @@ export default function StockScreen() {
   } | null>(null);
   const [isLoadingBarcode, setIsLoadingBarcode] = useState(false);
 
+  // Convert QRCodeData object to string for barcode state
+  const convertBarcodeData = (data: {
+    barcode: string;
+    barcode_format: string | null;
+    qr_code_data: { id: string; item_code: string; name: string; category?: string } | null;
+    item_name: string;
+    item_code: string;
+  } | null) => {
+    if (!data) return null;
+    return {
+      ...data,
+      qr_code_data: data.qr_code_data ? JSON.stringify(data.qr_code_data) : null,
+    };
+  };
+
   // Add form state
   const [formName, setFormName] = useState("");
   const [formCode, setFormCode] = useState("");
@@ -197,7 +211,7 @@ export default function StockScreen() {
     if (!propertyId) return { items: [] as StockItem[], movements: [] as StockMovement[], categories: [] as string[] };
     try {
       const [itemsRes, movementsRes] = await Promise.all([
-        stockService.getStockItems(propertyId, {
+        stockService.getItems(propertyId, {
           search: searchQuery || undefined,
           category: selectedCategory || undefined,
         }),
@@ -224,7 +238,11 @@ export default function StockScreen() {
     }
   }, [propertyId, searchQuery, selectedCategory]);
 
-  const { data, isLoading, isFetching, refetch } = useServerQuery(
+  const { data, isLoading, isFetching, refetch } = useServerQuery<{
+    items: StockItem[];
+    movements: StockMovement[];
+    categories: string[];
+  }>(
     queryKeys.property.stock(propertyId),
     fetchAll,
     { staleTime: 1000 * 60 * 5 }
@@ -232,7 +250,7 @@ export default function StockScreen() {
 
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
-  const categories = data?.categories ?? [];
+  const categories: string[] = data?.categories ?? [];
 
   // ── Computed ────────────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
@@ -285,16 +303,15 @@ export default function StockScreen() {
     setIsSaving(true);
     try {
       const res = await stockService.createItem({
-        propertyId,
+        property_id: propertyId as string,
         name: formName.trim(),
         item_code: formCode.trim() || undefined,
         category: formCategory.trim() || undefined,
         quantity: parseInt(formQuantity) || 0,
         min_threshold: parseInt(formMinThreshold) || 10,
         unit: formUnit.trim() || undefined,
-        unit_price: parseFloat(formPrice) || undefined,
       });
-      if (!res.success) throw new Error(res.error || "Failed to add item");
+      if (!res.success) throw new Error(String(res.error) || "Failed to add item");
       setShowAddModal(false);
       resetForm();
       await refetch();
@@ -336,7 +353,7 @@ export default function StockScreen() {
         userId: user?.id || undefined,
       });
 
-      if (!res.success) throw new Error(res.error || "Failed to record movement");
+      if (!res.success) throw new Error(String(res.error) || "Failed to record movement");
 
       setSelectedItem((prev) =>
         prev ? { ...prev, quantity: qtyAfter } : null,
@@ -377,7 +394,7 @@ export default function StockScreen() {
     try {
       const res = await stockService.getBarcode(item.id);
       if (res.success && res.data) {
-        setBarcodeInfo(res.data);
+        setBarcodeInfo(convertBarcodeData(res.data as any));
       } else {
         setBarcodeInfo(null);
       }
@@ -395,11 +412,11 @@ export default function StockScreen() {
     try {
       const res = await stockService.regenerateBarcode(selectedItem.id);
       if (res.success && res.data) {
-        setBarcodeInfo(res.data);
+        setBarcodeInfo(convertBarcodeData(res.data as any));
         Alert.alert("Success", "Barcode regenerated");
         await refetch();
       } else {
-        throw new Error(res.error || "Failed to regenerate barcode");
+        throw new Error(String(res.error) || "Failed to regenerate barcode");
       }
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to regenerate barcode");
@@ -1178,17 +1195,17 @@ export default function StockScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ─── Bulk Import Modal ───────────────────────────────────────────────────────── */}
+      <BulkImportModal
+        visible={showBulkImportModal}
+        onClose={() => setShowBulkImportModal(false)}
+        onSuccess={handleBulkImportSuccess}
+        propertyId={propertyId as string}
+      />
     </View>
   );
 }
-
-// ─── Bulk Import Modal ─────────────────────────────────────────────────────────
-<BulkImportModal
-  visible={showBulkImportModal}
-  onClose={() => setShowBulkImportModal(false)}
-  onSuccess={handleBulkImportSuccess}
-  propertyId={propertyId as string}
-/>
 
 // ─── Stock Item Card (memoized for FlashList) ─────────────────────────────────
 

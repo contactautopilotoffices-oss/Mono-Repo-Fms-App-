@@ -119,7 +119,7 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 60,
+    bottom: 140,
     left: (width - 340) / 2,
     width: 340,
     zIndex: 9999,

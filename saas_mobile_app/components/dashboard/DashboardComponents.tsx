@@ -42,6 +42,7 @@ export function GlassTile({
   delay = 0,
   status,
   onPress,
+  style,
 }: {
   label: string;
   icon: any;

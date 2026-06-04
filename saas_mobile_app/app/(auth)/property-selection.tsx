@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { Colors } from '@/constants/Colors';
 import { useDashboardStore } from '@/stores/dashboardStore';
 import { queryClient } from '@/utils/queryClient';
@@ -47,7 +47,6 @@ export default function PropertySelectionScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ properties?: string }>();
   const { signOut, membership } = useAuth();
-  const supabase = createClient();
 
   const [properties, setProperties] = useState<PropertyItem[]>([]);
   const [propertyNames, setPropertyNames] = useState<Record<string, string>>({});
@@ -76,13 +75,11 @@ export default function PropertySelectionScreen() {
       // No properties param — org-level admin with no property memberships yet
       // Fetch ALL properties from this org so they can pick one
       setLoading(true);
-      supabase
-        .from('properties')
-        .select('id, name')
-        .eq('organization_id', membership.org_id)
-        .then(({ data, error }) => {
-          if (!error && data) {
-            const orgProps: PropertyItem[] = data.map(p => ({ id: p.id, role: membership.org_role }));
+      apiFetch<{ success: boolean; data: Array<{ id: string; name: string }> }>(`/api/organizations/${membership.org_id}/properties`)
+        .then((res) => {
+          if (res.success && res.data) {
+            const orgRole = membership.org_role || 'member';
+            const orgProps: PropertyItem[] = res.data.map(p => ({ id: p.id, role: orgRole }));
             setProperties(orgProps);
             if (orgProps.length === 1) {
               setSelectedId(orgProps[0].id);
@@ -95,9 +92,10 @@ export default function PropertySelectionScreen() {
             }
           }
           setLoading(false);
-        });
+        })
+        .catch(() => setLoading(false));
     }
-  }, [params.properties, membership?.org_id, membership?.org_role]);
+  }, [params.properties, membership?.org_id, membership?.org_role, router]);
 
   // Fetch property names for display
   useEffect(() => {
@@ -105,18 +103,21 @@ export default function PropertySelectionScreen() {
 
     const fetchNames = async () => {
       const ids = properties.map((p) => p.id);
-      const { data } = await supabase
-        .from('properties')
-        .select('id, name')
-        .in('id', ids);
-
-      if (data) {
-        const nameMap: Record<string, string> = {};
-        data.forEach((p: { id: string; name: string }) => {
-          nameMap[p.id] = p.name;
-        });
-        setPropertyNames(nameMap);
-      }
+      // Fetch all properties by making parallel requests for each ID
+      const nameMap: Record<string, string> = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await apiFetch<{ success: boolean; data: { id: string; name: string } }>(`/api/properties/${id}`);
+            if (res.success && res.data) {
+              nameMap[res.data.id] = res.data.name;
+            }
+          } catch {
+            // Ignore individual failures
+          }
+        })
+      );
+      setPropertyNames(nameMap);
     };
 
     fetchNames();

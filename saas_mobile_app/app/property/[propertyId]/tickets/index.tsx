@@ -93,7 +93,7 @@ interface Ticket {
   assignee: { id: string; full_name: string; user_photo_url?: string | null } | null;
   creator:  { id: string; full_name: string; property_memberships?: { role: string }[] } | null;
   photo_before_url?: string | null;
-  is_internal?: boolean | null;
+  internal?: boolean | null;
   raised_by?: string | null;
   ticket_escalation_logs?: TicketEscalationLog[];
 }
@@ -106,6 +106,7 @@ export default function TicketsScreen() {
   const isNeedsAttentionMode = filter === 'needs_attention';
   // Keep supabase for realtime subscriptions if any, else we can remove it later
   const { membership, user: authUser } = useAuth();
+  const isTenant = membership?.role === 'tenant' || membership?.properties?.find((p: any) => p.id === propertyId)?.role === 'tenant';
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -195,11 +196,16 @@ export default function TicketsScreen() {
       queryFilters.push({ op: 'eq', column: 'assigned_to', value: assignedToFilter });
     }
 
+    // Tenants must never see internal tickets
+    if (isTenant) {
+      queryFilters.push({ op: 'neq', column: 'internal', value: true });
+    }
+
     return {
       table: 'tickets',
       action: 'select',
       select: `id, title, description, status, priority, ticket_number, created_at, updated_at,
-               property_id, organization_id, photo_before_url, is_internal, raised_by, assigned_to,
+               property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
                skill_group:skill_groups(name, code),
                assignee:users!assigned_to(id, full_name, user_photo_url),
                creator:users!raised_by(id, full_name, property_memberships(role)),
@@ -211,7 +217,7 @@ export default function TicketsScreen() {
       limit,
       offset,
     };
-  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy]);
+  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant]);
 
 const defaultCounts: Record<StatusFilter, number> = {
   all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
@@ -248,6 +254,10 @@ const getStatusCounts = useCallback(async () => {
     } else {
       baseFilters.push({ op: 'eq', column: 'property_id', value: propertyId });
     }
+    // Tenants must never see internal tickets in counts either
+    if (isTenant) {
+      baseFilters.push({ op: 'neq', column: 'internal', value: true });
+    }
 
     const fetchCount = async (additionalFilters: any[]) => {
       const res = await serverApi.query({
@@ -272,7 +282,7 @@ const getStatusCounts = useCallback(async () => {
     console.error('Error fetching status counts:', err);
     return defaultCounts;
   }
-}, [propertyId, dateRange, authUser?.id, membership?.properties]);
+}, [propertyId, dateRange, authUser?.id, membership?.properties, isTenant]);
 
 const fetchTickets = useCallback(async () => {
   if (!isValidProperty) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
@@ -288,6 +298,11 @@ const fetchTickets = useCallback(async () => {
     } else if (res.error) {
       throw new Error(res.error.message);
     }
+
+    const isTenant = membership?.role === 'tenant';
+    if (isTenant) {
+      items = items.filter(t => !t.internal);
+    }
     
     const hasMoreItems = items.length > limit;
     const counts = await getStatusCounts();
@@ -296,7 +311,7 @@ const fetchTickets = useCallback(async () => {
     console.error('Error fetching tickets:', err);
     return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
   }
-}, [propertyId, buildQueryParams, limit, getStatusCounts]);
+}, [propertyId, buildQueryParams, limit, getStatusCounts, membership?.role]);
 
 const { data, isLoading, isFetching, refetch } = useServerQuery(
   [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, String(isNeedsAttentionMode), String(limit)],
@@ -628,15 +643,6 @@ const onRefresh = () => {
 
 
       </View>
-
-        {/* FAB Create Button */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => setShowCreateModal(true)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={28} color="#FFF" />
-        </TouchableOpacity>
 
         <TicketCreateModal
           isOpen={showCreateModal}

@@ -22,7 +22,6 @@ import { useSuperTenantProperties } from '@/hooks/tenant/useSuperTenantPropertie
 import SignOutModal from '@/components/ui/SignOutModal';
 import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
 import NotificationModal from '@/components/notifications/NotificationModal';
-import TenantBottomNav from '@/components/tenant/TenantBottomNav';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import DashboardBackground from '@/components/dashboard/DashboardBackground';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -92,16 +91,18 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
   const { properties: superTenantProperties } = useSuperTenantProperties(isSuperTenant ? user?.id : undefined);
 
   // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(ticketsLoading);
 
   useEffect(() => {
-    if (!ticketsLoading && tickets.length > 0) {
-      const timer = setTimeout(() => setShowSkeleton(false), 600);
-      return () => clearTimeout(timer);
-    } else if (ticketsLoading) {
+    if (!ticketsLoading) {
+      if (showSkeleton) {
+        const timer = setTimeout(() => setShowSkeleton(false), 600);
+        return () => clearTimeout(timer);
+      }
+    } else {
       setShowSkeleton(true);
     }
-  }, [ticketsLoading, tickets]);
+  }, [ticketsLoading]);
 
   useEffect(() => {
     if (!selectedPropertyId) return;
@@ -155,7 +156,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
 
   const drawerItems = [
     { label: 'Dashboard', route: 'tenant', icon: 'grid-outline' as const },
-    { label: 'My Tickets', route: 'tenant/requests', icon: 'ticket-outline' as const },
+    { label: 'My Tickets', route: 'tickets', icon: 'ticket-outline' as const },
     { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' as const },
     { label: 'Visitors', route: 'tenant/visitors', icon: 'people-outline' as const },
     { label: 'Communities', route: 'tenant/communities', icon: 'chatbubbles-outline' as const },
@@ -270,7 +271,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
                 <Text style={styles.statLabel}>Active</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => setSelectedPropertyId(propertyId)}>
-                <View style={[styles.statIcon, { backgroundColor: 'rgba(16,185,129,0.2)' }]}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(10,185,129,0.2)' }]}>
                   <Users size={20} color="#10B981" />
                 </View>
                 <Text style={styles.statValue}>{superTenantProperties.length}</Text>
@@ -302,7 +303,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               </View>
             ) : (
               tickets.filter(t => !['resolved', 'closed'].includes(t.status as string)).map((ticket: any, index: number) => (
-                <TouchableOpacity key={ticket.id} style={styles.ticketCard} onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}>
+                <TouchableOpacity key={ticket.id} style={styles.ticketCard} onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
                   <View style={styles.ticketLeft}>
                     <Text style={styles.ticketTitle} numberOfLines={1}>{ticket.title || 'Request'}</Text>
                     <Text style={styles.ticketMeta}>#{ticket.ticket_number || ticket.id.slice(0, 8)}</Text>
@@ -365,9 +366,9 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               title="Helpdesk & Ticketing"
               description="Report issues, track requests & get support instantly."
               badge={ticketStats.open > 0 ? ticketStats.open : undefined}
-              statusLine={`${ticketStats.open} ACTIVE · ${ticketStats.completed} COMPLETED`}
+              statusLine={`${ticketStats.open} ACTIVE • ${ticketStats.completed} COMPLETED`}
               delay={120}
-              onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}
+              onPress={() => router.push(`/property/${propertyId}/tickets` as any)}
             />
 
             <GlassModuleCard
@@ -391,8 +392,6 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
           </View>
         )}
       </ScrollView>
-
-      <TenantBottomNav />
 
       {/* Modals */}
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />

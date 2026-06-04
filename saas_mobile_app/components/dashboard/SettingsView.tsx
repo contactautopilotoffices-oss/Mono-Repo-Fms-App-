@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { readFileAsArrayBuffer } from '@/utils/mediaUtils';
@@ -31,7 +31,6 @@ interface SettingsViewProps {
 
 export default function SettingsView({ onUpdate }: SettingsViewProps) {
   const { user } = useAuth();
-  const supabase = useMemo(() => createClient(), []);
   const [isSaving, setIsSaving] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -41,47 +40,39 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
   const [vendorInfo, setVendorInfo] = useState<{ id: string; shop_name: string } | null>(null);
 
   const fetchProfile = useCallback(async () => {
+    if (!user?.id) return null;
     try {
-      const { data: userData, error } = await (supabase as any)
-        .from('users').select('*').eq('id', user?.id ?? '').single();
-      if (error) throw error;
+      const response = await apiFetch<{
+        success: boolean;
+        data: {
+          user: any;
+          organization_memberships: any[];
+          property_memberships: any[];
+          vendor: any;
+        };
+      }>(`/api/users/${user.id}/settings`);
 
-      // Org memberships
-      const { data: orgMembers } = await (supabase as any)
-        .from('organization_memberships')
-        .select('role, organization:organizations(name)')
-        .eq('user_id', user?.id ?? '').eq('is_active', true);
+      if (!response.success) throw new Error(response.error);
 
-      // Property memberships
-      const { data: propMembers } = await (supabase as any)
-        .from('property_memberships')
-        .select('role, property:properties(name)')
-        .eq('user_id', user?.id ?? '').eq('is_active', true);
+      const { user: userData, organization_memberships, property_memberships, vendor } = response.data;
 
       const roles: RoleInfo[] = [];
-      orgMembers?.forEach((m: any) => roles.push({ role: m.role, entityName: m.organization?.name || 'Unknown Org', type: 'organization' }));
-      propMembers?.forEach((m: any) => roles.push({ role: m.role, entityName: m.property?.name || 'Unknown Property', type: 'property' }));
-
-      // Vendor check
-      const { data: vendorData } = await (supabase as any)
-        .from('vendors').select('id, shop_name').eq('user_id', user?.id ?? '').maybeSingle();
+      organization_memberships?.forEach((m: any) => roles.push({ role: m.role, entityName: m.organization?.name || 'Unknown Org', type: 'organization' }));
+      property_memberships?.forEach((m: any) => roles.push({ role: m.role, entityName: m.property?.name || 'Unknown Property', type: 'property' }));
 
       return {
         profile: userData,
         roles,
-        vendorInfo: vendorData || null,
+        vendorInfo: vendor || null,
       };
     } catch (err) {
-      if (user) {
-        return {
-          profile: { full_name: user.user_metadata?.full_name || '', email: user.email, phone: user.user_metadata?.phone || '' },
-          roles: [],
-          vendorInfo: null,
-        };
-      }
-      throw err;
+      return {
+        profile: { full_name: user.user_metadata?.full_name || '', email: user.email, phone: user.user_metadata?.phone || '' },
+        roles: [],
+        vendorInfo: null,
+      };
     }
-  }, [user, supabase]);
+  }, [user]);
 
   const { data: profileData, isLoading } = useServerQuery<{
     profile: any;
@@ -123,38 +114,35 @@ export default function SettingsView({ onUpdate }: SettingsViewProps) {
       let avatarUrl = profile.user_photo_url;
 
       if (avatarUri) {
-        const ext = avatarUri.split('.').pop() || 'jpg';
-        const filePath = `${user.id}/profile.${ext}`;
-        const arrayBuffer = await readFileAsArrayBuffer(avatarUri);
+        // Upload photo via server API
+        const formData = new FormData();
+        formData.append('file', {
+          uri: avatarUri,
+          name: 'avatar.jpg',
+          type: 'image/jpeg',
+        } as any);
 
-        const { error: uploadError } = await supabase.storage
-          .from('user-photos').upload(filePath, arrayBuffer, { upsert: true, contentType: `image/${ext}` });
-        if (uploadError) throw uploadError;
+        const uploadRes = await apiFetch(`/api/users/${user.id}/photo`, {
+          method: 'POST',
+          body: formData as any,
+        });
 
-        const { data } = supabase.storage.from('user-photos').getPublicUrl(filePath);
-        avatarUrl = data.publicUrl;
+        if (!uploadRes.success) throw new Error('Photo upload failed');
+        avatarUrl = (uploadRes as any).data?.url;
       }
 
-      const { error: dbError } = await (supabase as any)
-        .from('users')
-        .update({
+      // Update profile via server API
+      const updateRes = await apiFetch(`/api/users/${user.id}/settings-update`, {
+        method: 'PATCH',
+        body: JSON.stringify({
           full_name: profile.full_name,
           phone: profile.phone,
           user_photo_url: avatarUrl,
-        })
-        .eq('id', user.id);
-      if (dbError) throw dbError;
-
-      if (vendorInfo) {
-        await (supabase as any)
-          .from('vendors')
-          .update({ shop_name: vendorInfo.shop_name })
-          .eq('id', vendorInfo.id);
-      }
-
-      await supabase.auth.updateUser({
-        data: { full_name: profile.full_name, user_photo_url: avatarUrl, phone: profile.phone },
+          vendor_shop_name: vendorInfo?.shop_name,
+        }),
       });
+
+      if (!updateRes.success) throw new Error(updateRes.error || 'Update failed');
 
       setToast({ message: 'Profile updated!', type: 'success' });
       onUpdate?.();

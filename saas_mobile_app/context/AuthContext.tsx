@@ -252,8 +252,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           properties: builtProperties,
         };
 
-        // Also initialise dashboardStore with the first property so signIn can prefetch
-        if (builtProperties.length > 0 && !useDashboardStore.getState().loadedPropertyId) {
+        // Always initialize dashboardStore with the first property from fresh membership data.
+        // This overrides any stale persisted propertyId from a previous session.
+        if (builtProperties.length > 0) {
           useDashboardStore.getState().setDashboardData({ loadedPropertyId: builtProperties[0].id });
         }
 

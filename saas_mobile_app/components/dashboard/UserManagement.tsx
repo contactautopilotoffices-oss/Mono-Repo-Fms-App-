@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 
@@ -25,24 +25,19 @@ interface OrgUser {
 
 export default function UserManagement({ orgId }: { orgId: string }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const supabase = useMemo(() => createClient(), []);
 
   const fetchOrgUsers = useCallback(async () => {
-    const { data, error } = await (supabase
-      .from('organization_memberships')
-      .select('role, is_active, created_at, users(id, full_name, email)')
-      .eq('organization_id', orgId) as any);
-
-    if (error) throw error;
-    return (data || []).map((item: any) => ({
-      id: item.users.id,
-      full_name: item.users.full_name,
-      email: item.users.email,
+    const response = await apiFetch<{ success: boolean; data: any[] }>(`/api/organizations/${orgId}/users`);
+    if (!response.success) throw new Error('Failed to fetch users');
+    return (response.data || []).map((item: any) => ({
+      id: item.users?.id || item.id,
+      full_name: item.users?.full_name || item.full_name || 'Unknown',
+      email: item.users?.email || item.email || '',
       role: item.role,
       is_active: item.is_active,
       joined_at: item.created_at,
     })).sort((a: any, b: any) => a.full_name.localeCompare(b.full_name)) as OrgUser[];
-  }, [orgId, supabase]);
+  }, [orgId]);
 
   const { data: users = [], isLoading, refetch } = useServerQuery<OrgUser[]>(
     queryKeys.org.orgUsers(orgId),
@@ -62,11 +57,11 @@ export default function UserManagement({ orgId }: { orgId: string }) {
           text: 'Confirm',
           style: currentStatus ? 'destructive' : 'default',
           onPress: async () => {
-            await (supabase as any)
-              .from('organization_memberships')
-              .update({ is_active: !currentStatus })
-              .eq('user_id', userId)
-              .eq('organization_id', orgId);
+            const response = await apiFetch(`/api/organization-memberships`, {
+              method: 'PATCH',
+              body: JSON.stringify({ userId, organizationId: orgId, is_active: !currentStatus }),
+            });
+            if (!response.success) throw new Error(response.error);
             refetch();
           },
         },
