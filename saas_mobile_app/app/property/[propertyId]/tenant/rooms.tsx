@@ -96,7 +96,7 @@ export default function TenantRoomsPage() {
     try {
       const [roomsRes, bookingsRes] = await Promise.all([
         getMeetingRooms(propertyId as string),
-        getMeetingRoomBookings(propertyId as string),
+        getMeetingRoomBookings(propertyId as string, undefined, user?.id),
       ]);
       return {
         rooms: roomsRes.rooms || [],
@@ -277,6 +277,7 @@ export default function TenantRoomsPage() {
             <Text style={styles.roomName}>{item.meeting_room?.name || 'Untitled Booking'}</Text>
             <Text style={styles.roomLocation}>
               {item.booking_date || 'No date'} · {item.start_time || ''} - {item.end_time || ''}
+              {item.start_time && item.end_time ? ` (${(new Date(`1970-01-01T${item.end_time}`).getTime() - new Date(`1970-01-01T${item.start_time}`).getTime()) / (1000 * 60 * 60)} hrs)` : ''}
             </Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: 'rgba(16,185,129,0.15)' }]}>

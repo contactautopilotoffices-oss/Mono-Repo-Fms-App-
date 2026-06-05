@@ -75,12 +75,14 @@ export async function getMeetingRooms(propertyId: string, status?: string): Prom
   }
 }
 
-export async function getMeetingRoomBookings(propertyId: string, status?: string): Promise<{ bookings?: MeetingRoomBooking[]; error?: string }> {
+export async function getMeetingRoomBookings(propertyId: string, status?: string, userId?: string): Promise<{ bookings?: MeetingRoomBooking[]; error?: string }> {
   try {
     const filters: any[] = [
       { op: 'eq', column: 'property_id', value: propertyId },
     ];
     if (status) filters.push({ op: 'eq', column: 'status', value: status });
+    // Filter by userId to show only the current user's bookings
+    if (userId) filters.push({ op: 'eq', column: 'user_id', value: userId });
 
     const { data, error } = await serverApi.query<MeetingRoomBooking[]>({
       table: 'meeting_room_bookings',
