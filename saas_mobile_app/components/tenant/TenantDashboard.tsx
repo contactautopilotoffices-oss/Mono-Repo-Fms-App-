@@ -229,7 +229,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
         </View>
       </ScrollView>
 
-      <TenantBottomNav onOpenChat={() => setShowChat(true)} />
+      <TenantBottomNav />
 
       {/* Modals */}
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
