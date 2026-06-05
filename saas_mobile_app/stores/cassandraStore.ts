@@ -27,6 +27,9 @@ export interface ChatMessage {
   blockedReason?: string;
   reasoning?: string;        // Collapsible reasoning text (PRD: SSE Streaming)
   reasoningSteps?: string[]; // Array of reasoning steps for timeline view
+  // Graceful query-closure loop: 'pending' shows the "Did this answer your
+  // question?" footer; 'yes' = closed gracefully; 'no' = user asked to rethink.
+  confirmState?: 'pending' | 'yes' | 'no';
 }
 
 export interface SuggestedPrompt {
@@ -48,6 +51,7 @@ interface CassandraStore {
   // ── Message history (persistent chat) ─────────────────────────────────
   messageHistory: ChatMessage[];
   addMessage: (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
+  updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
   clearMessages: () => void;
 
   // ── Last AI response (for TTS) ────────────────────────────────────────
@@ -116,6 +120,13 @@ export const useCassandraStore = create<CassandraStore>((set, _get) => ({
         ...st.messageHistory,
         { ...msg, id: `${Date.now()}-${Math.random()}`, timestamp: Date.now() },
       ],
+    })),
+
+  updateMessage: (id, patch) =>
+    set((st) => ({
+      messageHistory: st.messageHistory.map((m) =>
+        m.id === id ? { ...m, ...patch } : m,
+      ),
     })),
 
   clearMessages: () => set({ messageHistory: [] }),

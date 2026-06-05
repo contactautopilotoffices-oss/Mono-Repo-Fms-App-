@@ -151,7 +151,7 @@ export const ReasoningBubble: React.FC<ReasoningBubbleProps> = ({
             <Text style={styles.previewText} numberOfLines={1}>
               {steps.length > 1
                 ? `Thought through ${steps.length} steps`
-                : latestStep}
+                : 'Thought for a moment'}
             </Text>
           )}
         </View>

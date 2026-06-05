@@ -180,35 +180,121 @@ def decode_session_token(token: str) -> Optional[dict]:
 
 
 async def validate_membership(user_id: str, property_id: str) -> Optional[dict]:
-    """Validate user belongs to property via FMS Supabase property_memberships."""
+    """
+    Validate user belongs to property. Checks in order:
+    1. Master Admin (is_master_admin = true) → Access to ALL properties
+    2. Org Super Admin (org_super_admin role) → Access to all properties in that org
+    3. Property Member (property_memberships) → Access to specific property only
+    """
     if not FMS_SUPABASE_URL or not FMS_SUPABASE_SERVICE_ROLE_KEY:
         logger.error("[AUTH] FMS Supabase not configured")
         return None
 
-    url = f"{FMS_SUPABASE_URL}/rest/v1/property_memberships"
     headers = {
         "apikey": FMS_SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {FMS_SUPABASE_SERVICE_ROLE_KEY}",
         "Accept": "application/json",
     }
-    params = {
-        "select": "organization_id,role",
-        "user_id": f"eq.{user_id}",
-        "property_id": f"eq.{property_id}",
-        "limit": "1",
-    }
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers, params=params)
-        logger.info("[AUTH] Membership query status=%s user=%s property=%s", resp.status_code, user_id, property_id)
-        if resp.status_code == 200:
-            data = resp.json()
-            logger.info("[AUTH] Membership query returned %d rows", len(data))
-            if data and len(data) > 0:
-                return data[0]
-        else:
-            logger.warning(f"[AUTH] Supabase returned {resp.status_code}: {resp.text[:200]}")
+            # Step 1: Check if user is a master admin
+            users_url = f"{FMS_SUPABASE_URL}/rest/v1/users"
+            users_params = {
+                "select": "id,is_master_admin",
+                "id": f"eq.{user_id}",
+                "limit": "1",
+            }
+            resp = await client.get(users_url, headers=headers, params=users_params)
+            if resp.status_code == 200:
+                users_data = resp.json()
+                if users_data and users_data[0].get("is_master_admin"):
+                    logger.info("[AUTH] User is MASTER ADMIN → allow all properties. user=%s", user_id)
+                    return {
+                        "organization_id": "",  # Master admin doesn't need org constraint
+                        "property_id": property_id,
+                        "role": "master_admin",
+                        "is_active": True,
+                    }
+
+            # Step 2: Get the organization for this property, then check org super admin
+            properties_url = f"{FMS_SUPABASE_URL}/rest/v1/properties"
+            properties_params = {
+                "select": "organization_id",
+                "id": f"eq.{property_id}",
+                "limit": "1",
+            }
+            resp = await client.get(properties_url, headers=headers, params=properties_params)
+            organization_id = None
+            if resp.status_code == 200:
+                prop_data = resp.json()
+                if prop_data:
+                    organization_id = prop_data[0].get("organization_id")
+
+            if organization_id:
+                # Check if user is org super admin
+                org_members_url = f"{FMS_SUPABASE_URL}/rest/v1/organization_memberships"
+                org_params = {
+                    "select": "role",
+                    "user_id": f"eq.{user_id}",
+                    "organization_id": f"eq.{organization_id}",
+                    "limit": "1",
+                }
+                resp = await client.get(org_members_url, headers=headers, params=org_params)
+                if resp.status_code == 200:
+                    org_data = resp.json()
+                    if org_data and org_data[0].get("role") == "org_super_admin":
+                        logger.info("[AUTH] User is ORG SUPER ADMIN → allow all properties in org. user=%s org=%s", user_id, organization_id)
+                        return {
+                            "organization_id": organization_id,
+                            "property_id": property_id,
+                            "role": "org_super_admin",
+                            "is_active": True,
+                        }
+
+            # Step 3: Check property membership (regular users)
+            prop_members_url = f"{FMS_SUPABASE_URL}/rest/v1/property_memberships"
+            prop_params = {
+                "select": "organization_id,role,is_active",
+                "user_id": f"eq.{user_id}",
+                "property_id": f"eq.{property_id}",
+                "limit": "1",
+            }
+            resp = await client.get(prop_members_url, headers=headers, params=prop_params)
+            logger.info("[AUTH] Property membership query status=%s user=%s property=%s", resp.status_code, user_id, property_id)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data and len(data) > 0:
+                    membership = data[0]
+                    if membership.get("is_active", True):  # is_active=True means active
+                        # Backfill organization_id from the property if the membership row
+                        # doesn't carry it (property_memberships.organization_id is often null).
+                        # Step 2 already resolved organization_id from the properties table.
+                        if not membership.get("organization_id") and organization_id:
+                            membership["organization_id"] = organization_id
+                            logger.info("[AUTH] Derived org_id from property. org=%s", organization_id)
+                        # Last-resort: pull the user's org directly from organization_memberships.
+                        if not membership.get("organization_id"):
+                            om_url = f"{FMS_SUPABASE_URL}/rest/v1/organization_memberships"
+                            om_params = {
+                                "select": "organization_id",
+                                "user_id": f"eq.{user_id}",
+                                "limit": "1",
+                            }
+                            om_resp = await client.get(om_url, headers=headers, params=om_params)
+                            if om_resp.status_code == 200:
+                                om_data = om_resp.json()
+                                if om_data and om_data[0].get("organization_id"):
+                                    membership["organization_id"] = om_data[0]["organization_id"]
+                                    logger.info("[AUTH] Derived org_id from organization_memberships. org=%s", membership["organization_id"])
+                        logger.info("[AUTH] User found in property_memberships. role=%s", membership.get("role"))
+                        return membership
+                    else:
+                        logger.warning("[AUTH] User membership is inactive. user=%s property=%s", user_id, property_id)
+            else:
+                logger.warning(f"[AUTH] Supabase returned {resp.status_code}: {resp.text[:200]}")
+
+        logger.warning("[AUTH] No valid membership found. user=%s property=%s", user_id, property_id)
         return None
     except Exception as exc:
         logger.error(f"[AUTH] Membership validation error: {exc}")
@@ -259,19 +345,25 @@ def get_orchestrator():
 
 
 def queue_handler(job: QueuedJob) -> dict:
-    """Process a queued chat job."""
+    """Process a queued chat job, emitting real-time progress steps for CoT streaming."""
     orch = get_orchestrator()
     ctx = job.context
+
+    def on_progress(event_type: str, data: dict):
+        """Append a live step to the job so the SSE poller can stream it immediately."""
+        job.steps.append({"type": event_type, "data": data})
+
     return orch.run(
         message=job.message,
         org_id=ctx.get("org_id", ""),
         user_id=ctx.get("user_id", ""),
-        property_id=ctx.get("property_id", ""),  # Added 2026-06-01
+        property_id=ctx.get("property_id", ""),
         role=ctx.get("role", "tenant"),
         photo_url=ctx.get("photo_url"),
         conversation_history=ctx.get("conversation_history"),
         allowed_property_ids=ctx.get("allowed_property_ids"),
         property_metadata=ctx.get("property_metadata"),
+        on_progress=on_progress,
     )
 
 
@@ -348,6 +440,74 @@ async def health():
     }
 
 
+@app.get("/health/ready")
+async def health_ready():
+    """
+    Pre-flight readiness check for demos.
+    Tests: LLM API key, schema loaded, tools registered.
+    """
+    checks = {}
+    status = "ready"
+
+    # Check 1: LLM API key configured
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    checks["llm_api_key"] = "configured" if api_key else "missing"
+    if not api_key:
+        status = "degraded"
+
+    # Check 2: Schema loaded
+    try:
+        from cassandra.tools.fms_schema import TABLES
+        table_count = len(TABLES)
+        checks["schema"] = f"loaded ({table_count} tables)"
+        if table_count < 10:
+            checks["schema"] = f"warning: only {table_count} tables"
+            status = "degraded"
+    except Exception as e:
+        checks["schema"] = f"error: {str(e)}"
+        status = "not_ready"
+
+    # Check 3: LLM reachable (quick ping — don't block)
+    try:
+        from cassandra.llm.openai_client import OpenAIClient
+        client = OpenAIClient()
+        # Quick 2-token call to verify connectivity
+        result = client.chat(
+            messages=[{"role": "user", "content": "Say OK"}],
+            max_tokens=2,
+        )
+        checks["llm_reachable"] = "yes"
+    except Exception as e:
+        checks["llm_reachable"] = f"no: {str(e)[:100]}"
+        status = "degraded"
+
+    # Check 4: Tools registered
+    try:
+        from cassandra.llm.openai_client import TOOL_DEFINITIONS
+        tool_count = len(TOOL_DEFINITIONS)
+        tool_names = [t.get("function", {}).get("name", "?") for t in TOOL_DEFINITIONS]
+        checks["tools"] = f"{tool_count} registered: {', '.join(tool_names)}"
+    except Exception as e:
+        checks["tools"] = f"error: {str(e)}"
+        status = "degraded"
+
+    # Check 5: Supabase connection
+    try:
+        supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
+        checks["supabase"] = "configured" if supabase_url else "missing"
+        if not supabase_url:
+            status = "degraded"
+    except Exception:
+        checks["supabase"] = "error"
+        status = "degraded"
+
+    return {
+        "status": status,
+        "checks": checks,
+        "timestamp": time.time(),
+    }
+
+
 @app.get("/")
 async def root():
     return {"service": "Cassandra", "status": "running", "version": "3.1.0"}
@@ -406,7 +566,7 @@ async def chat_stream(request: Request):
     identity = resolve_auth(request)
     org_id = identity["org_id"]
     user_id = identity["user_id"]
-    property_id = identity.get("property_id", "")
+    token_property_id = identity.get("property_id", "")
     role = identity.get("role", "tenant")
 
     # Parse body
@@ -422,6 +582,16 @@ async def chat_stream(request: Request):
     context_from_body = body.get("context", {})
     conversation_history = body.get("conversation_history", [])
     photo_url = body.get("photo_url")
+
+    # Admins can override the session property via the request body context.
+    # This enables "All Properties" mode (empty property_id = org-wide scope)
+    # and property switching without re-authentication.
+    # Non-admins are always pinned to their token property_id.
+    ADMIN_ROLES = {"org_super_admin", "org_admin", "master_admin", "property_admin", "property_manager"}
+    if role in ADMIN_ROLES and "property_id" in context_from_body:
+        property_id = context_from_body.get("property_id", "") or ""
+    else:
+        property_id = token_property_id
 
     logger.info(f"[CHAT] stream: '{message[:60]}' user={user_id[:8]}... org={org_id[:8]}...")
 
@@ -452,6 +622,7 @@ async def chat_stream(request: Request):
         import re
         max_wait = 120
         waited = 0.0
+        emitted_steps = 0  # Track how many job.steps we've already emitted
 
         while waited < max_wait:
             await asyncio.sleep(0.5)
@@ -462,6 +633,14 @@ async def chat_stream(request: Request):
                 yield sse_format("error", {"code": "JOB_NOT_FOUND", "message": "Job expired"})
                 break
 
+            # ── Real-time CoT: emit any new steps the orchestrator has appended ──
+            # This fires while status is still "processing" so the client sees
+            # tool_start / tool_result events live, not as a batch after completion.
+            new_steps = job.steps[emitted_steps:]
+            for step in new_steps:
+                yield sse_format(step["type"], step["data"])
+                emitted_steps += 1
+
             if job.status == "queued":
                 yield sse_format("queued", {"job_id": job_id, "message": "Queued..."})
             elif job.status == "processing":
@@ -470,27 +649,19 @@ async def chat_stream(request: Request):
                 result = job.result or {}
                 response = result.get("response", "")
 
-                # Stream reasoning
+                # Stream remaining reasoning tags from final response
                 reasoning_steps = re.findall(r"<reasoning>(.*?)</reasoning>", response, re.DOTALL)
                 for step in reasoning_steps:
                     if step.strip():
                         yield sse_format("reasoning", {"message": step.strip()})
 
-                # Stream answer (without reasoning tags)
+                # Stream answer without reasoning tags, word-by-word for typing effect
                 clean = re.sub(r"<reasoning>.*?</reasoning>", "", response, flags=re.DOTALL).strip()
-                # Stream word-by-word for typing effect
                 words = clean.split()
-                chunk_size = 5  # Send 5 words at a time for smoother streaming
+                chunk_size = 5
                 for i in range(0, len(words), chunk_size):
                     chunk = " ".join(words[i:i + chunk_size]) + " "
                     yield sse_format("answer", {"token": chunk})
-
-                # Tool results
-                for tr in result.get("tool_results", []):
-                    yield sse_format("tool_result", {
-                        "tool": tr.get("tool_name", ""),
-                        "success": tr.get("success", False),
-                    })
 
                 # Done
                 yield sse_format("done", {
