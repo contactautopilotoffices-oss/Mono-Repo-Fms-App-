@@ -160,7 +160,7 @@ export default function PropertySelectionScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.logoContainer}>
-            <AutopilotLogo width={160} height={40} />
+            <AutopilotLogo size={40} />
           </View>
           <Text style={[styles.title, { color: theme.text }]}>
             Select a Property

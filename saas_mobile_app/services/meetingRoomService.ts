@@ -149,14 +149,30 @@ export async function getMeetingRoomCredits(propertyId: string): Promise<{ credi
     let companyData: any | null = null;
 
     if (userId) {
+      // Check if user belongs to a company
+      const { data: companyMember } = await serverApi.query<any>({
+        table: 'company_members',
+        action: 'select',
+        select: 'company_id',
+        filters: [{ op: 'eq', column: 'user_id', value: userId }],
+        maybeSingle: true,
+      });
+
+      const filters: any[] = [
+        { op: 'eq', column: 'property_id', value: propertyId },
+      ];
+
+      if (companyMember?.company_id) {
+        filters.push({ op: 'eq', column: 'company_id', value: companyMember.company_id });
+      } else {
+        filters.push({ op: 'eq', column: 'user_id', value: userId });
+      }
+
       const { data: credit } = await serverApi.query<MeetingRoomCredit>({
         table: 'meeting_room_credits',
         action: 'select',
         select: '*',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'user_id', value: userId },
-        ],
+        filters,
         maybeSingle: true,
       });
 
@@ -196,24 +212,16 @@ export async function createMeetingRoomBooking(input: CreateBookingInput): Promi
     const userId = await getCurrentUserId();
     if (!userId) throw new Error('Not authenticated');
 
-    const { data, error } = await serverApi.query<MeetingRoomBooking>({
-      table: 'meeting_room_bookings',
-      action: 'insert',
-      values: {
-        meeting_room_id: input.meetingRoomId,
-        property_id: input.propertyId,
-        user_id: userId,
-        booking_date: input.date,
-        start_time: input.startTime,
-        end_time: input.endTime,
-        status: 'confirmed',
-      },
-      select: '*, meeting_room:meeting_room_id(name, photo_url, location), tenant:user_id(full_name, email)',
-      single: true,
+    const result = await serverApi.post<any>('/api/meeting-room-bookings', {
+      meetingRoomId: input.meetingRoomId,
+      propertyId: input.propertyId,
+      date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
     });
 
-    if (error) throw new Error(error.message);
-    return { success: true, booking: data as MeetingRoomBooking };
+    if (result.error) throw new Error(result.error.message);
+    return { success: true, booking: result.data?.booking || result.data };
   } catch (err: any) {
     return { error: err.message };
   }

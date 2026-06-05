@@ -43,6 +43,13 @@ import {
   Trash2,
 } from 'lucide-react-native';
 
+function formatRemainingHours(hours: number): string {
+  const num = typeof hours === 'string' ? parseFloat(hours) : hours;
+  const h = Math.floor(num);
+  const m = Math.round((num - h) * 60);
+  return `${h} hour${h !== 1 ? 's' : ''} ${m} minute${m !== 1 ? 's' : ''}`;
+}
+
 export default function AdminCreditsScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
@@ -266,6 +273,11 @@ export default function AdminCreditsScreen() {
                     placeholder="0"
                     placeholderTextColor="rgba(255,255,255,0.2)"
                   />
+                  {editRemainingHours[item.id] && !isNaN(parseFloat(editRemainingHours[item.id])) && (
+                    <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 6, fontFamily: 'Urbanist-SemiBold' }}>
+                      {formatRemainingHours(parseFloat(editRemainingHours[item.id]))} remaining
+                    </Text>
+                  )}
                 </View>
               </View>
 

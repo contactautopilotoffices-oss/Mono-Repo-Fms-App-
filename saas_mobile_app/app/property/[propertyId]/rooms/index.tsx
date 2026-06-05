@@ -95,6 +95,13 @@ function formatAmenityLabel(amenity: string): string {
   return amenity.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
+function formatRemainingHours(hours: number): string {
+  const num = typeof hours === 'string' ? parseFloat(hours) : hours;
+  const h = Math.floor(num);
+  const m = Math.round((num - h) * 60);
+  return `${h} hour${h !== 1 ? 's' : ''} ${m} minute${m !== 1 ? 's' : ''}`;
+}
+
 // ─── Room Detail Bottom Sheet ─────────────────────────────────────────────────
 
 function RoomDetailSheet({
@@ -191,7 +198,7 @@ function RoomDetailSheet({
           <View style={{ backgroundColor: 'rgba(255,159,10,0.1)', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <CreditCard size={18} color="#FF9F0A" />
             <Text style={{ color: '#FF9F0A', fontFamily: 'Urbanist-SemiBold', fontSize: 14 }}>
-              {credit.remaining_hours}h remaining · resets {format(new Date(credit.next_reset_at), 'MMM d')}
+              {formatRemainingHours(credit.remaining_hours)} remaining · resets {format(new Date(credit.next_reset_at), 'MMM d')}
             </Text>
           </View>
         )}
@@ -299,7 +306,7 @@ export default function RoomsScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.rooms(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 30 }
   );
 
   const rooms = data?.rooms ?? [];
@@ -362,7 +369,7 @@ export default function RoomsScreen() {
           <SafeBlurView intensity={60} tint="dark" style={styles.creditBannerInner}>
             <LinearGradient colors={['rgba(255,159,10,0.12)', 'rgba(255,159,10,0.04)']} style={StyleSheet.absoluteFillObject} />
             <CreditCard size={18} color="#FF9F0A" />
-            <Text style={styles.creditBannerText}>Monthly Credits: <Text style={styles.creditBannerHighlight}>{credit.remaining_hours}h</Text> remaining</Text>
+            <Text style={styles.creditBannerText}>Monthly Quota: <Text style={{ fontFamily: 'Poppins-Bold' }}>{credit.monthly_hours}h</Text> · <Text style={styles.creditBannerHighlight}>{formatRemainingHours(credit.remaining_hours)}</Text> remaining</Text>
           </SafeBlurView>
         </View>
       )}
@@ -408,7 +415,10 @@ export default function RoomsScreen() {
                     <Text style={styles.cardName}>{item.meeting_room?.name || 'Room'}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                       <CalendarDays size={12} color="#708F96" />
-                      <Text style={styles.cardMetaText}>{item.booking_date} · {item.start_time} - {item.end_time}</Text>
+                      <Text style={styles.cardMetaText}>
+                        {item.booking_date} · {item.start_time} - {item.end_time}
+                        {item.start_time && item.end_time ? ` (${(new Date(`1970-01-01T${item.end_time}`).getTime() - new Date(`1970-01-01T${item.start_time}`).getTime()) / (1000 * 60 * 60)} hrs)` : ''}
+                      </Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                       <Users size={12} color="#708F96" />

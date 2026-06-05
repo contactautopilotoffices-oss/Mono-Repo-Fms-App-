@@ -993,6 +993,7 @@ export default function ChecklistScreen() {
     >
   >({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [liveNow, setLiveNow] = useState(() => new Date());
   const [adminUnlocked, setAdminUnlocked] = useState(false);
 
@@ -1315,6 +1316,12 @@ export default function ChecklistScreen() {
 
   const fetchTemplates = fetchAll;
 
+  // ── Realtime setup stub ────────────────────────────────────────────────────
+  const setupRealtime = (_completionId: string) => {
+    // Realtime subscriptions disabled for preview build
+    realtimeChannel.current = null;
+  };
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await refetch();
@@ -1411,22 +1418,23 @@ export default function ChecklistScreen() {
           now,
         );
 
-      const res = await checklistService.startCompletion({
-        template_id: template.id,
-        property_id: propertyId,
-        organization_id: template.organization_id || orgId,
-        completed_by: user?.id,
-        status: "in_progress",
-        completion_date: logicalDateStr,
-        slot_time: slotTime || null,
-      });
-
-      if (res.error) {
-        Alert.alert("Error", res.error);
+      let fullCompletion: SOPCompletion;
+      try {
+        const res = await checklistService.startCompletion({
+          template_id: template.id,
+          property_id: propertyId,
+          organization_id: template.organization_id || orgId,
+          completed_by: user?.id,
+          status: "in_progress",
+          completion_date: logicalDateStr,
+          slot_time: slotTime || null,
+        });
+        fullCompletion = (res.completion || {}) as SOPCompletion;
+      } catch (err: any) {
+        Alert.alert("Error", err.message || "Failed to start checklist");
+        setIsLoading(false);
         return;
       }
-
-      const fullCompletion = (res.completion || {}) as SOPCompletion;
 
       setActiveTemplate(template);
       setActiveCompletion(fullCompletion);
@@ -1740,7 +1748,7 @@ export default function ChecklistScreen() {
       setAdminUnlocked(false);
       Alert.alert("Success", "Checklist submitted!");
       setView("history");
-      fetchAll(true);
+      fetchAll();
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to submit checklist");
     } finally {

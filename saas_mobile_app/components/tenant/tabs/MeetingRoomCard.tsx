@@ -199,7 +199,7 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
           <View style={styles.metaRow}>
              <Text style={styles.metaText}>{room.capacity} People</Text>
              <Text style={styles.metaDot}>•</Text>
-             <Text style={styles.metaText}>{room.location || 'General'}</Text>
+             <Text style={[styles.metaText, { flexShrink: 1 }]} numberOfLines={2}>{room.location || 'General'}</Text>
           </View>
         </View>
       </View>
@@ -434,7 +434,7 @@ const styles = StyleSheet.create({
   },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   metaText: {
     fontSize: 12,
@@ -445,6 +445,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.3)',
     marginHorizontal: 6,
     fontSize: 12,
+    marginTop: -2,
   },
   bookingSection: {
     borderTopWidth: 1,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyMeetingRoomBookedUser, notifyMeetingRoomBookedAdmin } from "@/lib/whatsapp/whatsappService";
 
 export async function GET(request: NextRequest) {
   try {
@@ -126,7 +127,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Room is already booked for this time slot" }, { status: 409 });
     }
 
-    const { data: property } = await admin.from("properties").select("organization_id").eq("id", propertyId).maybeSingle();
+    const { data: property } = await admin.from("properties").select("organization_id, name").eq("id", propertyId).maybeSingle();
+    const { data: room } = await admin.from("meeting_rooms").select("name").eq("id", meetingRoomId).maybeSingle();
 
     const { data: booking, error: insertError } = await admin
       .from("meeting_room_bookings")
@@ -161,6 +163,43 @@ export async function POST(request: NextRequest) {
         await admin.from("meeting_room_bookings").delete().eq("id", booking.id);
         return NextResponse.json({ error: "Failed to deduct meeting room credits" }, { status: 402 });
       }
+    }
+
+    // ── WhatsApp Notifications ──────────────────────────────────────────────────
+    try {
+      // 1. Notify the user who booked
+      await notifyMeetingRoomBookedUser(
+        auth.user.id,
+        room?.name || "Meeting Room",
+        property?.name || "Property",
+        date,
+        `${startTime} - ${endTime} (${durationHours} hrs)`
+      );
+
+      // 2. Notify Property Admins
+      const { data: admins } = await admin
+        .from("property_memberships")
+        .select("user_id")
+        .eq("property_id", propertyId)
+        .in("role", ["property_admin"]);
+
+      if (admins?.length) {
+        // Fetch user's name for the admin notification
+        const { data: userProfile } = await admin.from("users").select("full_name").eq("id", auth.user.id).maybeSingle();
+        
+        for (const adminUser of admins) {
+          await notifyMeetingRoomBookedAdmin(
+            adminUser.user_id,
+            room?.name || "Meeting Room",
+            property?.name || "Property",
+            date,
+            `${startTime} - ${endTime} (${durationHours} hrs)`,
+            userProfile?.full_name || "A user"
+          );
+        }
+      }
+    } catch (notifErr) {
+      console.error("[WhatsApp] Failed to send meeting room notifications:", notifErr);
     }
 
     return NextResponse.json({ success: true, booking }, { status: 201 });

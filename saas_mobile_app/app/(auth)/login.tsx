@@ -34,6 +34,7 @@ import { z } from 'zod';
 import { useAuth } from '@/hooks/useAuth';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { authService } from '@/services/authService';
+import { supabase } from '@/utils/supabase/client';
 import { Colors } from '@/constants/Colors';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
 import Animated, {

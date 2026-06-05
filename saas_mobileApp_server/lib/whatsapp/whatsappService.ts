@@ -159,6 +159,45 @@ Task marked as done.`;
   return sendWhatsAppMessage(phone, message);
 }
 
+// ── Meeting Room Notifications ────────────────────────────────────────────────
+
+export async function notifyMeetingRoomBookedUser(
+  userId: string,
+  roomName: string,
+  propertyName: string,
+  date: string,
+  time: string
+): Promise<WhatsAppResult> {
+  const message = `✅ *Meeting Room Booked*
+
+🏢 ${propertyName}
+🚪 ${roomName}
+📅 ${date}
+⏰ ${time}
+
+Your booking is confirmed!`;
+  return notifyUser(userId, message);
+}
+
+export async function notifyMeetingRoomBookedAdmin(
+  userId: string,
+  roomName: string,
+  propertyName: string,
+  date: string,
+  time: string,
+  bookedBy: string
+): Promise<WhatsAppResult> {
+  const message = `🏢 *New Meeting Room Booking*
+
+🚪 Room: ${roomName}
+📅 Date: ${date}
+⏰ Time: ${time}
+👤 Booked By: ${bookedBy}
+
+This booking has been confirmed.`;
+  return notifyUser(userId, message);
+}
+
 // ── Fetch user phone from DB ────────────────────────────────────────────────────
 
 export async function getUserPhone(userId: string): Promise<string | null> {
