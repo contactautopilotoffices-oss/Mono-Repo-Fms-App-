@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   ScrollView,
   Image,
   Modal,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -23,110 +22,383 @@ interface GlobalNavigationDrawerProps {
   propertyId: string;
 }
 
-const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
-const fontDisplay = Platform.OS === 'web' ? 'Poppins' : 'System';
+interface MenuItem {
+  label: string;
+  route: string;
+  icon: string;
+  color?: string;
+}
+
+interface MenuSection {
+  title: string;
+  badge?: { text: string; color: string };
+  items: MenuItem[];
+  color?: string;
+}
 
 export default function GlobalNavigationDrawer({ visible, onClose, propertyId }: GlobalNavigationDrawerProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
+  const { signOut, membership } = useAuth();
   const [showSignOut, setShowSignOut] = useState(false);
 
+  // Get user role from membership
+  const userRole = useMemo(() => {
+    const role = membership?.properties?.[0]?.role || membership?.org_role || 'tenant';
+    return role.toLowerCase();
+  }, [membership]);
+
   const navigateTo = (route: string) => {
-    console.log(`[VERIFICATION LOG] GlobalNavDrawer Navigating | Route: ${route} | Drawer PropertyId: ${propertyId}`);
     onClose();
     router.push(`/property/${propertyId}/${route}` as any);
   };
+
+  // Define menu sections based on role - matching web app
+  const menuSections = useMemo((): MenuSection[] => {
+    // TENANT - matches TenantDashboard.tsx
+    if (userRole === 'tenant') {
+      return [
+        {
+          title: 'CORE',
+          badge: { text: 'CLIENT', color: '#10B981' },
+          items: [
+            { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+            { label: 'My Requests', route: 'tenant/requests', icon: 'ticket-outline' },
+            { label: 'Visitor Management', route: 'visitors', icon: 'people-outline' },
+            { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
+          ],
+        },
+        {
+          title: 'ACCOUNT',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // STAFF - matches StaffDashboard.tsx
+    if (userRole === 'staff' || userRole === 'maintenance_staff') {
+      return [
+        {
+          title: 'DAILY WORK',
+          badge: { text: 'STAFF', color: '#F59E0B' },
+          items: [
+            { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+            { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
+            { label: 'Live Flow Map', route: 'flow-map', icon: 'git-branch-outline' },
+          ],
+        },
+        {
+          title: 'OPERATIONS',
+          items: [
+            { label: 'Visitors', route: 'visitors', icon: 'people-outline' },
+            { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
+            { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline', color: '#F97316' },
+            { label: 'Electricity', route: 'electricity', icon: 'flash-outline', color: '#EAB308' },
+            { label: 'Stock', route: 'stock', icon: 'cube-outline' },
+            { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
+          ],
+        },
+        {
+          title: 'SYSTEM',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // PROPERTY ADMIN - matches PropertyAdminDashboard.tsx
+    if (userRole === 'property_admin' || userRole === 'org_admin') {
+      return [
+        {
+          title: 'CORE',
+          badge: { text: 'ADMIN', color: '#3B82F6' },
+          items: [
+            { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+            { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
+            { label: 'Reports', route: 'reports', icon: 'stats-chart-outline' },
+          ],
+        },
+        {
+          title: 'MANAGEMENT',
+          items: [
+            { label: 'User Directory', route: 'users', icon: 'people-outline' },
+            { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
+            { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
+            { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline', color: '#F97316' },
+            { label: 'Electricity', route: 'electricity', icon: 'flash-outline', color: '#EAB308' },
+            { label: 'Stock', route: 'stock', icon: 'cube-outline' },
+            { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
+            { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
+            { label: 'PPM', route: 'ppm', icon: 'calendar-clear-outline' },
+          ],
+        },
+        {
+          title: 'SYSTEM',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // SECURITY - matches SecurityDashboard.tsx
+    if (userRole === 'security' || userRole === 'security_guard') {
+      return [
+        {
+          title: 'SECURITY',
+          badge: { text: 'SECURITY', color: '#3B82F6' },
+          items: [
+            { label: 'Overview', route: 'security', icon: 'shield-outline', color: '#3B82F6' },
+            { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
+            { label: 'Check In / Out', route: 'visitors', icon: 'log-in-outline', color: '#10B981' },
+            { label: 'Visitor Registry', route: 'visitors', icon: 'people-outline' },
+            { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline', color: '#F97316' },
+            { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
+          ],
+        },
+        {
+          title: 'SYSTEM',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // SUPER TENANT - matches SuperTenantDashboard.tsx
+    if (userRole === 'super_tenant' || userRole === 'org_super_admin') {
+      return [
+        {
+          title: 'CORE',
+          badge: { text: 'SUPER CLIENT', color: '#8B5CF6' },
+          items: [
+            { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+            { label: 'My Requests', route: 'tenant/requests', icon: 'ticket-outline' },
+          ],
+        },
+        {
+          title: 'SERVICES',
+          items: [
+            { label: 'Visitor Management', route: 'visitors', icon: 'people-outline' },
+            { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
+          ],
+        },
+        {
+          title: 'ACCOUNT',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // MASTER ADMIN
+    if (userRole === 'master_admin') {
+      return [
+        {
+          title: 'ADMIN',
+          badge: { text: 'MASTER ADMIN', color: '#EF4444' },
+          items: [
+            { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+            { label: 'All Requests', route: 'tickets', icon: 'ticket-outline' },
+          ],
+        },
+        {
+          title: 'MANAGEMENT',
+          items: [
+            { label: 'User Directory', route: 'users', icon: 'people-outline' },
+            { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
+            { label: 'Diesel', route: 'diesel', icon: 'flame-outline', color: '#F97316' },
+            { label: 'Electricity', route: 'electricity', icon: 'flash-outline', color: '#EAB308' },
+            { label: 'Stock', route: 'stock', icon: 'cube-outline' },
+            { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
+          ],
+        },
+        {
+          title: 'SYSTEM',
+          items: [
+            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Profile', route: 'profile', icon: 'person-outline' },
+          ],
+        },
+      ];
+    }
+
+    // DEFAULT - Fallback for unknown roles
+    return [
+      {
+        title: 'NAVIGATION',
+        items: [
+          { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
+          { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
+          { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
+          { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+        ],
+      },
+    ];
+  }, [userRole]);
 
   return (
     <>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
         <View style={styles.container}>
           <View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }]}>
+            {/* Header */}
             <View style={styles.drawerHeader}>
               <View style={styles.drawerLogoContainer}>
-                <Image 
-                  source={require('@/assets/images/autopilot-logo-new.png')} 
-                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]} 
-                  resizeMode="contain" 
+                <Image
+                  source={require('@/assets/images/autopilot-logo-new.png')}
+                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]}
+                  resizeMode="contain"
                 />
               </View>
               <TouchableOpacity onPress={onClose} style={styles.drawerCloseBtn}>
                 <Ionicons name="close" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
-              {[
-                { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
-                { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
-                { label: 'User Directory', route: 'users', icon: 'people-outline' },
-                { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
-                { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => navigateTo(item.route)}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
+              {menuSections.map((section, sectionIndex) => (
+                <View key={section.title} style={sectionIndex > 0 ? styles.sectionContainer : undefined}>
+                  {/* Section Header */}
+                  <View style={styles.sectionHeader}>
+                    {section.badge && (
+                      <View style={[styles.roleBadge, { backgroundColor: section.badge.color + '20' }]}>
+                        <Text style={[styles.roleBadgeText, { color: section.badge.color }]}>
+                          {section.badge.text}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={[styles.sectionTitle, section.color && { color: section.color }]}>
+                      {section.title}
+                    </Text>
+                  </View>
+
+                  {/* Section Items */}
+                  {section.items.map((item) => (
+                    <TouchableOpacity
+                      key={item.route + item.label}
+                      style={styles.menuItem}
+                      onPress={() => navigateTo(item.route)}
+                    >
+                      <View style={styles.menuItemContent}>
+                        <Ionicons
+                          name={item.icon as any}
+                          size={20}
+                          color={item.color || 'rgba(255,255,255,0.6)'}
+                        />
+                        <Text style={[styles.menuItemLabel, item.color && { color: item.color }]}>
+                          {item.label}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
               ))}
 
-              <Text style={[styles.drawerSectionLabel, { marginTop: 20 }]}>UTILITIES</Text>
-              {[
-                { label: 'Diesel', route: 'diesel', icon: 'flame-outline' },
-                { label: 'Electricity', route: 'electricity', icon: 'flash-outline' },
-                { label: 'Stock / Inventory', route: 'stock', icon: 'cube-outline' },
-                { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
-                { label: 'PPM', route: 'ppm', icon: 'calendar-clear-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => navigateTo(item.route)}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <Text style={[styles.drawerSectionLabel, { marginTop: 20 }]}>MANAGEMENT</Text>
-              {[
-                { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
-                { label: 'Escalation', route: 'escalation', icon: 'git-branch-outline' },
-                { label: 'Vendor Revenue', route: 'vendor', icon: 'restaurant-outline' },
-                { label: 'Reports', route: 'reports', icon: 'document-text-outline' },
-                { label: 'Settings', route: 'settings', icon: 'settings-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => navigateTo(item.route)}>
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
+              {/* Sign Out */}
+              <TouchableOpacity
+                style={styles.signOutBtn}
+                onPress={() => setShowSignOut(true)}
+              >
+                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                <Text style={styles.signOutText}>Sign Out</Text>
+              </TouchableOpacity>
             </ScrollView>
-
-            <TouchableOpacity style={styles.drawerSignOut} onPress={() => { onClose(); setShowSignOut(true); }}>
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-              <Text style={styles.drawerSignOutText}>Logout</Text>
-            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.drawerBackdrop} onPress={onClose} />
         </View>
       </Modal>
 
-      <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
+      <SignOutModal
+        visible={showSignOut}
+        onClose={() => setShowSignOut(false)}
+        onSignOut={async () => {
+          setShowSignOut(false);
+          onClose();
+          await signOut();
+        }}
+      />
     </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, flexDirection: 'row' },
-  drawerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  drawerPanel: { width: 320, height: '100%', backgroundColor: '#111', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 24 },
-  drawerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, marginTop: 12 },
+  drawerPanel: {
+    width: 320,
+    height: '100%',
+    backgroundColor: '#111',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+    marginTop: 8,
+  },
   drawerLogoContainer: { flex: 1, alignItems: 'flex-start' },
   drawerLogo: { width: 160, height: 42, resizeMode: 'contain' },
-  drawerCloseBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
-  drawerItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 14, paddingHorizontal: 8, borderRadius: 12 },
-  drawerItemLabel: {  fontSize: 15, fontWeight: '500', color: '#FFF' },
-  drawerSectionLabel: {  fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.35)', letterSpacing: 1.5, marginBottom: 10, paddingHorizontal: 8, marginTop: 6 },
-  securityBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(59,130,246,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
-  securityBadgeText: { fontSize: 10, fontWeight: '800', color: '#3B82F6', letterSpacing: 1.5 },
-  drawerSignOut: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', marginBottom: 40, paddingHorizontal: 8 },
-  drawerSignOutText: { color: '#EF4444', fontWeight: '700', fontSize: 15 },
+  drawerCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  sectionContainer: { marginTop: 24 },
+  sectionHeader: { marginBottom: 8, paddingHorizontal: 8 },
+  roleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 8
+  },
+  roleBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.5
+  },
+  sectionTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 1.5
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    marginBottom: 2,
+  },
+  menuItemContent: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  menuItemLabel: { fontSize: 15, fontWeight: '500', color: '#FFF' },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 32,
+    marginBottom: 40,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  signOutText: { color: '#EF4444', fontWeight: '600', fontSize: 15 },
 });
