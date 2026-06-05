@@ -22,9 +22,11 @@ import { useRouter, useGlobalSearchParams, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
 import { vmsService } from '@/services/vmsService';
 import { ticketService } from '@/services/ticketService';
+import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
   Shield,
   Users,
@@ -38,6 +40,10 @@ import {
   Fuel,
   Eye,
   Settings,
+  Home,
+  FileText,
+  Box,
+  Settings2,
 } from 'lucide-react-native';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
@@ -231,28 +237,24 @@ export default function SecurityDashboard() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={{ flex: 1, backgroundColor: '#0F1521' }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={['#0f172a', '#1e1b4b', '#0f172a']} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={['#0F1521', '#121824', '#090d16']} style={StyleSheet.absoluteFillObject} />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.headerIcon}>
+      {/* Modern Header - Same as other pages */}
+      <SafeBlurView intensity={80} tint="dark" style={[styles.modernHeader, { paddingTop: insets.top + 10 }]}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <View style={styles.headerIconCenter}>
             <Shield size={22} color="#3B82F6" />
           </View>
-          <View>
-            <Text style={styles.headerTitle}>Security</Text>
-            <Text style={styles.headerSubtitle}>Officer Portal</Text>
-          </View>
+          <Text style={styles.headerTitleMain}>Security</Text>
+          <View style={{ width: 40 }} />
         </View>
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          onPress={() => router.push(`/property/${propertyId}/visitors` as any)}
-        >
-          <Users size={20} color="rgba(255,255,255,0.7)" />
-        </TouchableOpacity>
-      </View>
+        <Text style={styles.headerSubtitle}>Officer Portal</Text>
+      </SafeBlurView>
 
       {/* Live Badge */}
       <View style={styles.liveBadge}>
@@ -262,7 +264,7 @@ export default function SecurityDashboard() {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 80 }]}
         refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="#fff" />}
         showsVerticalScrollIndicator={false}
       >
@@ -367,6 +369,26 @@ export default function SecurityDashboard() {
           ))
         )}
       </ScrollView>
+
+      {/* Bottom Tab Bar - Same as other pages */}
+      <SafeBlurView intensity={60} tint="dark" style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
+        <LinearGradient colors={['rgba(15,21,33,0.95)', 'rgba(15,21,33,0.98)']} style={StyleSheet.absoluteFill} />
+        <View style={styles.bottomNavInner}>
+          {[
+            { icon: <Home size={22} color="#708F96" />, label: 'Home', route: `/property/${propertyId}` },
+            { icon: <FileText size={22} color="#708F96" />, label: 'Requests', route: `/property/${propertyId}/tickets` },
+            { icon: <Shield size={22} color="#3B82F6" />, label: 'Security', route: `/property/${propertyId}/security`, active: true },
+            { icon: <Box size={22} color="#708F96" />, label: 'Stock', route: `/property/${propertyId}/stock` },
+            { icon: <Settings2 size={22} color="#708F96" />, label: 'Settings', route: `/property/${propertyId}/profile` },
+          ].map((item) => (
+            <TouchableOpacity key={item.label} style={styles.navItem} onPress={() => router.push(item.route as any)}>
+              {item.active && <View style={styles.activeDot} />}
+              {item.icon}
+              <Text style={[styles.navLabel, item.active && styles.navLabelActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </SafeBlurView>
     </View>
   );
 }
@@ -375,24 +397,36 @@ export default function SecurityDashboard() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  modernHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.12)',
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerIcon: {
-    width: 44,
-    height: 44,
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerIconCenter: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
     backgroundColor: 'rgba(59,130,246,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#FFFFFF' },
-  headerSubtitle: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
+  headerTitleMain: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
+  headerSubtitle: { fontSize: 12, color: '#708F96', fontWeight: '600' },
   settingsBtn: {
     width: 44,
     height: 44,
@@ -498,4 +532,37 @@ const styles = StyleSheet.create({
   visitorTime: { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   visitorStatus: { alignItems: 'flex-end' },
   statusBadge: { fontSize: 11, fontWeight: '600' },
+  bottomNav: {
+    flexDirection: 'row',
+    paddingTop: 8,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  bottomNavInner: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: 4,
+  },
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3B82F6',
+    position: 'absolute',
+    top: 0,
+  },
+  navLabel: { fontSize: 10, color: '#708F96', fontWeight: '600' },
+  navLabelActive: { color: '#3B82F6' },
 });
