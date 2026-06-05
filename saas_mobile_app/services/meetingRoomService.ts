@@ -97,6 +97,48 @@ export async function getMeetingRoomBookings(propertyId: string, status?: string
   }
 }
 
+export async function getMeetingRoomBookingsByDate(propertyId: string, date: string): Promise<{ bookings?: MeetingRoomBooking[]; error?: string }> {
+  try {
+    const { data, error } = await serverApi.query<MeetingRoomBooking[]>({
+      table: 'meeting_room_bookings',
+      action: 'select',
+      select: '*',
+      filters: [
+        { op: 'eq', column: 'property_id', value: propertyId },
+        { op: 'eq', column: 'booking_date', value: date },
+        { op: 'neq', column: 'status', value: 'cancelled' }
+      ],
+    });
+
+    if (error) throw new Error(error.message);
+    return { bookings: (data ?? []) as MeetingRoomBooking[] };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
+export interface MeetingRoomSlot {
+  id: string;
+  start_time: string;
+  end_time: string;
+}
+
+export async function getMeetingRoomSlotsApi(): Promise<{ slots?: MeetingRoomSlot[]; error?: string }> {
+  try {
+    const { data, error } = await serverApi.query<MeetingRoomSlot[]>({
+      table: 'meeting_room_slots',
+      action: 'select',
+      select: '*',
+      orders: [{ column: 'start_time', ascending: true }],
+    });
+
+    if (error) throw new Error(error.message);
+    return { slots: (data ?? []) as MeetingRoomSlot[] };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
 export async function getMeetingRoomCredits(propertyId: string): Promise<{ credit?: MeetingRoomCredit | null; company?: any | null; error?: string }> {
   try {
     const userId = await getCurrentUserId();

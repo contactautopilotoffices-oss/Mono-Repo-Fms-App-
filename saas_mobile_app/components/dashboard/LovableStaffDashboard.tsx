@@ -25,6 +25,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   runOnJS,
   interpolate,
   Extrapolate,
@@ -36,13 +37,15 @@ import {
   GestureDetector,
 } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
 import { useAsyncStorageCache } from '@/hooks/useAsyncStorageCache';
 import { queryKeys } from '@/utils/queryKeys';
 import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import SkeletonLoader from './lovable/SkeletonLoader';
 
 // WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -51,6 +54,7 @@ import { XPBar } from '@/components/gamification/XPBar';
 import { StreakChip } from '@/components/gamification/StreakChip';
 import { Leaderboard } from '@/components/gamification/Leaderboard';
 import { AchievementBadge } from '@/components/gamification/AchievementBadge';
+import MobilePropertySelector from '../shared/MobilePropertySelector';
 import {
   defaultMstUser,
   defaultAchievements,
@@ -256,7 +260,7 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
     .onEnd((e) => {
       if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
         const dest = e.translationX > 0 ? SCREEN_W : -SCREEN_W;
-        translateX.value = withSpring(dest, { velocity: e.velocityX, damping: 20, stiffness: 90 }, () => {
+        translateX.value = withTiming(dest, { duration: 150 }, () => {
           runOnJS(sendToBack)();
         });
       } else {
@@ -318,7 +322,7 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
   );
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
+const TicketCard = React.memo(function TicketCard({ ticket }: { ticket: Ticket }) {
   const priorityColors: Record<string, { bg: string; text: string; border: string }> = {
     LOW: { bg: 'rgba(100,116,139,0.20)', text: '#94A3B8', border: 'rgba(100,116,139,0.40)' },
     MEDIUM: { bg: 'rgba(251,191,36,0.15)', text: '#FDE68A', border: 'rgba(251,191,36,0.35)' },
@@ -414,7 +418,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
       </View>
     </View>
   );
-}
+});
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
@@ -424,7 +428,16 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const { weather } = useWeather();
   const router = useRouter();
 
-  const supabase = useMemo(() => createClient(), []);
+  // Use property role to determine dashboard features (matching Web App logic)
+  const propRole = useMemo(() => {
+    const prop = membership?.properties?.find(p => p.id === propertyId);
+    return (prop?.role || membership?.org_role || 'staff').toLowerCase().replace(/\s+/g, '_');
+  }, [membership, propertyId]);
+
+  const STAFF_TECHNICAL_ROLES = ['mst', 'technician', 'fe', 'se', 'bms_operator'];
+  const isTechnical = STAFF_TECHNICAL_ROLES.includes(propRole) || propRole.includes('technical');
+  const isSoftServices = propRole.includes('soft_service') || propRole.includes('housekeeping');
+  const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
 
   // AsyncStorage cache for instant dashboard load on app reopen
   const { cachedData: staffCache, hasCache: hasStaffCache, saveCache: saveStaffCache } = useAsyncStorageCache<{
@@ -445,6 +458,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   });
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
   const [isLoading, setIsLoading] = useState(!hasStaffCache);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [property, setProperty] = useState<{ name: string } | null>(staffCache?.property ?? null);
@@ -462,8 +476,20 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const [ppmOverdue, setPpmOverdue] = useState(staffCache?.ppmOverdue ?? 0);
   const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
 
-  const isTechnical = userSkills.includes('technical');
-  const isSoftServices = userSkills.includes('soft_services') || userSkills.includes('housekeeping');
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(!hasStaffCache);
+
+  // Minimum skeleton duration effect
+  useEffect(() => {
+    if (hasStaffCache) {
+      if (showSkeleton) {
+        const timer = setTimeout(() => setShowSkeleton(false), 600);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      setShowSkeleton(true);
+    }
+  }, [hasStaffCache]);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -496,89 +522,115 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const fetchData = useCallback(async () => {
     if (!propertyId) return;
     try {
-      const { data: propData } = await supabase
-        .from('properties')
-        .select('name')
-        .eq('id', propertyId)
-        .maybeSingle();
+      // Fetch all data in parallel using serverApi
+      const [propRes, ticketRes, shiftRes, skillsRes, resolverStatsRes, ppmRes] = await Promise.allSettled([
+        serverApi.query<{ name: string }[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.query<Ticket[]>({
+          table: 'tickets',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+        }),
+        serverApi.query<{ is_checked_in: boolean }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'is_checked_in',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+          ],
+          limit: 1,
+        }),
+        serverApi.query<{ skill_group_code: string }[]>({
+          table: 'mst_skills',
+          action: 'select',
+          select: 'skill_group_code',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+            { op: 'eq', column: 'property_id', value: propertyId },
+          ],
+          limit: 1,
+        }),
+        serverApi.query<{ skills: string[]; specialization: string }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'skills, specialization',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+            { op: 'eq', column: 'property_id', value: propertyId },
+          ],
+          limit: 1,
+        }),
+        ppmService.fetchStats(propertyId).catch(() => null),
+      ]);
+
+      // Helper to get data from PromiseSettledResult
+      const getData = (result: PromiseSettledResult<any>): any => {
+        return result.status === 'fulfilled' ? result.value : null;
+      };
+
+      // Update state
+      const propData = getData(propRes)?.data?.[0];
       if (propData) setProperty(propData);
 
-      const { data: ticketData } = await supabase
-        .from('tickets')
-        .select(`
-          *,
-          assignee:users!assigned_to(id, full_name, email, user_photo_url),
-          creator:users!raised_by(id, full_name)
-        `)
-        .eq('property_id', propertyId)
-        .order('created_at', { ascending: false });
-      if (ticketData) setTickets(ticketData as Ticket[]);
+      const ticketData = getData(ticketRes)?.data ?? [];
+      if (ticketData) setTickets(ticketData);
 
-      // Shift status
-      const { data: shiftData } = await supabase
-        .from('resolver_stats')
-        .select('is_checked_in')
-        .eq('property_id', propertyId)
-        .eq('user_id', user?.id as string)
-        .maybeSingle();
-      if (shiftData) setIsCheckedIn(!!(shiftData as any).is_checked_in);
+      const shiftData = getData(shiftRes)?.data?.[0];
+      if (shiftData) setIsCheckedIn(!!shiftData.is_checked_in);
 
       // Fetch specialization
       let cachedUserSkills = userSkills;
       let cachedSpecialization = specialization;
-      const { data: skills } = await ((supabase
-        .from('mst_skills') as any)
-        .select('skill_group_code')
-        .eq('user_id', user?.id as string)
-        .eq('property_id', propertyId)
-        .single() as any);
 
+      const skills = getData(skillsRes)?.data?.[0];
       if (skills?.skill_group_code) {
+        const spec = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
         setUserSkills([skills.skill_group_code]);
-        setSpecialization(skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
+        setSpecialization(spec);
         cachedUserSkills = [skills.skill_group_code];
-        cachedSpecialization = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+        cachedSpecialization = spec;
       } else {
-        const { data: resolverStats } = await (supabase
-          .from('resolver_stats')
-          .select('skills, specialization')
-          .eq('user_id', user?.id as string)
-          .eq('property_id', propertyId)
-          .single() as any);
-
+        const resolverStats = getData(resolverStatsRes)?.data?.[0];
         if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
           setUserSkills(resolverStats.skills);
           cachedUserSkills = resolverStats.skills;
           if (resolverStats.skills.length > 0) {
-            setSpecialization(resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
-            cachedSpecialization = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            const spec = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            setSpecialization(spec);
+            cachedSpecialization = spec;
           }
         }
       }
 
       // PPM stats
       let cachedPpmTotal = 0, cachedPpmDone = 0, cachedPpmPending = 0, cachedPpmOverdue = 0, cachedPpmPostponed = 0;
-      try {
-        const ppmRes = await ppmService.fetchStats(propertyId);
-        if (ppmRes.success && ppmRes.data) {
-          cachedPpmTotal = ppmRes.data.total ?? 0;
-          cachedPpmDone = ppmRes.data.done ?? 0;
-          cachedPpmPending = ppmRes.data.pending ?? 0;
-          cachedPpmOverdue = ppmRes.data.overdue ?? 0;
-          cachedPpmPostponed = ppmRes.data.postponed ?? 0;
-          setPpmTotal(cachedPpmTotal);
-          setPpmDone(cachedPpmDone);
-          setPpmPending(cachedPpmPending);
-          setPpmOverdue(cachedPpmOverdue);
-          setPpmPostponed(cachedPpmPostponed);
-        }
-      } catch (_e) { /* ignore */ }
+      const ppmResult = getData(ppmRes);
+      if (ppmResult?.success && ppmResult?.data) {
+        cachedPpmTotal = ppmResult.data.total ?? 0;
+        cachedPpmDone = ppmResult.data.done ?? 0;
+        cachedPpmPending = ppmResult.data.pending ?? 0;
+        cachedPpmOverdue = ppmResult.data.overdue ?? 0;
+        cachedPpmPostponed = ppmResult.data.postponed ?? 0;
+        setPpmTotal(cachedPpmTotal);
+        setPpmDone(cachedPpmDone);
+        setPpmPending(cachedPpmPending);
+        setPpmOverdue(cachedPpmOverdue);
+        setPpmPostponed(cachedPpmPostponed);
+      }
 
       // Save to AsyncStorage cache so next app open is instant
       saveStaffCache({
         property: propData ?? property,
-        tickets: (ticketData as Ticket[]) ?? tickets,
-        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+        tickets: ticketData ?? tickets,
+        isCheckedIn: !!shiftData?.is_checked_in,
         userSkills: cachedUserSkills,
         specialization: cachedSpecialization,
         ppmTotal: cachedPpmTotal,
@@ -644,12 +696,10 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       //   setActiveShiftId(null);
       // }
 
-      await serverApi.query({
-        table: 'resolver_stats',
-        action: 'upsert',
-        values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
-        mutationOptions: { onConflict: 'user_id,property_id' },
-      });
+        // Call the shift-status endpoint which updates both resolver_stats and shift_logs
+        await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
+          is_checked_in: newStatus
+        });
 
       setIsCheckedIn(newStatus);
       
@@ -679,18 +729,27 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     }
   }, [isCheckedIn, propertyId, user?.id, activeShiftId, isCheckingInOut]);
 
+  // ── Filtered Tickets ──
+  const filteredTickets = useMemo(() => {
+    let result = [...tickets];
+    if (!isTechnical && scopeFilter === 'my_tasks') {
+      result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
+    }
+    return result;
+  }, [tickets, scopeFilter, user?.id, isTechnical]);
+
   // ── Stats ──
   const stats = useMemo(() => {
-    const total = tickets.length;
-    const active = tickets.filter((t) =>
+    const total = filteredTickets.length;
+    const active = filteredTickets.filter((t) =>
       ['open', 'in_progress', 'blocked', 'client_raised'].includes(t.status)
     ).length;
-    const completed = tickets.filter((t) =>
+    const completed = filteredTickets.filter((t) =>
       ['resolved', 'closed'].includes(t.status)
     ).length;
-    const assignedToMe = tickets.filter(t => t.assigned_to === user?.id).length;
+    const assignedToMe = filteredTickets.filter(t => t.assigned_to === user?.id).length;
     return { total, active, completed, assignedToMe };
-  }, [tickets, user]);
+  }, [filteredTickets, user]);
 
   // ── Gamification user ──
   const mstUser: UserStats = useMemo(() => {
@@ -759,25 +818,56 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </Animated.View>
 
       {/* Stats card */}
-      <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.statsCardInner}>
-          <View style={styles.statsCardHeader}>
-            <TouchableOpacity style={styles.customizeBtn}>
-              <Ionicons name="options-outline" size={14} color="rgba(255,255,255,0.80)" />
-              <Text style={styles.customizeBtnText}>Customize</Text>
-            </TouchableOpacity>
+      {isTechnical ? (
+        <GlassTile label="Tickets" icon="ticket" delay={80} onPress={() => router.push(`/property/${propertyId}/tickets`)}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <View style={{ alignItems: 'flex-start' }}>
+              <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.active} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.completed} />
+              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+            </View>
           </View>
-          <View style={styles.statsGrid}>
-            <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-            <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
+        </GlassTile>
+      ) : (
+        <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
+          <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <View style={styles.statsCardInner}>
+            <View style={styles.statsCardHeader}>
+              <View style={styles.timeToggleRow}>
+                <TouchableOpacity
+                  style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+                  onPress={() => setScopeFilter('property')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+                  onPress={() => setScopeFilter('my_tasks')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.statsGrid}>
+              <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
+              <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
+            </View>
+            <View style={[styles.statsGrid, { marginTop: 12 }]}>
+              <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
+              <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
+            </View>
           </View>
-          <View style={[styles.statsGrid, { marginTop: 12 }]}>
-            <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
-            <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
-          </View>
-        </View>
-      </Animated.View>
+        </Animated.View>
+      )}
 
       <ChecklistProgressCard completed={stats.completed} total={stats.total} delay={280} />
 
@@ -869,30 +959,34 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </View>
 
       <View style={styles.flowGrid}>
-        {/* Always visible modules */}
-        <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
-          <View style={styles.flowTileInner}>
-            <View style={styles.flowTileHeader}>
-              <Ionicons name="people" size={20} color="#60A5FA" />
+        {/* Conditionally visible modules */}
+        {!isSoftServices && (
+          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
+            <View style={styles.flowTileInner}>
+              <View style={styles.flowTileHeader}>
+                <Ionicons name="people" size={20} color="#60A5FA" />
+              </View>
+              <Text style={styles.flowTileName}>Visitors</Text>
+              <View style={styles.flowTileStatus}>
+                <Text style={styles.flowTileStatusText}>Visitor Management</Text>
+              </View>
             </View>
-            <Text style={styles.flowTileName}>Visitors</Text>
-            <View style={styles.flowTileStatus}>
-              <Text style={styles.flowTileStatusText}>Visitor Management</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
-        <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
-          <View style={styles.flowTileInner}>
-            <View style={styles.flowTileHeader}>
-              <Ionicons name="cube" size={20} color="#34D399" />
+        {(!isSoftServices || isManager) && (
+          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
+            <View style={styles.flowTileInner}>
+              <View style={styles.flowTileHeader}>
+                <Ionicons name="cube" size={20} color="#34D399" />
+              </View>
+              <Text style={styles.flowTileName}>Stock</Text>
+              <View style={styles.flowTileStatus}>
+                <Text style={styles.flowTileStatusText}>Inventory & Scans</Text>
+              </View>
             </View>
-            <Text style={styles.flowTileName}>Stock</Text>
-            <View style={styles.flowTileStatus}>
-              <Text style={styles.flowTileStatusText}>Inventory & Scans</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
         {/* Technical Modules */}
         {isTechnical && (
@@ -1009,16 +1103,12 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading) {
+  if (showSkeleton || isLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
         <DashboardBackground />
-        {/* WeatherBackground removed — DashboardBackground handles theming */}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
+        <SkeletonLoader />
       </View>
     );
   }
@@ -1059,9 +1149,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
                 <Text style={styles.greetingName} numberOfLines={1}>
                   Hey, {(user?.user_metadata?.full_name || mstUser.name).split(' ')[0]}
                 </Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
-                  {property?.name || 'MST Portal'}
-                </Text>
+                <MobilePropertySelector currentPropertyId={propertyId} />
               </View>
             </TouchableOpacity>
           </View>
@@ -1108,7 +1196,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         </View>
       </ScrollView>
 
-      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} />
+      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} moreMenuItems={[{ label: "Overview", icon: "grid-outline", action: () => { setShowDrawer(false); setActiveTab("dashboard"); } },{ label: "Requests", icon: "ticket-outline", route: "tickets" },{ label: "Live Flow Map", icon: "git-branch-outline", route: "flow-map" },{ label: "Visitors", icon: "people-outline", route: "visitors" },{ label: "Diesel Logger", icon: "flame-outline", route: "diesel", color: "#F97316" },{ label: "Electricity Logger", icon: "flash-outline", route: "electricity", color: "#EAB308" },{ label: "Checklists", icon: "clipboard-outline", route: "checklist" },{ label: "Settings", icon: "settings-outline", route: "settings" },{ label: "Profile", icon: "person-outline", action: () => { setShowDrawer(false); setActiveTab("profile"); } },{ label: "Sign Out", icon: "log-out-outline", action: () => { setShowDrawer(false); setShowSignOut(true); }, color: "#EF4444" }]} />
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
@@ -1132,57 +1220,41 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.drawerSectionHeader}>
-                <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>DAILY WORK</Text>
+                <Ionicons name="construct-outline" size={14} color="rgba(255,255,255,0.3)" />
+                <Text style={styles.drawerSectionLabel}>MAINTENANCE PORTAL</Text>
               </View>
               {[
                 { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-                { label: 'Daily Board', icon: 'podium-outline', action: () => setActiveTab('daily') },
-                { label: 'Operations', icon: 'briefcase-outline', action: () => setActiveTab('operations') },
+                { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
+                { label: 'Live Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
+                { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
+                { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
+                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
+                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
               ].map((item) => (
                 <TouchableOpacity
                   key={item.label}
                   style={styles.drawerItem}
                   onPress={() => {
                     setShowDrawer(false);
-                    item.action();
+                    if (item.action) {
+                      item.action();
+                    } else if (item.route) {
+                      router.push(`/property/${propertyId}/${item.route}` as any);
+                    }
                   }}
                 >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="hammer-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
-              </View>
-              {[
-                { label: 'Tickets', icon: 'ticket-outline', route: 'tickets' },
-                { label: 'Visitors', icon: 'walk-outline', route: 'visitors' },
-                { label: 'Diesel Logger', icon: 'water-outline', route: 'diesel' },
-                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity' },
-                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.route}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    router.push(`/property/${propertyId}/${item.route}` as any);
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
+                  <Ionicons name={item.icon as any} size={20} color={item.color || 'rgba(255,255,255,0.6)'} />
+                  <Text style={[styles.drawerItemLabel, item.color && { color: item.color }]}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
 
               <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
                 <Ionicons name="person-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>SYSTEM & PERSONAL</Text>
+                <Text style={styles.drawerSectionLabel}>ACCOUNT</Text>
               </View>
               {[
-                { label: 'Settings', icon: 'settings-outline', route: 'settings', local: false },
+                { label: 'Settings', icon: 'settings-outline', route: 'settings' },
                 { label: 'Profile', icon: 'person-outline', local: true },
               ].map((item) => (
                 <TouchableOpacity
@@ -1771,7 +1843,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   ticketViewBtn: {
-    flex: 1,
     borderRadius: 999,
     backgroundColor: '#8B5CF6',
     paddingVertical: 12,
@@ -1786,6 +1857,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  customizeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  timeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    padding: 4,
+    width: '100%',
+  },
+  timeToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  timeToggleBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  timeToggleText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  timeToggleTextActive: {
+    color: '#FFF',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+  },
+  tileMetricMid: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: -0.5,
+  },
+  tileSubtext: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 4,
   },
   ticketAcceptBtn: {
     flex: 1,

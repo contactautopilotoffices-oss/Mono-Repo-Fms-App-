@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { useAuth } from '@/hooks/useAuth';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 
@@ -118,9 +118,10 @@ export default function GeneratorConfigModal({
     setError(null);
     try {
       if (isNew) {
-        const { data: gen, error: genErr } = await supabase
-          .from('generators')
-          .insert({
+        // Create generator via API
+        const res = await apiFetch<{ success: boolean; data?: any; error?: string }>('/api/diesel/generators', {
+          method: 'POST',
+          body: JSON.stringify({
             property_id: propertyId,
             name: name.trim(),
             make: make.trim() || null,
@@ -131,47 +132,24 @@ export default function GeneratorConfigModal({
             initial_run_hours: parseFloat(initialRunHours) || 0,
             initial_diesel_level: initDiesel,
             effective_from_date: effectiveFrom,
-          } as any)
-          .select()
-          .single() as any;
+          }),
+        });
 
-        if (genErr) throw genErr;
-
-        const kwh = parseFloat(initialKwh) || 0;
-        const hrs = parseFloat(initialRunHours) || 0;
-        if (kwh > 0 || hrs > 0 || initDiesel > 0) {
-          const { error: readingErr } = await supabase
-            .from('diesel_readings')
-            .insert({
-              property_id: propertyId,
-              generator_id: gen.id,
-              reading_date: effectiveFrom,
-              opening_hours: 0,
-              closing_hours: hrs,
-              opening_kwh: 0,
-              closing_kwh: kwh,
-              opening_diesel_level: 0,
-              closing_diesel_level: initDiesel,
-              diesel_added_litres: 0,
-              computed_consumed_litres: initDiesel,
-              notes: 'Initial setup reading',
-              created_by: authUser?.id
-            } as any);
-          if (readingErr) console.error('[Generators] Error recording initial reading:', readingErr.message);
-        }
+        if (!res.success) throw new Error(res.error || 'Failed to create generator');
       } else {
-        const { error: updateErr } = await (supabase as any)
-          .from('generators')
-          .update({
+        // Update generator via API
+        const res = await apiFetch<{ success: boolean; error?: string }>(`/api/diesel/generators/${existingGenerator!.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
             name: name.trim(),
             make: make.trim() || null,
             capacity_kva: cap,
             tank_capacity_litres: tank,
             status,
-          })
-          .eq('id', existingGenerator!.id);
-        
-        if (updateErr) throw updateErr;
+          }),
+        });
+
+        if (!res.success) throw new Error(res.error || 'Failed to update generator');
       }
       await onSuccess();
       onClose();

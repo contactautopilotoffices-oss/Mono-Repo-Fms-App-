@@ -23,7 +23,7 @@ import { useTheme } from "@/context";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors } from "@/constants/Colors";
 import { ppmService } from "@/services/ppmService";
-import type { PPMSchedule, AMCContract } from "@/services/ppmService";
+import type { PPMSchedule, AMCContract, MaintenanceVendor } from "@/services/ppmService";
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -574,8 +574,14 @@ export default function PPMScreen() {
     useState<PPMSchedule["status"]>("pending");
   const [editDoneDate, setEditDoneDate] = useState("");
   const [editRemark, setEditRemark] = useState("");
+  const [editVendorId, setEditVendorId] = useState<string | null>(null);
+  const [editVendorName, setEditVendorName] = useState("");
+  const [editVendorPhone, setEditVendorPhone] = useState("");
+  const [editVendorContact, setEditVendorContact] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [vendorList, setVendorList] = useState<MaintenanceVendor[]>([]);
+  const [showVendorPicker, setShowVendorPicker] = useState(false);
 
   // Add schedule modal
   const [showAdd, setShowAdd] = useState(false);
@@ -587,6 +593,7 @@ export default function PPMScreen() {
   const [formLocation, setFormLocation] = useState("");
   const [formVendorName, setFormVendorName] = useState("");
   const [formVendorPhone, setFormVendorPhone] = useState("");
+  const [formVendorContact, setFormVendorContact] = useState("");
 
   const [showReport, setShowReport] = useState(false);
 
@@ -704,6 +711,11 @@ export default function PPMScreen() {
       schedule.done_date || new Date().toISOString().split("T")[0],
     );
     setEditRemark(schedule.remark || "");
+    // Initialize vendor fields from schedule
+    setEditVendorId(schedule.vendor_id || null);
+    setEditVendorName(schedule.maintenance_vendors?.company_name || schedule.vendor_name || "");
+    setEditVendorPhone(schedule.maintenance_vendors?.phone || schedule.vendor_phone || "");
+    setEditVendorContact(schedule.maintenance_vendors?.contact_person || schedule.vendor_contact_person || "");
     setShowDetail(true);
   };
 
@@ -716,9 +728,11 @@ export default function PPMScreen() {
         status: editStatus,
         done_date: editStatus === "done" ? editDoneDate : undefined,
         remark: editRemark,
-        vendor_name: selectedSchedule.vendor_name,
-        vendor_phone: selectedSchedule.vendor_phone,
-        vendor_contact_person: selectedSchedule.vendor_contact_person,
+        completed_by: editStatus === "done" ? user.id : undefined,
+        vendor_id: editVendorId,
+        vendor_name: editVendorName || null,
+        vendor_phone: editVendorPhone || null,
+        vendor_contact_person: editVendorContact || null,
       });
       if (res.success) {
         setShowDetail(false);
@@ -752,6 +766,7 @@ export default function PPMScreen() {
         location: formLocation.trim() || null,
         vendor_name: formVendorName.trim() || null,
         vendor_phone: formVendorPhone.trim() || null,
+        vendor_contact_person: formVendorContact.trim() || null,
         status: "pending",
       });
       if (!res.success) throw new Error(String(res.error || 'Failed to create'));
@@ -775,9 +790,37 @@ export default function PPMScreen() {
     setFormLocation("");
     setFormVendorName("");
     setFormVendorPhone("");
+    setFormVendorContact("");
   };
 
-  // ── Attachment Upload ──────────────────────────────────────────────────────
+  // ── Vendor list fetch ─────────────────────────────────────────────────────
+  const fetchVendorList = useCallback(async () => {
+    const res = await ppmService.fetchVendors(propertyId as string, membership?.org_id ?? null);
+    if (res.success && res.data) {
+      setVendorList(res.data);
+    }
+  }, [propertyId, membership?.org_id]);
+
+  useEffect(() => {
+    if (showDetail) {
+      fetchVendorList();
+    }
+  }, [showDetail, fetchVendorList]);
+
+  const handleSelectVendor = (vendor: MaintenanceVendor) => {
+    setEditVendorId(vendor.id);
+    setEditVendorName(vendor.company_name);
+    setEditVendorPhone(vendor.phone || "");
+    setEditVendorContact(vendor.contact_person || "");
+    setShowVendorPicker(false);
+  };
+
+  const handleClearVendor = () => {
+    setEditVendorId(null);
+    setEditVendorName("");
+    setEditVendorPhone("");
+    setEditVendorContact("");
+  };
   const pickAndUploadPhotos = async () => {
     if (!selectedSchedule) return;
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1528,56 +1571,171 @@ export default function PPMScreen() {
                 )}
 
                 {/* Vendor */}
-                {(selectedSchedule.vendor_name ||
-                  selectedSchedule.vendor_phone ||
-                  selectedSchedule.maintenance_vendors) && (
-                  <View
-                    style={[
-                      styles.sectionCard,
-                      { backgroundColor: colors.surface },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.sectionLabel,
-                        { color: colors.textTertiary },
-                      ]}
-                    >
-                      VENDOR
-                    </Text>
-                    <Text style={[styles.sectionValue, { color: colors.text }]}>
-                      {selectedSchedule.maintenance_vendors?.company_name ||
-                        selectedSchedule.vendor_name ||
-                        "N/A"}
-                    </Text>
-                    {(selectedSchedule.maintenance_vendors?.contact_person ||
-                      selectedSchedule.vendor_contact_person) && (
-                      <Text
-                        style={[
-                          styles.sectionSub,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        <User size={12} color={colors.textSecondary} />{" "}
-                        {selectedSchedule.maintenance_vendors?.contact_person ||
-                          selectedSchedule.vendor_contact_person}
-                      </Text>
-                    )}
-                    {(selectedSchedule.maintenance_vendors?.phone ||
-                      selectedSchedule.vendor_phone) && (
-                      <Text
-                        style={[
-                          styles.sectionSub,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        <Phone size={12} color={colors.textSecondary} />{" "}
-                        {selectedSchedule.maintenance_vendors?.phone ||
-                          selectedSchedule.vendor_phone}
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  VENDOR
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    },
+                  ]}
+                  onPress={() => setShowVendorPicker(true)}
+                >
+                  <View style={{ flex: 1 }}>
+                    {editVendorName ? (
+                      <>
+                        <Text style={[styles.sectionValue, { color: colors.text }]}>
+                          {editVendorName}
+                        </Text>
+                        {editVendorContact || editVendorPhone ? (
+                          <Text
+                            style={[styles.sectionSub, { color: colors.textSecondary }]}
+                          >
+                            {editVendorContact ? `${editVendorContact} · ` : ""}
+                            {editVendorPhone}
+                          </Text>
+                        ) : null}
+                      </>
+                    ) : (
+                      <Text style={{ color: colors.textTertiary, fontSize: 14 }}>
+                        Select vendor...
                       </Text>
                     )}
                   </View>
-                )}
+                  <Wrench size={16} color={colors.textSecondary} />
+                </TouchableOpacity>
+
+                {/* Vendor Picker Modal */}
+                <Modal
+                  visible={showVendorPicker}
+                  animationType="slide"
+                  transparent
+                >
+                  <View style={styles.modalOverlay}>
+                    <View
+                      style={[styles.detailSheet, { backgroundColor: colors.card, maxHeight: "70%" }]}
+                    >
+                      <View style={styles.modalHandle} />
+                      <View style={styles.modalHeader}>
+                        <Text style={[styles.modalTitle, { color: colors.text }]}>
+                          Select Vendor
+                        </Text>
+                        <TouchableOpacity onPress={() => setShowVendorPicker(false)}>
+                          <X size={20} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView>
+                        {vendorList.length === 0 ? (
+                          <View style={styles.emptyState}>
+                            <Wrench size={36} color={colors.textTertiary} />
+                            <Text
+                              style={[
+                                styles.emptyTitle,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              No vendors found
+                            </Text>
+                            <TouchableOpacity
+                              style={[
+                                styles.createBtn,
+                                { backgroundColor: colors.primary },
+                              ]}
+                              onPress={() => {
+                                setShowVendorPicker(false);
+                                setEditVendorName("");
+                                setEditVendorPhone("");
+                                setEditVendorContact("");
+                              }}
+                            >
+                              <Text style={styles.createBtnText}>
+                                Enter Manually
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          vendorList.map((vendor) => (
+                            <TouchableOpacity
+                              key={vendor.id}
+                              style={[
+                                styles.vendorItem,
+                                {
+                                  backgroundColor: colors.surface,
+                                  borderColor: colors.border,
+                                },
+                                editVendorId === vendor.id && {
+                                  borderColor: colors.primary,
+                                  borderWidth: 2,
+                                },
+                              ]}
+                              onPress={() => handleSelectVendor(vendor)}
+                            >
+                              <View style={styles.vendorItemContent}>
+                                <Text
+                                  style={[
+                                    styles.sectionValue,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {vendor.company_name}
+                                </Text>
+                                {vendor.contact_person && (
+                                  <Text
+                                    style={[
+                                      styles.sectionSub,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    <User size={10} color={colors.textSecondary} />{" "}
+                                    {vendor.contact_person}
+                                  </Text>
+                                )}
+                                {vendor.phone && (
+                                  <Text
+                                    style={[
+                                      styles.sectionSub,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    <Phone size={10} color={colors.textSecondary} />{" "}
+                                    {vendor.phone}
+                                  </Text>
+                                )}
+                              </View>
+                              {editVendorId === vendor.id && (
+                                <CheckCircle2 size={18} color={colors.primary} />
+                              )}
+                            </TouchableOpacity>
+                          ))
+                        )}
+                        <TouchableOpacity
+                          style={[
+                            styles.createBtn,
+                            { backgroundColor: colors.surface, margin: 16 },
+                          ]}
+                          onPress={() => {
+                            setShowVendorPicker(false);
+                            setEditVendorName("");
+                            setEditVendorPhone("");
+                            setEditVendorContact("");
+                          }}
+                        >
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Urbanist-Bold" }}>
+                            Enter Vendor Manually
+                          </Text>
+                        </TouchableOpacity>
+                      </ScrollView>
+                    </View>
+                  </View>
+                </Modal>
 
                 {/* Status picker */}
                 <Text
@@ -2051,6 +2209,26 @@ export default function PPMScreen() {
                   keyboardType="phone-pad"
                   value={formVendorPhone}
                   onChangeText={setFormVendorPhone}
+                />
+
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Vendor Contact Person
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      color: colors.text,
+                    },
+                  ]}
+                  placeholder="Contact person name"
+                  placeholderTextColor={colors.textTertiary}
+                  value={formVendorContact}
+                  onChangeText={setFormVendorContact}
                 />
               </ScrollView>
               <TouchableOpacity
@@ -2831,7 +3009,17 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
   },
-  verificationText: { fontSize: 13, fontFamily: "Urbanist-Medium", flex: 1 },
+  vendorItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    gap: 12,
+  },
+  vendorItemContent: { flex: 1, gap: 2 },
 
   markCompleteBtn: {
     borderRadius: 12,

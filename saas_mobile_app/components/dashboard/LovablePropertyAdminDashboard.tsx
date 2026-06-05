@@ -39,7 +39,7 @@ import { ppmService } from '@/services/ppmService';
 import { useCassandraStore } from '@/stores/cassandraStore';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
-import { useSidebarToggle } from '@/context/SidebarToggleContext';
+import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
 import {
   SPACING,
   TYPOGRAPHY,
@@ -104,13 +104,36 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
   const [propertyPhoto, setPropertyPhoto] = useState<string | null>(null);
 
-  // Layout sidebar toggle (connected to the capability-filtered sidebar in _layout.tsx)
-  const toggleSidebar = useSidebarToggle();
+  // Drawer state for hamburger menu
+  const [showDrawer, setShowDrawer] = useState(false);
 
   const [ticketTimeFilter, setTicketTimeFilter] = useState<'today' | 'month' | 'all'>('all');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(
     lastUpdatedAt ? new Date(lastUpdatedAt) : null
   );
+
+  // Minimum skeleton duration - don't flash if data loads too fast
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(!(hasLoadedInitialData && loadedPropertyId === propertyId));
+
+  // Effect to handle minimum skeleton duration
+  useEffect(() => {
+    if (hasLoadedInitialData && loadedPropertyId === propertyId) {
+      if (showSkeleton) {
+        // Data is loaded, but keep skeleton for minimum 600ms for smooth UX
+        const timer = setTimeout(() => {
+          setShowSkeleton(false);
+          setIsFirstLoad(false);
+        }, 600);
+        return () => clearTimeout(timer);
+      } else {
+        setIsFirstLoad(false);
+      }
+    } else if (!hasLoadedInitialData) {
+      // Still loading
+      setShowSkeleton(true);
+    }
+  }, [hasLoadedInitialData, loadedPropertyId, propertyId]);
 
   // PPM stats (local)
   const [ppmTotal, setPpmTotal]   = useState(0);
@@ -700,7 +723,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     },
   };
 
-  const shouldShowLoading = !hasLoadedInitialData || loadedPropertyId !== propertyId;
+  const shouldShowLoading = showSkeleton || (!hasLoadedInitialData || loadedPropertyId !== propertyId);
 
   if (shouldShowLoading) {
     return (
@@ -835,7 +858,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       <WeatherBackground condition={weather?.condition} />
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />} contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}>
         <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => toggleSidebar?.()} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>
+          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>
           <View style={styles.headerCenter}>
             <TouchableOpacity 
               style={styles.profileRow} 
@@ -933,8 +956,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           }}
         />
       )}
-      
 
+      <GlobalNavigationDrawer
+        visible={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        propertyId={propertyId}
+      />
     </View>
   );
 }

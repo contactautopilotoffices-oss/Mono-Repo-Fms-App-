@@ -470,7 +470,10 @@ export default function DieselAnalyticsScreen() {
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <ArrowLeft size={20} color="#E6EBEE" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>DG Power Analytics</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Fuel size={18} color="#3B82F6" />
+            <Text style={styles.headerTitle}>DG Power Analytics</Text>
+          </View>
           <View style={{ width: 36 }} />
         </View>
 

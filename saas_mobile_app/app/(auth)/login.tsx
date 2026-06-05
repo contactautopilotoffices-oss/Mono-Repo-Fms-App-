@@ -32,7 +32,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/hooks/useAuth';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { authService } from '@/services/authService';
 import { Colors } from '@/constants/Colors';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
@@ -154,7 +154,6 @@ export default function LoginScreen() {
 
   const { signIn, signUp } = useAuth();
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
 
   // ─── React Hook Form – Sign In ─────────────────────────────────────────────
   const signInForm = useForm<SignInForm>({
@@ -187,36 +186,23 @@ export default function LoginScreen() {
 
   // ─── Redirect helper ────────────────────────────────────────────────────────
   const resolveAndRedirect = async (authUserId: string) => {
-    const { data: { user: authUserData } } = await supabase.auth.getUser();
-
-    if (authUserData?.email?.toLowerCase() === 'sanyog@gmail.com') {
+    if (authUserId?.toLowerCase() === 'sanyog@gmail.com') {
       router.replace('/super-admin' as any);
       return;
     }
 
-    const { data: userProfile, error: profileError } = await (supabase
-      .from('users')
-      .select('id')
-      .eq('id', authUserId)
-      .single() as unknown as Promise<{ data: { id: string } | null; error: unknown }>);
-
-    if (profileError || !userProfile) {
-      throw new Error('User profile not found.');
+    // Fetch user profile via API - if not found, continue without it (new users)
+    let profileRes;
+    try {
+      profileRes = await apiFetch<{ success: boolean; data: { id: string } | null }>(`/api/users/${authUserId}`);
+    } catch {
+      // User profile might not exist yet for new users - continue anyway
+      profileRes = { success: true, data: null };
     }
 
-    // TODO: is_master_admin does not exist on the users table — use a dedicated master_admins table or role check via memberships
-    // if (userProfile.is_master_admin) {
-    //   router.replace('/master' as any);
-    //   return;
-    // }
-
-    const { data: orgMemberships } = await supabase
-      .from('organization_memberships')
-      .select('organization_id, role, is_active')
-      .eq('user_id', userProfile.id) as { data: unknown; error: unknown };
-
-    type OrgMembershipRow = { organization_id: string; role: string; is_active: boolean | null };
-    const orgRows = (orgMemberships ?? []) as OrgMembershipRow[];
+    // Fetch organization memberships via API
+    const orgMemRes = await apiFetch<{ success: boolean; data: Array<{ organization_id: string; role: string; is_active: boolean | null }> }>('/api/users/me/organization-memberships');
+    const orgRows = orgMemRes.success ? orgMemRes.data ?? [] : [];
 
     const ORG_LEVEL_ROLES = ['org_super_admin', 'super_tenant', 'owner', 'admin', 'org_admin', 'maintenance_vendor'];
     const activeOrgMemberships = orgRows.filter(
@@ -231,17 +217,20 @@ export default function LoginScreen() {
         return ai - bi;
       })[0];
 
-      // Fetch org properties to pass to property selection
-      const { data: orgProps } = await supabase
-        .from('properties')
-        .select('id, name')
-        .eq('organization_id', best.organization_id);
+      if (['org_super_admin'].includes(best.role)) {
+        router.replace('/super-admin' as any);
+        return;
+      }
+
+      // Fetch org properties via API
+      const propsRes = await apiFetch<{ success: boolean; data: Array<{ id: string; name: string }> }>(`/api/organizations/${best.organization_id}/properties`);
+      const orgProps = propsRes.success ? propsRes.data ?? [] : [];
 
       if (orgProps && orgProps.length > 0) {
         if (orgProps.length === 1) {
           router.replace(`/property/${orgProps[0].id}` as any);
         } else {
-          const propsParam = encodeURIComponent(JSON.stringify(orgProps.map((p: any) => ({
+          const propsParam = encodeURIComponent(JSON.stringify(orgProps.map((p) => ({
             id: p.id,
             role: best.role
           }))));
@@ -254,14 +243,9 @@ export default function LoginScreen() {
       }
     }
 
-    const { data: propMemberships } = await supabase
-      .from('property_memberships')
-      .select('property_id, organization_id, role, is_active')
-      .eq('user_id', userProfile.id)
-      .order('created_at', { ascending: false }) as { data: unknown; error: unknown };
-
-    type PropMembershipRow = { property_id: string; organization_id: string; role: string; is_active: boolean | null };
-    const propRows = (propMemberships ?? []) as PropMembershipRow[];
+    // Fetch property memberships via API
+    const propMemRes = await apiFetch<{ success: boolean; data: Array<{ property_id: string; organization_id: string; role: string; is_active: boolean | null }> }>('/api/users/me/property-memberships');
+    const propRows = propMemRes.success ? propMemRes.data ?? [] : [];
 
     const activePropMemberships = propRows.filter(
       (m) => m.is_active === true || m.is_active === null

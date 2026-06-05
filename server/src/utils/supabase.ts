@@ -9,13 +9,14 @@
 import { createClient } from '@supabase/supabase-js';
 
 // FMS/Expo project — where tickets, properties, users live
-const fmsSupabaseUrl = process.env.FMS_SUPABASE_URL;
-const fmsServiceRoleKey = process.env.AUTH_SUPABASE_SERVICE_ROLE_KEY; // Service role for FMS project
-const fmsAnonKey = process.env.FMS_SUPABASE_ANON_KEY;
+// Uses same Supabase project as the mobile app (xvucakstcmtfoanmgcql)
+const fmsSupabaseUrl = process.env.FMS_SUPABASE_URL || process.env.SUPABASE_URL;
+const fmsServiceRoleKey = process.env.FMS_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+const fmsAnonKey = process.env.FMS_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 if (!fmsSupabaseUrl || !fmsServiceRoleKey || !fmsAnonKey) {
   throw new Error(
-    'Missing FMS Supabase credentials: FMS_SUPABASE_URL, AUTH_SUPABASE_SERVICE_ROLE_KEY, FMS_SUPABASE_ANON_KEY'
+    `Missing FMS Supabase credentials. FMS_SUPABASE_URL=${!!fmsSupabaseUrl}, FMS_SUPABASE_SERVICE_ROLE_KEY=${!!fmsServiceRoleKey}, FMS_SUPABASE_ANON_KEY=${!!fmsAnonKey}`
   );
 }
 

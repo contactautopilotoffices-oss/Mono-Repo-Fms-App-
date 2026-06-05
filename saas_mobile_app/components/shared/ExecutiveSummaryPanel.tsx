@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 interface TicketData {
   id: string;
@@ -29,7 +29,6 @@ function formatShortMonth(date: Date) {
 }
 
 export default function ExecutiveSummaryPanel({ propertyId }: ExecutiveSummaryPanelProps) {
-  const supabase = useMemo(() => createClient(), []);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
@@ -48,30 +47,38 @@ export default function ExecutiveSummaryPanel({ propertyId }: ExecutiveSummaryPa
       setIsLoading(true);
       setError(null);
       try {
-        const { data: tickets, error: ticketsError } = await supabase
-          .from('tickets')
-          .select('id, category, status, created_at, resolved_at, issue_category:category_id(name)')
-          .eq('property_id', propertyId)
-          .eq('is_internal', false)
-          .order('created_at', { ascending: false });
+        // Use server API to fetch executive summary data
+        const response = await apiFetch<{
+          property: { id: string; name: string; code: string };
+          allTimeTotal: number;
+          prevMonth: { label: string; total: number; closed: number; open: number; closureRate: number };
+          currMonth: { label: string; total: number; closed: number; open: number; closureRate: number };
+          topCategories: { name: string; count: number }[];
+          trends: { prev: number[]; curr: number[] };
+        }>(`/api/reports/executive-summary?propertyId=${propertyId}`);
 
-        if (ticketsError) throw new Error(ticketsError.message);
+        const normalised: TicketData[] = [];
+        // Build property info from API response
+        const property = response.property;
 
-        const { data: property } = await supabase
-          .from('properties')
-          .select('id, name, code')
-          .eq('id', propertyId)
-          .single();
-
-        const normalised: TicketData[] = (tickets || []).map((t: any) => ({
-          id: t.id,
-          category: t.issue_category?.name || t.category || 'Other',
-          status: t.status,
-          created_at: t.created_at,
-          resolved_at: t.resolved_at ?? null,
-        }));
-
-        processData(normalised, property);
+        setDashboardData({
+          property,
+          prevStats: {
+            total: response.prevMonth.total,
+            closed: response.prevMonth.closed,
+            open: response.prevMonth.open,
+            rate: response.prevMonth.closureRate,
+            topCategories: response.topCategories,
+          },
+          currStats: {
+            total: response.currMonth.total,
+            closed: response.currMonth.closed,
+            open: response.currMonth.open,
+            rate: response.currMonth.closureRate,
+            topCategories: response.topCategories,
+          },
+          allTimeTotal: response.allTimeTotal,
+        });
       } catch (err: any) {
         setError(err.message || 'Failed to load data');
       } finally {

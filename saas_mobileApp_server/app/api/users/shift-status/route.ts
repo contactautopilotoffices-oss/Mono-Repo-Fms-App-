@@ -21,14 +21,44 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
 
-    const { error } = await admin
+    const { error: statsError } = await admin
       .from("resolver_stats")
       .upsert(
         { property_id: propertyId, user_id: userId, is_checked_in: isCheckedIn },
         { onConflict: "user_id,property_id" }
       );
 
-    if (error) throw error;
+    if (statsError) throw statsError;
+
+    // Log the action in shift_logs
+    if (isCheckedIn) {
+      await admin.from("shift_logs").insert({
+        user_id: userId,
+        property_id: propertyId,
+        check_in_at: new Date().toISOString(),
+        status: 'active'
+      });
+    } else {
+      // Find the most recent active shift log and check out
+      const { data: activeShifts } = await admin
+        .from("shift_logs")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("property_id", propertyId)
+        .eq("status", "active")
+        .order("check_in_at", { ascending: false })
+        .limit(1);
+
+      if (activeShifts && activeShifts.length > 0) {
+        await admin
+          .from("shift_logs")
+          .update({
+            check_out_at: new Date().toISOString(),
+            status: 'completed'
+          })
+          .eq("id", activeShifts[0].id);
+      }
+    }
 
     return NextResponse.json({ success: true, data: { is_checked_in: isCheckedIn } });
   } catch (error: any) {

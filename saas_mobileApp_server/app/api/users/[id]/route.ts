@@ -11,6 +11,59 @@ interface UpdateUserRequest {
   propertyId?: string;
 }
 
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  try {
+    const auth = await getAuthenticatedUser(request);
+    if (auth.response || !auth.user) {
+      return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { id } = await context.params;
+    if (!id) {
+      return NextResponse.json({ error: "User id is required" }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+
+    // Fetch user profile
+    const { data: user, error } = await admin
+      .from("users")
+      .select("id, full_name, email, phone, user_photo_url, is_active, created_at")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error || !user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Fetch property memberships
+    const { data: propertyMemberships } = await admin
+      .from("property_memberships")
+      .select("id, property_id, role, is_active, properties(name, code)")
+      .eq("user_id", id)
+      .eq("is_active", true);
+
+    // Fetch organization memberships
+    const { data: orgMemberships } = await admin
+      .from("organization_memberships")
+      .select("id, organization_id, role, is_active, organizations(name)")
+      .eq("user_id", id)
+      .eq("is_active", true);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...user,
+        property_memberships: propertyMemberships ?? [],
+        organization_memberships: orgMemberships ?? []
+      }
+    });
+  } catch (error) {
+    console.error("[users/[id]] GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 async function canManageTargetUser(actorUserId: string, targetUserId: string) {
   const profile = await getUserProfile(actorUserId);
   if (profile?.is_master_admin) return true;

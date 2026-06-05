@@ -51,6 +51,9 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
     { label: 'Stock', icon: 'business-outline', route: 'stock' },
     { label: 'Diesel Logger', icon: 'water-outline', route: 'diesel', color: '#F97316' },
     { label: 'Electricity', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
+    // Security section
+    { label: 'Security', icon: 'shield-checkmark-outline', route: 'security', color: '#3B82F6' },
+    { label: 'Security Check In/Out', icon: 'log-in-outline', route: 'security', color: '#3B82F6' },
     { label: 'Profile', icon: 'person-outline', action: () => onMorePress?.() },
     { label: 'Notifications', icon: 'notifications-outline', action: () => {} },
   ];

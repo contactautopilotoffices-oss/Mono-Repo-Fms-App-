@@ -23,7 +23,7 @@ async function initAsyncStorage(): Promise<void> {
 
   try {
     // Static import is more reliable than dynamic import in RN production builds
-    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const AsyncStorage = require('@/utils/storage').mmkvAsyncStorage;
     if (AsyncStorage) {
       _asyncStorage = AsyncStorage;
     }

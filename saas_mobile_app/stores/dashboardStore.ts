@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { zustandStorage } from '@/utils/storage';
 import type { Ticket } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ export const useDashboardStore = create<DashboardState>()(
     }),
     {
       name: 'autopilot-dashboard-store',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => zustandStorage),
       partialize: (state) => ({
         backgroundImage: state.backgroundImage,
         loadedPropertyId: state.loadedPropertyId,

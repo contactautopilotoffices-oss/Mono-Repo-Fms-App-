@@ -60,7 +60,7 @@ import {
   deleteChatSession,
 } from '@/lib/cassandra';
 import type { ChatSession } from '@/lib/cassandra';
-import { supabase } from '@/utils/supabase';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const SendIcon = ({ size = 20, color = '#fff' }: { size?: number; color?: string }) => (
@@ -1355,7 +1355,7 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: CassSpacing.sm,
+    gap: CassSpacing.md,
     paddingHorizontal: CassSpacing.lg,
     paddingTop: CassSpacing.md,
     borderTopWidth: 1,
@@ -1378,13 +1378,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_SURFACES.cardBorder,
     paddingLeft: CassSpacing.md,
+    paddingRight: CassSpacing.xs,
   },
   input: {
     flex: 1,
     height: 44,
     color: Colors.textPrimary,
     ...Typography.body,
-    paddingRight: 4,
+    paddingRight: CassSpacing.sm,
   },
   micBtnInline: {
     width: 36,
@@ -1392,7 +1393,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginRight: CassSpacing.xs,
   },
   sendBtn: {
     width: 40,

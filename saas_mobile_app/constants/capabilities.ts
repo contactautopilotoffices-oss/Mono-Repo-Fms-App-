@@ -64,6 +64,11 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         reports: ['view'],
         sop: ['view']
     },
+    procurement: {
+        procurement: ['view', 'create', 'update', 'approve', 'delete'],
+        vendors: ['view', 'create', 'update', 'delete'],
+        dashboards: ['view']
+    },
     purchase_manager: {
         procurement: ['view', 'approve'],
         vendors: ['view'],
@@ -165,6 +170,7 @@ export const ROLE_LEVEL_MAP: Record<string, RoleLevel> = {
     'owner': 1,
     'property_admin': 2,
     'manager_executive': 3,
+    'procurement': 3,
     'purchase_manager': 3,
     'purchase_executive': 3,
     'mst': 4,

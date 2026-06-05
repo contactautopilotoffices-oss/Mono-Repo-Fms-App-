@@ -22,15 +22,28 @@ import { useSuperTenantProperties } from '@/hooks/tenant/useSuperTenantPropertie
 import SignOutModal from '@/components/ui/SignOutModal';
 import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
 import NotificationModal from '@/components/notifications/NotificationModal';
-import TenantBottomNav from '@/components/tenant/TenantBottomNav';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import DashboardBackground from '@/components/dashboard/DashboardBackground';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { TicketCreateModal } from '../tickets/TicketCreateModal';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
-import { createClient } from '@/utils/supabase/client';
 import { getMeetingRoomCredits } from '@/services/meetingRoomService';
 import { GlassModuleCard } from './GlassModuleCard';
+import SkeletonLoader from '../dashboard/lovable/SkeletonLoader';
+import {
+  Building2,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Users,
+  Calendar,
+  ChevronRight,
+  LayoutGrid,
+  Ticket,
+  Settings,
+} from 'lucide-react-native';
+
+type DashboardTab = 'overview' | 'requests' | 'visitors' | 'rooms' | 'profile';
 
 const FONT_DISPLAY = Platform.select({
   web: 'Poppins, -apple-system, BlinkMacSystemFont, sans-serif',
@@ -69,12 +82,27 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
   const [showDrawer, setShowDrawer] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [selectedPropertyId, setSelectedPropertyId] = useState(propertyId);
   const [propertyName, setPropertyName] = useState('Property');
   const [remainingHours, setRemainingHours] = useState<number | null>(null);
 
   const { tickets, loading: ticketsLoading, refetch: refetchTickets } = useTenantTickets(selectedPropertyId, user?.id);
   const { properties: superTenantProperties } = useSuperTenantProperties(isSuperTenant ? user?.id : undefined);
+
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(ticketsLoading);
+
+  useEffect(() => {
+    if (!ticketsLoading) {
+      if (showSkeleton) {
+        const timer = setTimeout(() => setShowSkeleton(false), 600);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      setShowSkeleton(true);
+    }
+  }, [ticketsLoading]);
 
   useEffect(() => {
     if (!selectedPropertyId) return;
@@ -115,9 +143,20 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
     refetchTickets();
   };
 
+  // Show skeleton on first load
+  if (showSkeleton) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <DashboardBackground />
+        <SkeletonLoader />
+      </View>
+    );
+  }
+
   const drawerItems = [
     { label: 'Dashboard', route: 'tenant', icon: 'grid-outline' as const },
-    { label: 'My Tickets', route: 'tenant/requests', icon: 'ticket-outline' as const },
+    { label: 'My Tickets', route: 'tickets', icon: 'ticket-outline' as const },
     { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' as const },
     { label: 'Visitors', route: 'tenant/visitors', icon: 'people-outline' as const },
     { label: 'Communities', route: 'tenant/communities', icon: 'chatbubbles-outline' as const },
@@ -196,40 +235,163 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
           </Animated.View>
         )}
 
-        {/* Module Cards — Glass Style */}
-        <View style={styles.cardsContainer}>
-          <GlassModuleCard
-            icon="chatbubble-ellipses-outline"
-            title="Helpdesk & Ticketing"
-            description="Report issues, track requests & get support instantly."
-            badge={ticketStats.open > 0 ? ticketStats.open : undefined}
-            statusLine={`${ticketStats.open} ACTIVE · ${ticketStats.completed} COMPLETED`}
-            delay={120}
-            onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}
-          />
+        {/* Super Tenant Tab Bar */}
+        {isSuperTenant && (
+          <Animated.View entering={FadeInUp.delay(130).duration(400)} style={styles.tabBarContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarContent}>
+              {[
+                { key: 'overview', label: 'Overview', icon: <LayoutGrid size={16} color={activeTab === 'overview' ? '#5A8A8F' : 'rgba(255,255,255,0.5)'} /> },
+                { key: 'requests', label: 'Requests', icon: <Ticket size={16} color={activeTab === 'requests' ? '#5A8A8F' : 'rgba(255,255,255,0.5)'} /> },
+                { key: 'visitors', label: 'Visitors', icon: <Users size={16} color={activeTab === 'visitors' ? '#5A8A8F' : 'rgba(255,255,255,0.5)'} /> },
+                { key: 'rooms', label: 'Rooms', icon: <Calendar size={16} color={activeTab === 'rooms' ? '#5A8A8F' : 'rgba(255,255,255,0.5)'} /> },
+              ].map((tab) => (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[styles.tabItem, activeTab === tab.key && styles.tabItemActive]}
+                  onPress={() => setActiveTab(tab.key as DashboardTab)}
+                  activeOpacity={0.8}
+                >
+                  {tab.icon}
+                  <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        )}
 
-          <GlassModuleCard
-            icon="people-outline"
-            title="Visitor Management"
-            description="Secure building access & visitor check-in system."
-            statusLine="ACCESS CONTROL"
-            delay={200}
-            onPress={() => router.push(`/property/${propertyId}/tenant/visitors` as any)}
-          />
+        {/* Super Tenant Quick Stats */}
+        {isSuperTenant && activeTab === 'overview' && (
+          <Animated.View entering={FadeInUp.delay(150).duration(500)} style={styles.superTenantStats}>
+            <View style={styles.statsRow}>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => { setActiveTab('requests'); }}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(59,130,246,0.2)' }]}>
+                  <CheckCircle2 size={20} color="#3B82F6" />
+                </View>
+                <Text style={styles.statValue}>{ticketStats.open}</Text>
+                <Text style={styles.statLabel}>Active</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => setSelectedPropertyId(propertyId)}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(10,185,129,0.2)' }]}>
+                  <Users size={20} color="#10B981" />
+                </View>
+                <Text style={styles.statValue}>{superTenantProperties.length}</Text>
+                <Text style={styles.statLabel}>Properties</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statCard} activeOpacity={0.8} onPress={() => { setActiveTab('rooms'); }}>
+                <View style={[styles.statIcon, { backgroundColor: 'rgba(139,92,246,0.2)' }]}>
+                  <Calendar size={20} color="#8B5CF6" />
+                </View>
+                <Text style={styles.statValue}>{remainingHours !== null ? remainingHours : '--'}</Text>
+                <Text style={styles.statLabel}>Hrs Left</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )}
 
-          <GlassModuleCard
-            icon="calendar-outline"
-            title="Meeting Rooms"
-            description="Reserve meeting spaces & conference rooms with ease."
-            statusLine="ROOM BOOKING"
-            rightStatusText={remainingHours !== null ? `${remainingHours} HRS LEFT` : undefined}
-            delay={280}
-            onPress={() => router.push(`/property/${propertyId}/rooms` as any)}
-          />
-        </View>
+        {/* Super Tenant Tab Content */}
+        {isSuperTenant && activeTab === 'requests' && (
+          <View style={styles.tabContent}>
+            <TouchableOpacity style={styles.createTicketBtn} onPress={() => setShowTicketModal(true)}>
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Text style={styles.createTicketText}>Create New Request</Text>
+            </TouchableOpacity>
+            <Text style={styles.tabSectionTitle}>Active Requests</Text>
+            {tickets.filter(t => !['resolved', 'closed'].includes(t.status as string)).length === 0 ? (
+              <View style={styles.emptyTab}>
+                <CheckCircle2 size={48} color="rgba(255,255,255,0.15)" />
+                <Text style={styles.emptyTabText}>No active requests</Text>
+              </View>
+            ) : (
+              tickets.filter(t => !['resolved', 'closed'].includes(t.status as string)).map((ticket: any, index: number) => (
+                <TouchableOpacity key={ticket.id} style={styles.ticketCard} onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}>
+                  <View style={styles.ticketLeft}>
+                    <Text style={styles.ticketTitle} numberOfLines={1}>{ticket.title || 'Request'}</Text>
+                    <Text style={styles.ticketMeta}>#{ticket.ticket_number || ticket.id.slice(0, 8)}</Text>
+                  </View>
+                  <View style={styles.ticketRight}>
+                    <Text style={[styles.ticketStatus, { color: ticket.status === 'open' ? '#3B82F6' : '#F59E0B' }]}>
+                      {(ticket.status as string).replace('_', ' ').toUpperCase()}
+                    </Text>
+                    <ChevronRight size={16} color="rgba(255,255,255,0.3)" />
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        )}
+
+        {isSuperTenant && activeTab === 'visitors' && (
+          <View style={styles.tabContent}>
+            <TouchableOpacity style={styles.createTicketBtn} onPress={() => router.push(`/property/${propertyId}/tenant/visitors` as any)}>
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Text style={styles.createTicketText}>Add Visitor</Text>
+            </TouchableOpacity>
+            <Text style={styles.tabSectionTitle}>Recent Visitors</Text>
+            <View style={styles.emptyTab}>
+              <Users size={48} color="rgba(255,255,255,0.15)" />
+              <Text style={styles.emptyTabText}>View visitor logs in the Visitors tab</Text>
+              <TouchableOpacity style={styles.viewAllBtn} onPress={() => router.push(`/property/${propertyId}/tenant/visitors` as any)}>
+                <Text style={styles.viewAllText}>View All Visitors</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {isSuperTenant && activeTab === 'rooms' && (
+          <View style={styles.tabContent}>
+            <TouchableOpacity style={styles.createTicketBtn} onPress={() => router.push(`/property/${propertyId}/rooms` as any)}>
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Text style={styles.createTicketText}>Book a Room</Text>
+            </TouchableOpacity>
+            <Text style={styles.tabSectionTitle}>Meeting Room Credits</Text>
+            <View style={styles.creditsCard}>
+              <View style={styles.creditsMain}>
+                <Text style={styles.creditsValue}>{remainingHours !== null ? remainingHours : '--'}</Text>
+                <Text style={styles.creditsUnit}>HOURS</Text>
+              </View>
+              <Text style={styles.creditsLabel}>Available Credits</Text>
+            </View>
+            <TouchableOpacity style={styles.viewAllBtn} onPress={() => router.push(`/property/${propertyId}/rooms` as any)}>
+              <Text style={styles.viewAllText}>View All Rooms</Text>
+              <ChevronRight size={16} color="#5A8A8F" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Module Cards — Glass Style (for non-Super Tenant or Super Tenant Overview) */}
+        {(!isSuperTenant || activeTab === 'overview') && (
+          <View style={styles.cardsContainer}>
+            <GlassModuleCard
+              icon="chatbubble-ellipses-outline"
+              title="Helpdesk & Ticketing"
+              description="Report issues, track requests & get support instantly."
+              badge={ticketStats.open > 0 ? ticketStats.open : undefined}
+              statusLine={`${ticketStats.open} ACTIVE • ${ticketStats.completed} COMPLETED`}
+              delay={120}
+              onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}
+            />
+
+            <GlassModuleCard
+              icon="people-outline"
+              title="Visitor Management"
+              description="Secure building access & visitor check-in system."
+              statusLine="ACCESS CONTROL"
+              delay={200}
+              onPress={() => router.push(`/property/${propertyId}/tenant/visitors` as any)}
+            />
+
+            <GlassModuleCard
+              icon="calendar-outline"
+              title="Meeting Rooms"
+              description="Reserve meeting spaces & conference rooms with ease."
+              statusLine="ROOM BOOKING"
+              rightStatusText={remainingHours !== null ? `${remainingHours} HRS LEFT` : undefined}
+              delay={280}
+              onPress={() => router.push(`/property/${propertyId}/rooms` as any)}
+            />
+          </View>
+        )}
       </ScrollView>
-
-      <TenantBottomNav />
 
       {/* Modals */}
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
@@ -382,6 +544,43 @@ const styles = StyleSheet.create({
   propertyPicker: {
     marginBottom: 16,
   },
+  superTenantStats: {
+    marginBottom: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  statIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statValue: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  statLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 2,
+  },
   propertyChips: {
     paddingHorizontal: 16,
     gap: 8,
@@ -406,6 +605,163 @@ const styles = StyleSheet.create({
   },
   propertyChipTextActive: {
     color: '#FFFFFF',
+  },
+  tabBarContainer: {
+    marginBottom: 16,
+  },
+  tabBarContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  tabItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  tabItemActive: {
+    backgroundColor: 'rgba(90,138,143,0.2)',
+    borderColor: '#5A8A8F',
+  },
+  tabIcon: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  tabLabelActive: {
+    color: '#5A8A8F',
+  },
+  tabContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  tabSectionTitle: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  createTicketBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#5A8A8F',
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 16,
+  },
+  createTicketText: {
+    fontFamily: FONT_BODY,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  emptyTab: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 8,
+  },
+  emptyTabText: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  ticketCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  ticketLeft: {
+    flex: 1,
+  },
+  ticketTitle: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  ticketMeta: {
+    fontFamily: FONT_BODY,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 2,
+  },
+  ticketRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  ticketStatus: {
+    fontFamily: FONT_BODY,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  viewAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  viewAllText: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#5A8A8F',
+  },
+  creditsCard: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  creditsMain: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  creditsValue: {
+    fontFamily: FONT_DISPLAY,
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  creditsUnit: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  creditsLabel: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 4,
   },
   cardsContainer: {
     paddingHorizontal: 16,

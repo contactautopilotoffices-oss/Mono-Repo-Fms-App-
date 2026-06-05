@@ -23,8 +23,9 @@ import { useWeather } from '@/hooks/useWeather';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
-import TenantBottomNav from '@/components/tenant/TenantBottomNav';
+
 import SafeBlurView from '@/components/ui/SafeBlurView';
+import { RoomBookingTab } from '@/components/tenant/tabs/RoomBookingTab';
 import {
   getMeetingRooms,
   getMeetingRoomBookings,
@@ -324,20 +325,9 @@ export default function TenantRoomsPage() {
       </View>
 
       {activeTab === 'rooms' ? (
-        <FlatList
-          data={rooms}
-          keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
-          contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={renderRoomCard}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Ionicons name="calendar-outline" size={48} color="rgba(255,255,255,0.2)" />
-              <Text style={styles.emptyTitle}>No meeting rooms</Text>
-            </View>
-          }
-        />
+        <View style={{ flex: 1, paddingTop: 8 }}>
+          <RoomBookingTab propertyId={propertyId as string} userId={user?.id || ''} />
+        </View>
       ) : (
         <FlatList
           data={bookings}
@@ -356,7 +346,7 @@ export default function TenantRoomsPage() {
         />
       )}
 
-      <TenantBottomNav />
+      
 
       {/* Booking Modal */}
       <Modal visible={showBookingModal} transparent animationType="slide" onRequestClose={() => setShowBookingModal(false)}>

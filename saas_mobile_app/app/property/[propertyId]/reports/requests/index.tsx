@@ -13,15 +13,23 @@ import { queryKeys } from '@/utils/queryKeys';
 import { getRequestsReport, RequestsReportResponse, SnagTicket } from '@/utils/api/mobileApi';
 import { BarChart, KPICard } from '@/components/shared/ReportCharts';
 
-const MONTHS = [
-  '2026-03', '2026-02', '2026-01',
-  '2025-12', '2025-11', '2025-10',
-];
+function getLast6Months(): string[] {
+  const months: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return months;
+}
 
-const MONTH_LABELS: Record<string, string> = {
-  '2026-03': 'Mar 2026', '2026-02': 'Feb 2026', '2026-01': 'Jan 2026',
-  '2025-12': 'Dec 2025', '2025-11': 'Nov 2025', '2025-10': 'Oct 2025',
-};
+const MONTHS = getLast6Months();
+
+const MONTH_LABELS: Record<string, string> = MONTHS.reduce((acc, m, i) => {
+  const d = new Date(m + '-01');
+  acc[m] = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  return acc;
+}, {} as Record<string, string>);
 
 const STATUS_COLORS: Record<string, string> = {
   open: '#F97316',

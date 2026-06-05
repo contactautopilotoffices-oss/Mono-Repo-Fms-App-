@@ -38,6 +38,7 @@ import {
   ClipboardList,
   Wrench,
   Shield,
+  ShoppingBag,
 } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TicketCreateModal } from '../../../components/tickets/TicketCreateModal';
@@ -45,6 +46,7 @@ import AnimatedLogo from '@/components/shared/AnimatedLogo';
 
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import GlobalBottomNav from '@/components/shared/GlobalBottomNav';
+import TenantBottomNav from '@/components/tenant/TenantBottomNav';
 
 // ---- Layout Constants ----
 const SIDEBAR_WIDTH = 288;
@@ -101,9 +103,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Visitors',          route: 'visitors',     icon: UserCheck,       domain: 'visitors' },
   { label: 'Security',          route: 'security',     icon: Shield,          domain: 'security' },
   { label: 'Meeting Rooms',     route: 'rooms',        icon: DoorOpen,        domain: 'properties' },
-  { label: 'Diesel Manager',    route: 'diesel',       icon: Fuel,            domain: 'assets' },
+  { label: 'Diesel',           route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
   { label: 'Stock / Inventory', route: 'stock',        icon: Package,         domain: 'stock' },
+  { label: 'Procurement',       route: 'procurement',  icon: ShoppingBag,     domain: 'procurement' },
   { label: 'SOPs & Checklists', route: 'checklist',    icon: ClipboardList,   domain: 'sop' },
   { label: 'PPM',               route: 'ppm',          icon: Wrench,          domain: 'reports' },
   { label: 'Reports',           route: 'reports',      icon: FileText,        domain: 'reports' },
@@ -112,7 +115,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const NAV_SECTIONS: { label: string; routes: string[] }[] = [
   { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'security', 'rooms'] },
-  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'checklist', 'ppm', 'reports'] },
+  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
 ];
 
 // ---- Get User Initials ----
@@ -574,13 +577,16 @@ export default function PropertyLayout() {
   console.log('[PropertyLayout] Access granted — role:', role);
 
 
+  const isTenantRoute = pathname?.includes('/tenant');
+  const showTenantNav = role === 'tenant' || role === 'super_tenant' || isTenantRoute;
+
   // ---- Unified sidebar layout for ALL roles (unless full-screen) ----
   if (isFullScreen) {
     return (
       <PropertyContext.Provider value={propertyInfo}>
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <Slot />
-          {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
+          {showTenantNav ? <TenantBottomNav /> : <GlobalBottomNav />}
         </View>
       </PropertyContext.Provider>
     );
@@ -625,7 +631,7 @@ export default function PropertyLayout() {
             organizationId={membership?.org_id ?? ''}
             role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
           />
-          {role !== 'tenant' && role !== 'super_tenant' && <GlobalBottomNav />}
+          {showTenantNav ? <TenantBottomNav /> : <GlobalBottomNav />}
         </View>
       </SidebarToggleContext.Provider>
     </PropertyContext.Provider>

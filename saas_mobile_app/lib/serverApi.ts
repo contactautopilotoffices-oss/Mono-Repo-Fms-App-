@@ -215,9 +215,89 @@ export const serverApi = {
     }
   },
 
+  async post<T = unknown>(endpoint: string, body?: unknown): Promise<ServerApiResponse<T>> {
+    try {
+      const result = (await this.request(endpoint, 'POST', body)) as { success?: boolean; data?: T } | T;
+      if (result && typeof result === 'object' && 'data' in result) {
+        return { data: (result as { data: T }).data ?? null, error: null };
+      }
+      return { data: result as T, error: null };
+    } catch (err) {
+      if (err instanceof ServerApiError) {
+        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
+      }
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+    }
+  },
+
+  async patch<T = unknown>(endpoint: string, body?: unknown): Promise<ServerApiResponse<T>> {
+    try {
+      const result = (await this.request(endpoint, 'PATCH', body)) as { success?: boolean; data?: T } | T;
+      if (result && typeof result === 'object' && 'data' in result) {
+        return { data: (result as { data: T }).data ?? null, error: null };
+      }
+      return { data: result as T, error: null };
+    } catch (err) {
+      if (err instanceof ServerApiError) {
+        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
+      }
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+    }
+  },
+
+  async delete<T = unknown>(endpoint: string, body?: unknown): Promise<ServerApiResponse<T>> {
+    try {
+      const result = (await this.request(endpoint, 'DELETE', body)) as { success?: boolean; data?: T } | T;
+      if (result && typeof result === 'object' && 'data' in result) {
+        return { data: (result as { data: T }).data ?? null, error: null };
+      }
+      return { data: result as T, error: null };
+    } catch (err) {
+      if (err instanceof ServerApiError) {
+        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
+      }
+      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+    }
+  },
+
+  async request(endpoint: string, method: string, body?: unknown): Promise<unknown> {
+    const doFetch = async (authToken: string | null) => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    };
+
+    let token = await getSupabaseToken();
+    let response = await doFetch(token);
+
+    if (response.status === 401) {
+      token = await getSupabaseToken(true);
+      if (token) {
+        response = await doFetch(token);
+      }
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new ServerApiError(
+        `Server error ${response.status}: ${text || response.statusText}`,
+        response.status
+      );
+    }
+    return response.json();
+  },
+
   async rpc<T = unknown>(functionName: string, params?: Record<string, unknown>): Promise<ServerApiResponse<T>> {
     try {
-      const result = (await serverFetch('/api/rpc', { functionName, params })) as ServerApiResponse<T>;
+      const result = (await serverFetch('/api/rpc', { fn: functionName, params })) as ServerApiResponse<T>;
       return result;
     } catch (err) {
       if (err instanceof ServerApiError) {

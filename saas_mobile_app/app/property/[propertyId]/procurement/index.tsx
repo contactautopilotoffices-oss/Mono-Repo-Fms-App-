@@ -1,581 +1,368 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+'use client';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
   ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
-  TextInput,
+  FlatList,
   Platform,
-  Dimensions,
 } from 'react-native';
-import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
-import {
-  ShoppingCart,
-  ArrowLeft,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Package,
-  Search,
-  X,
-  RefreshCw,
-} from 'lucide-react-native';
-import { useAuth } from '@/hooks/useAuth';
-import { useCapabilities } from '@/hooks/useCapabilities';
+import { useGlobalSearchParams, router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { procurementService, MaterialRequest, ProcurementActivityLog } from '@/services/procurementService';
+import SafeBlurView from '@/components/ui/SafeBlurView';
 import { useTheme } from '@/context';
-import {
-  listPendingApprovals,
-  listMaterialRequests,
-  getProcurementCatalogItems,
-  type MaterialRequest,
-} from '@/utils/api/mobileApi';
-import MobileRequestList from '@/components/procurement/MobileRequestList';
-import { useServerQuery } from '@/hooks/useServerQuery';
-import { queryKeys } from '@/utils/queryKeys';
+import { useAuth } from '@/hooks/useAuth';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+type Tab = 'overview' | 'requests' | 'history';
 
-// ─── Design tokens ─────────────────────────────────────────────────────────────
-const T = {
-  bg: ['#080E1A', '#0D1728', '#111F35'] as const,
-  accent: '#007AFF',
-  glass: 'rgba(255,255,255,0.06)',
-  glassBorder: 'rgba(255,255,255,0.09)',
-  textPrimary: '#FFFFFF',
-  textSecondary: 'rgba(255,255,255,0.55)',
-  textTertiary: 'rgba(255,255,255,0.30)',
-};
-
-// ─── Tabs ──────────────────────────────────────────────────────────────────────
-type TabKey = 'approvals' | 'all' | 'catalog';
-
-interface TabDef {
-  key: TabKey;
-  label: string;
-  icon: React.ReactNode;
-  requireApprove?: boolean;
-}
-
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KPICard({
-  label,
-  value,
-  color,
-  icon,
-  delay = 0,
-}: {
-  label: string;
-  value: string | number;
-  color: string;
-  icon: React.ReactNode;
-  delay?: number;
-}) {
-  return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(450)} style={{ flex: 1 }}>
-      <View style={[sKPI.card, { borderColor: `${color}22` }]}>
-        <LinearGradient
-          colors={[`${color}18`, 'transparent']}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={[sKPI.iconWrap, { backgroundColor: `${color}18` }]}>{icon}</View>
-        <Text style={sKPI.value}>{value}</Text>
-        <Text style={sKPI.label}>{label}</Text>
-      </View>
-    </Animated.View>
-  );
-}
-
-const sKPI = StyleSheet.create({
-  card: {
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  iconWrap: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  value: { color: '#FFFFFF', fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
-  label: { color: 'rgba(255,255,255,0.45)', fontSize: 11 },
-});
-
-// ─── Main Screen ───────────────────────────────────────────────────────────────
-export default function ProcurementScreen() {
+export default function ProcurementDashboard() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { user, membership } = useAuth();
-  const { capabilities } = useCapabilities(propertyId);
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const { membership } = useAuth();
 
-  // ── Permission flags ─────────────────────────────────────────────────────────
-  const canApprove = !!(capabilities.procurement?.includes('approve'));
-  const canView    = !!(capabilities.procurement?.includes('view') || canApprove);
+  const isProcurementRole = useMemo(() => {
+    const prop = membership?.properties?.find(p => p.id === propertyId);
+    return prop?.role === 'procurement' || membership?.org_role === 'procurement';
+  }, [membership, propertyId]);
 
-  // ── Tabs ─────────────────────────────────────────────────────────────────────
-  const tabs: TabDef[] = useMemo(() => {
-    const list: TabDef[] = [];
-    if (canApprove) {
-      list.push({
-        key: 'approvals',
-        label: 'Approvals',
-        icon: <AlertTriangle size={14} color="#F59E0B" strokeWidth={2} />,
-        requireApprove: true,
-      });
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [requests, setRequests] = useState<MaterialRequest[]>([]);
+  const [logs, setLogs] = useState<ProcurementActivityLog[]>([]);
+  const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [reqData, logData] = await Promise.all([
+        procurementService.fetchRequests(propertyId as string),
+        procurementService.fetchLogs(propertyId as string),
+      ]);
+      setRequests(reqData);
+      setLogs(logData);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-    list.push(
-      { key: 'all',     label: 'All Orders',  icon: <Package size={14} color={T.textSecondary} strokeWidth={1.8} /> },
-      { key: 'catalog', label: 'Catalog',     icon: <ShoppingCart size={14} color={T.textSecondary} strokeWidth={1.8} /> }
-    );
-    return list;
-  }, [canApprove]);
+  };
 
-  const [activeTab, setActiveTab] = useState<TabKey>(canApprove ? 'approvals' : 'all');
-
-  // ── Data ─────────────────────────────────────────────────────────────────────
-  const [searchQuery, setSearchQuery]         = useState('');
-
-  // Moved stats block below fetch
-
-  // ── Fetch ────────────────────────────────────────────────────────────────────
-  const fetchProcurementData = useCallback(async () => {
-    let pendingRequests: MaterialRequest[] = [];
-    let allRequests: MaterialRequest[] = [];
-    let catalogItems: any[] = [];
-
-    const orgId = membership?.org_id ?? undefined;
-    if (user?.id && canApprove) {
-      try {
-        const data = await listPendingApprovals(user.id, propertyId, orgId);
-        pendingRequests = data.filter(r => ['pending_approval', 'pending', 'pending_quotation'].includes(r.status));
-      } catch (err) {
-        console.error('[Procurement] approvals fetch:', err);
-      }
+  useEffect(() => {
+    if (propertyId && propertyId !== 'undefined') {
+      fetchData();
     }
+  }, [propertyId]);
 
-    if (propertyId) {
-      try {
-        allRequests = await listMaterialRequests({
-          propertyId,
-          organizationId: orgId,
-        });
-      } catch (err) {
-        console.error('[Procurement] all requests fetch:', err);
-      }
-      try {
-        catalogItems = await getProcurementCatalogItems({
-          propertyId,
-          organizationId: orgId,
-        });
-      } catch (err) {
-        console.error('[Procurement] catalog fetch:', err);
-      }
-    }
-
-    return { pendingRequests, allRequests, catalogItems };
-  }, [propertyId, membership?.org_id, canApprove, user?.id]);
-
-  const { data, isLoading, isFetching, refetch } = useServerQuery<{ pendingRequests: MaterialRequest[]; allRequests: MaterialRequest[]; catalogItems: any[] }>(
-    queryKeys.property.procurement(propertyId),
-    fetchProcurementData,
-    { staleTime: 1000 * 60 * 5 }
-  );
-
-  const pendingRequests = data?.pendingRequests ?? [];
-  const allRequests = data?.allRequests ?? [];
-  const catalogItems = data?.catalogItems ?? [];
-
-  const handleRefresh = () => refetch();
-
-  // ── Stats ────────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const pending  = allRequests.filter(r => ['pending', 'pending_approval', 'pending_quotation'].includes(r.status)).length;
-    const approved = allRequests.filter(r => r.status === 'approved').length;
-    const total    = allRequests.length;
-    return { pending, approved, total };
-  }, [allRequests]);
+    return {
+      total: requests.length,
+      pending: requests.filter(r => r.status === 'pending_quotation' || r.status === 'pending').length,
+      ordered: requests.filter(r => r.status === 'ordered').length,
+      delivered: requests.filter(r => r.status === 'delivered').length,
+    };
+  }, [requests]);
 
-  // ── Handle request updated (remove from pending) ──────────────────────────
-  const handleRequestUpdated = useCallback(() => {
-    refetch();
-  }, [refetch]);
-
-  // ── Filtered data ─────────────────────────────────────────────────────────
-  const filteredAll = useMemo(() => {
-    if (!searchQuery.trim()) return allRequests;
-    const q = searchQuery.toLowerCase();
-    return allRequests.filter(r =>
-      r.ticket?.ticket_number?.toLowerCase().includes(q) ||
-      r.ticket?.title?.toLowerCase().includes(q) ||
-      r.requester?.full_name?.toLowerCase().includes(q) ||
-      r.status?.toLowerCase().includes(q)
-    );
-  }, [allRequests, searchQuery]);
-
-  const filteredCatalog = useMemo(() => {
-    if (!searchQuery.trim()) return catalogItems;
-    const q = searchQuery.toLowerCase();
-    return catalogItems.filter((c: any) =>
-      c.name?.toLowerCase().includes(q) ||
-      c.category?.toLowerCase().includes(q) ||
-      c.item_code?.toLowerCase().includes(q)
-    );
-  }, [catalogItems, searchQuery]);
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
-  if (!canView) {
-    return (
-      <View style={[sMain.container, { paddingTop: insets.top }]}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <LinearGradient colors={[...T.bg]} style={StyleSheet.absoluteFillObject} />
-        <View style={sMain.noAccess}>
-          <ShoppingCart size={52} color="rgba(255,255,255,0.15)" />
-          <Text style={sMain.noAccessTitle}>No Access</Text>
-          <Text style={sMain.noAccessSub}>You don't have access to the Procurement module.</Text>
-        </View>
-      </View>
-    );
-  }
+  const textColor = isDark ? '#F1F5F9' : '#0F172A';
+  const subtextColor = isDark ? '#94A3B8' : '#64748B';
+  const cardBg = isDark ? 'rgba(30,41,59,0.5)' : '#FFFFFF';
+  const borderColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
 
   return (
-    <View style={[sMain.container, { paddingTop: insets.top }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient colors={[...T.bg]} style={StyleSheet.absoluteFillObject} />
-
-      {/* ── Header ── */}
-      <Animated.View entering={FadeInDown.duration(400)} style={sMain.header}>
-        <TouchableOpacity style={sMain.backBtn} onPress={() => router.back()} activeOpacity={0.75}>
-          <ArrowLeft size={20} color="#FFFFFF" />
+    <View style={[styles.container, { backgroundColor: isDark ? '#0A0D14' : '#F8FAFC' }]}>
+      <View style={[styles.header, { borderBottomColor: borderColor, backgroundColor: isDark ? '#0A0D14' : '#FFF' }]}>
+        <Text style={[styles.title, { color: textColor }]}>Procurement</Text>
+        <TouchableOpacity onPress={fetchData}>
+          <Ionicons name="refresh" size={20} color={subtextColor} />
         </TouchableOpacity>
-        <View style={sMain.headerCenter}>
-          <Text style={sMain.headerTitle}>Procurement</Text>
-          <Text style={sMain.headerSub}>Material Requests & Orders</Text>
-        </View>
-        <TouchableOpacity style={sMain.backBtn} onPress={handleRefresh} activeOpacity={0.75}>
-          <RefreshCw size={16} color="rgba(255,255,255,0.7)" />
-        </TouchableOpacity>
-      </Animated.View>
+      </View>
 
-      {/* ── KPI Row ── */}
-      {!loading && (
-        <Animated.View entering={FadeInDown.delay(80).duration(400)} style={sMain.kpiRow}>
-          <KPICard
-            label="Pending"
-            value={stats.pending}
-            color="#F59E0B"
-            icon={<Clock size={16} color="#F59E0B" />}
-            delay={0}
-          />
-          <KPICard
-            label="Approved"
-            value={stats.approved}
-            color="#10B981"
-            icon={<CheckCircle size={16} color="#10B981" />}
-            delay={60}
-          />
-          <KPICard
-            label="Total"
-            value={stats.total}
-            color="#007AFF"
-            icon={<Package size={16} color="#007AFF" />}
-            delay={120}
-          />
-        </Animated.View>
-      )}
+      <View style={styles.tabContainer}>
+        {(['overview', 'requests', 'history'] as Tab[]).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={[
+              styles.tab,
+              activeTab === tab && styles.activeTab,
+              { borderBottomColor: activeTab === tab ? '#7CB9A8' : 'transparent' }
+            ]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === tab ? '#7CB9A8' : subtextColor }
+            ]}>
+              {tab.toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-      {/* ── Tabs ── */}
-      <Animated.View entering={FadeInDown.delay(140).duration(400)} style={sMain.tabBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={sMain.tabScroll} showsVerticalScrollIndicator={false}>
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.key;
-            const count = tab.key === 'approvals' ? pendingRequests.length : undefined;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[sMain.tab, isActive && sMain.tabActive]}
-                onPress={() => setActiveTab(tab.key)}
-                activeOpacity={0.75}
-              >
-                {tab.icon}
-                <Text style={[sMain.tabLabel, isActive && sMain.tabLabelActive]}>
-                  {tab.label}
-                </Text>
-                {count !== undefined && count > 0 && (
-                  <View style={sMain.tabBadge}>
-                    <Text style={sMain.tabBadgeText}>{count}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </Animated.View>
-
-      {/* ── Search ── */}
-      {(activeTab === 'all' || activeTab === 'catalog') && (
-        <Animated.View entering={FadeInDown.delay(180).duration(400)} style={sMain.searchRow}>
-          <View style={sMain.searchInput}>
-            <Search size={15} color="rgba(255,255,255,0.35)" />
-            <TextInput
-              style={sMain.searchText}
-              placeholder={activeTab === 'catalog' ? 'Search catalog...' : 'Search orders...'}
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <X size={14} color="rgba(255,255,255,0.35)" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </Animated.View>
-      )}
-
-      {/* ── Content ── */}
-      {isLoading ? (
-        <View style={sMain.loadingWrap}>
-          <ActivityIndicator size="large" color={T.accent} />
-          <Text style={sMain.loadingText}>Loading procurement data…</Text>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#7CB9A8" />
         </View>
       ) : (
-        <Animated.View entering={FadeInUp.delay(200).duration(400)} style={{ flex: 1 }}>
-          {/* APPROVALS TAB */}
-          {activeTab === 'approvals' && (
-            <ScrollView
-              contentContainerStyle={sMain.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={
-                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
-              }
-            >
-              {pendingRequests.length === 0 ? (
-                <View style={sMain.emptyWrap}>
-                  <CheckCircle size={52} color="rgba(16,185,129,0.3)" />
-                  <Text style={sMain.emptyTitle}>All caught up!</Text>
-                  <Text style={sMain.emptySub}>No pending approvals at the moment.</Text>
-                </View>
-              ) : (
-                <MobileRequestList
-                  requests={pendingRequests}
-                  canApprove={canApprove}
-                  canEscalate
-                  onRequestUpdated={handleRequestUpdated}
-                  emptyMessage="No pending approvals."
-                />
-              )}
-            </ScrollView>
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+          {activeTab === 'overview' && (
+            <View style={styles.grid}>
+              <SafeBlurView intensity={isDark ? 30 : 60} tint={isDark ? 'dark' : 'light'} style={[styles.card, { borderColor }]}>
+                <View style={styles.cardIconBg}><Ionicons name="document-text" size={20} color="#7CB9A8" /></View>
+                <Text style={[styles.cardValue, { color: textColor }]}>{stats.total}</Text>
+                <Text style={[styles.cardLabel, { color: subtextColor }]}>TOTAL REQUESTS</Text>
+              </SafeBlurView>
+              <SafeBlurView intensity={isDark ? 30 : 60} tint={isDark ? 'dark' : 'light'} style={[styles.card, { borderColor }]}>
+                <View style={styles.cardIconBg}><Ionicons name="time" size={20} color="#F59E0B" /></View>
+                <Text style={[styles.cardValue, { color: textColor }]}>{stats.pending}</Text>
+                <Text style={[styles.cardLabel, { color: subtextColor }]}>PENDING</Text>
+              </SafeBlurView>
+              <SafeBlurView intensity={isDark ? 30 : 60} tint={isDark ? 'dark' : 'light'} style={[styles.card, { borderColor }]}>
+                <View style={styles.cardIconBg}><Ionicons name="cube" size={20} color="#3B82F6" /></View>
+                <Text style={[styles.cardValue, { color: textColor }]}>{stats.ordered}</Text>
+                <Text style={[styles.cardLabel, { color: subtextColor }]}>ORDERED</Text>
+              </SafeBlurView>
+              <SafeBlurView intensity={isDark ? 30 : 60} tint={isDark ? 'dark' : 'light'} style={[styles.card, { borderColor }]}>
+                <View style={styles.cardIconBg}><Ionicons name="checkmark-circle" size={20} color="#10B981" /></View>
+                <Text style={[styles.cardValue, { color: textColor }]}>{stats.delivered}</Text>
+                <Text style={[styles.cardLabel, { color: subtextColor }]}>DELIVERED</Text>
+              </SafeBlurView>
+            </View>
           )}
 
-          {/* ALL ORDERS TAB */}
-          {activeTab === 'all' && (
-            <ScrollView
-              contentContainerStyle={sMain.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={
-                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
-              }
-            >
-              <MobileRequestList
-                requests={filteredAll}
-                canApprove={canApprove}
-                canEscalate
-                onRequestUpdated={handleRequestUpdated}
-                emptyMessage={searchQuery ? 'No results found.' : 'No orders yet.'}
-              />
-            </ScrollView>
-          )}
-
-          {/* CATALOG TAB */}
-          {activeTab === 'catalog' && (
-            <ScrollView
-              contentContainerStyle={sMain.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={
-                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={T.accent} />
-              }
-            >
-              {filteredCatalog.length === 0 ? (
-                <View style={sMain.emptyWrap}>
-                  <Package size={52} color="rgba(255,255,255,0.10)" />
-                  <Text style={sMain.emptyTitle}>No items found</Text>
-                  <Text style={sMain.emptySub}>
-                    {searchQuery ? 'Try a different search.' : 'No catalog items linked to this property.'}
-                  </Text>
-                </View>
-              ) : (
-                filteredCatalog.map((item: any, i: number) => (
-                  <Animated.View
-                    key={item.id}
-                    entering={FadeInUp.delay(i * 35).duration(400)}
-                    style={sCatalog.card}
+          {activeTab === 'requests' && (
+            <View>
+              {requests.map(req => {
+                const isExpanded = expandedRequestId === req.id;
+                return (
+                  <TouchableOpacity
+                    key={req.id}
+                    activeOpacity={0.8}
+                    onPress={() => setExpandedRequestId(isExpanded ? null : req.id)}
                   >
-                    <LinearGradient
-                      colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)']}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <View style={sCatalog.row}>
-                      <View style={sCatalog.iconWrap}>
-                        <Package size={16} color="#007AFF" strokeWidth={1.8} />
-                      </View>
-                      <View style={sCatalog.mid}>
-                        <Text style={sCatalog.name} numberOfLines={1}>{item.name}</Text>
-                        <Text style={sCatalog.meta}>
-                          {item.item_code ? `${item.item_code} · ` : ''}{item.category || 'Uncategorized'}
-                        </Text>
-                      </View>
-                      <View style={sCatalog.right}>
-                        {item.unit_price > 0 && (
-                          <Text style={sCatalog.price}>
-                            ₹{item.unit_price.toLocaleString('en-IN')}
-                            <Text style={sCatalog.unit}>/{item.unit || 'unit'}</Text>
-                          </Text>
-                        )}
-                        <View style={[
-                          sCatalog.stockBadge,
-                          { backgroundColor: item.quantity <= 0 ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)' }
-                        ]}>
-                          <Text style={[
-                            sCatalog.stockText,
-                            { color: item.quantity <= 0 ? '#EF4444' : '#10B981' }
-                          ]}>
-                            {item.quantity <= 0 ? 'Out of stock' : `${item.quantity} ${item.unit || 'units'}`}
-                          </Text>
+                    <SafeBlurView intensity={isDark ? 40 : 80} tint={isDark ? 'dark' : 'light'} style={[styles.requestCard, { borderColor }]}>
+                      <View style={styles.reqHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={[styles.ticketNo, { color: textColor }]}>{req.ticket?.ticket_number || 'REQ'}</Text>
+                          <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={subtextColor} style={{ marginLeft: 6 }} />
+                        </View>
+                        <View style={[styles.badge, { backgroundColor: req.status === 'delivered' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)' }]}>
+                          <Text style={[styles.badgeText, { color: req.status === 'delivered' ? '#10B981' : '#F59E0B' }]}>{req.status.toUpperCase()}</Text>
                         </View>
                       </View>
-                    </View>
-                  </Animated.View>
-                ))
-              )}
-            </ScrollView>
+                      <View style={styles.reqBody}>
+                        <Text style={[styles.reqAssignee, { color: subtextColor }]}>{req.assignee?.full_name || 'Unassigned'}</Text>
+                        <Text style={[styles.reqDate, { color: subtextColor }]}>{new Date(req.created_at).toLocaleDateString()}</Text>
+                      </View>
+                      
+                      {isExpanded && (
+                        <View style={styles.expandedContent}>
+                          <View style={styles.divider} />
+
+                          <View style={styles.detailSection}>
+                            <Text style={[styles.detailTitle, { color: textColor }]}>Request Details</Text>
+                            <Text style={[styles.detailText, { color: subtextColor }]}>
+                              <Text style={{ fontWeight: 'bold' }}>Property: </Text>{req.property?.name || 'Unknown'}{'\n'}
+                              <Text style={{ fontWeight: 'bold' }}>Requested By: </Text>{req.requester?.full_name || 'Unknown'}{'\n'}
+                              <Text style={{ fontWeight: 'bold' }}>Ticket Desc: </Text>{req.ticket?.description || 'No description provided'}
+                            </Text>
+                          </View>
+
+                          {req.items && req.items.length > 0 && (
+                            <View style={styles.detailSection}>
+                              <Text style={[styles.detailTitle, { color: textColor }]}>Items Requested:</Text>
+                              {req.items.map((item, idx) => (
+                                <View key={idx} style={styles.itemRow}>
+                                  <Text style={[styles.itemName, { color: subtextColor }]}>• {item.name || 'Item'}</Text>
+                                  <Text style={[styles.itemQty, { color: textColor }]}>{item.quantity} {item.unit || 'pcs'}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {(req.total_estimated_cost || req.total_amount) ? (
+                            <View style={styles.detailSection}>
+                              <Text style={[styles.detailTitle, { color: textColor }]}>Cost / Amount:</Text>
+                              <Text style={[styles.detailText, { color: '#10B981', fontWeight: 'bold' }]}>
+                                ₹{(req.total_amount || req.total_estimated_cost || 0).toLocaleString('en-IN')}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {req.notes && (
+                            <View style={styles.detailSection}>
+                              <Text style={[styles.detailTitle, { color: textColor }]}>Notes:</Text>
+                              <Text style={[styles.detailText, { color: subtextColor }]}>{req.notes}</Text>
+                            </View>
+                          )}
+                          <View style={styles.actionButtons}>
+                            <TouchableOpacity 
+                              style={[styles.actionBtnPrimary, { backgroundColor: isDark ? '#475569' : '#E2E8F0', marginRight: 8 }]} 
+                              onPress={() => router.push(`/property/${req.property?.id || propertyId}/tickets/${req.ticket_id}`)}
+                            >
+                              <Text style={[styles.actionBtnText, { color: textColor }]}>View Ticket</Text>
+                            </TouchableOpacity>
+                            {isProcurementRole && (
+                              <TouchableOpacity style={styles.actionBtnPrimary} onPress={() => {}}>
+                                <Text style={styles.actionBtnText}>Update Status</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      )}
+                    </SafeBlurView>
+                  </TouchableOpacity>
+                );
+              })}
+              {requests.length === 0 && <Text style={{ color: subtextColor, textAlign: 'center', marginTop: 20 }}>No active orders.</Text>}
+            </View>
           )}
-        </Animated.View>
+
+          {activeTab === 'history' && (
+            <View>
+              {logs.map(log => (
+                <View key={log.id} style={styles.logRow}>
+                  <Ionicons name="ellipse" size={8} color="#7CB9A8" style={{ marginTop: 6, marginRight: 12 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.logAction, { color: textColor }]}>{log.action.replace(/_/g, ' ')}</Text>
+                    <Text style={[styles.logMeta, { color: subtextColor }]}>{log.user?.full_name || 'System'} • {new Date(log.created_at).toLocaleString()}</Text>
+                  </View>
+                </View>
+              ))}
+              {logs.length === 0 && <Text style={{ color: subtextColor, textAlign: 'center', marginTop: 20 }}>No history.</Text>}
+            </View>
+          )}
+        </ScrollView>
       )}
     </View>
   );
 }
 
-// ─── Catalog Item Styles ───────────────────────────────────────────────────────
-const sCatalog = StyleSheet.create({
-  card: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: T.glassBorder,
-    overflow: 'hidden',
-    marginBottom: 8,
-    padding: 12,
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  iconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    backgroundColor: 'rgba(0,122,255,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mid: { flex: 1 },
-  name: { color: '#FFFFFF', fontSize: 13, fontWeight: '500' },
-  meta: { color: 'rgba(255,255,255,0.40)', fontSize: 11, marginTop: 2 },
-  right: { alignItems: 'flex-end', gap: 4 },
-  price: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-  unit: { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '400' },
-  stockBadge: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  stockText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-});
-
-// ─── Main Styles ───────────────────────────────────────────────────────────────
-const sMain = StyleSheet.create({
+const styles = StyleSheet.create({
   container: { flex: 1 },
-
-  // Header
   header: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
   },
-  backBtn: {
+  title: { fontSize: 24, fontWeight: '800' },
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 10,
+  },
+  tab: {
+    paddingVertical: 12,
+    marginRight: 24,
+    borderBottomWidth: 2,
+  },
+  activeTab: {
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  content: { flex: 1 },
+  contentContainer: { padding: 20 },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  card: {
+    width: '48%',
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  cardIconBg: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: T.glass,
-    borderWidth: 1,
-    borderColor: T.glassBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCenter: { flex: 1 },
-  headerTitle: { color: '#FFFFFF', fontSize: 19, fontWeight: '700', letterSpacing: -0.3 },
-  headerSub: { color: 'rgba(255,255,255,0.40)', fontSize: 12, marginTop: 1 },
-
-  // KPI
-  kpiRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 16 },
-
-  // Tabs
-  tabBar: { marginBottom: 12 },
-  tabScroll: { paddingHorizontal: 16, gap: 8 },
-  tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: T.glass,
-    borderWidth: 1,
-    borderColor: T.glassBorder,
-  },
-  tabActive: {
-    backgroundColor: 'rgba(0,122,255,0.15)',
-    borderColor: 'rgba(0,122,255,0.35)',
-  },
-  tabLabel: { color: 'rgba(255,255,255,0.50)', fontSize: 13, fontWeight: '500' },
-  tabLabelActive: { color: '#007AFF', fontWeight: '700' },
-  tabBadge: {
-    backgroundColor: '#F59E0B',
-    borderRadius: 8,
-    minWidth: 18,
-    height: 18,
-    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  tabBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
-
-  // Search
-  searchRow: { paddingHorizontal: 16, marginBottom: 12 },
-  searchInput: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: T.glass,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: T.glassBorder,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
-  searchText: { flex: 1, color: '#FFFFFF', fontSize: 14 },
-
-  // Content
-  listContent: { paddingHorizontal: 16, paddingBottom: 120 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
-  loadingText: { color: 'rgba(255,255,255,0.4)', fontSize: 14 },
-
-  // Empty
-  emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  emptySub: { color: 'rgba(255,255,255,0.4)', fontSize: 14, textAlign: 'center' },
-
-  // No access
-  noAccess: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 40 },
-  noAccessTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: '700' },
-  noAccessSub: { color: 'rgba(255,255,255,0.4)', fontSize: 14, textAlign: 'center' },
+  cardValue: {
+    fontSize: 28,
+    fontWeight: '800',
+    marginTop: 12,
+  },
+  cardLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 4,
+  },
+  requestCard: {
+    padding: 18,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 14,
+    overflow: 'hidden',
+  },
+  reqHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  ticketNo: { fontSize: 14, fontWeight: '800' },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  badgeText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  reqBody: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  reqAssignee: { fontSize: 13 },
+  reqDate: { fontSize: 13 },
+  expandedContent: {
+    marginTop: 12,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(150,150,150,0.2)',
+    marginBottom: 12,
+  },
+  detailSection: {
+    marginBottom: 10,
+  },
+  detailTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  itemName: { fontSize: 13 },
+  itemQty: { fontSize: 13, fontWeight: '600' },
+  detailText: { fontSize: 14 },
+  actionButtons: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-end'
+  },
+  actionBtnPrimary: {
+    backgroundColor: '#3B82F6',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  actionBtnText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  logRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  logAction: { fontSize: 14, fontWeight: '700', textTransform: 'capitalize' },
+  logMeta: { fontSize: 11, marginTop: 4 },
 });

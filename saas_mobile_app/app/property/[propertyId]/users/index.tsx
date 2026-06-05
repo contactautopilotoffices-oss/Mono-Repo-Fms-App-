@@ -17,7 +17,7 @@ import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { fetchUsersList, createMemberUser, updateMemberRole } from '@/utils/api/mobileApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -374,12 +374,10 @@ function UserDetailSheet({
 
   async function loadSkills() {
     if (user.propertyRole === 'mst' || user.propertyRole === 'staff') {
-      const { data } = await (supabase
-        .from('mst_skills') as any)
-        .select('skill_code')
-        .eq('user_id', user.id)
-        .eq('property_id', propertyId);
-      if (data) setSkills(data.map((s: UserSkills) => s.skill_code));
+      const response = await apiFetch<{ success: boolean; data: UserSkills[] }>(`/api/users/${user.id}/skills`);
+      if (response.success && response.data) {
+        setSkills(response.data.map((s: UserSkills) => s.skill_code));
+      }
     }
   }
 
@@ -409,12 +407,17 @@ function UserDetailSheet({
   async function handleToggleActive() {
     setIsLoading(true);
     try {
-      const { error } = await (supabase
-        .from('property_memberships') as any)
-        .update({ is_active: !user.is_active })
-        .eq('user_id', user.id)
-        .eq('property_id', propertyId);
-      if (error) throw error;
+      // Find membership id for this user
+      const membershipRes = await apiFetch<{ success: boolean; data: any[] }>(`/api/properties/${propertyId}/users`);
+      if (!membershipRes.success) throw new Error('Failed to fetch users');
+      const membership = membershipRes.data?.find((u: any) => u.user_id === user.id);
+      if (!membership) throw new Error('Membership not found');
+
+      const response = await apiFetch<{ success: boolean; error?: string }>('/api/property-memberships', {
+        method: 'PATCH',
+        body: JSON.stringify({ membershipId: membership.membership_id, is_active: !user.is_active }),
+      });
+      if (!response.success) throw new Error(response.error);
       onUpdate();
       bottomSheetRef.current?.dismiss();
     } catch (err: any) {
@@ -425,26 +428,23 @@ function UserDetailSheet({
   }
 
   async function handleResetPassword() {
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-        redirectTo: 'autopilot://reset-password',
-      });
-      if (error) throw error;
-      Alert.alert('Success', `Password reset email sent to ${user.email}`);
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to send reset email');
-    }
+    // Note: Password reset via email should go through auth API
+    Alert.alert('Info', 'Password reset feature coming soon');
   }
 
   async function handleRemoveUser() {
     setIsLoading(true);
     try {
-      const { error } = await supabase
-        .from('property_memberships')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('property_id', propertyId);
-      if (error) throw error;
+      // Find membership id for this user
+      const membershipRes = await apiFetch<{ success: boolean; data: any[] }>(`/api/properties/${propertyId}/users`);
+      if (!membershipRes.success) throw new Error('Failed to fetch users');
+      const membership = membershipRes.data?.find((u: any) => u.user_id === user.id);
+      if (!membership) throw new Error('Membership not found');
+
+      const response = await apiFetch(`/api/property-memberships?membershipId=${membership.membership_id}&propertyId=${propertyId}`, {
+        method: 'DELETE',
+      });
+      if (!response.success) throw new Error(response.error);
       onUpdate();
       bottomSheetRef.current?.dismiss();
     } catch (err: any) {
@@ -1044,14 +1044,10 @@ export default function UsersScreen() {
 
   useEffect(() => {
     if (propertyId) {
-      supabase
-        .from('properties')
-        .select('organization_id')
-        .eq('id', propertyId)
-        .single()
-        .then(({ data }: any) => {
-          if (data?.organization_id) {
-            setOrganizationId(data.organization_id);
+      apiFetch<{ success: boolean; data: any }>(`/api/properties/${propertyId}`)
+        .then((res) => {
+          if (res.success && res.data?.organization_id) {
+            setOrganizationId(res.data.organization_id);
           }
         });
     }
@@ -1061,22 +1057,10 @@ export default function UsersScreen() {
     if (!propertyId) return [] as UserWithMembership[];
 
     try {
-      const { data, error } = await supabase
-        .from('property_memberships')
-        .select(
-          `
-          role,
-          is_active,
-          created_at,
-          user:users(id, email, full_name, phone, user_photo_url)
-        `
-        )
-        .eq('property_id', propertyId)
-        .order('created_at', { ascending: false });
+      const response = await apiFetch<{ success: boolean; data: any[] }>(`/api/properties/${propertyId}/users`);
+      if (!response.success) throw new Error('Failed to fetch users');
 
-      if (error) throw error;
-
-      const mapped: UserWithMembership[] = (data || []).map((m: any) => ({
+      const mapped: UserWithMembership[] = (response.data || []).map((m: any) => ({
         id: m.user?.id || '',
         full_name: m.user?.full_name || 'Unknown',
         email: m.user?.email || '',

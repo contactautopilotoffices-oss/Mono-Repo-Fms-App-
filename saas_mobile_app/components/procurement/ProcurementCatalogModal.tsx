@@ -56,6 +56,7 @@ interface Props {
   ticketId: string;
   propertyId: string;
   organizationId?: string;
+  allowCustomItems?: boolean;
   onSuccess?: () => void;
 }
 
@@ -73,6 +74,7 @@ export default function ProcurementCatalogModal({
   ticketId,
   propertyId,
   organizationId,
+  allowCustomItems = true,
   onSuccess,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -702,91 +704,93 @@ export default function ProcurementCatalogModal({
             </View>
 
             {/* Add Custom Item */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Item not in list? Add it here</Text>
+            {allowCustomItems && (
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Item not in list? Add it here</Text>
 
-              <TextInput
-                style={[styles.customInput, { marginBottom: 8 }]}
-                placeholder="Item Name (e.g. Special Drill Bit)"
-                placeholderTextColor="#64748B"
-                value={customName}
-                onChangeText={setCustomName}
-              />
-
-              <View style={styles.customItemRow}>
                 <TextInput
-                  style={[styles.customInput, { flex: 1 }]}
-                  placeholder="Unit (pcs, kg, etc.)"
+                  style={[styles.customInput, { marginBottom: 8 }]}
+                  placeholder="Item Name (e.g. Special Drill Bit)"
                   placeholderTextColor="#64748B"
-                  value={customUnit}
-                  onChangeText={setCustomUnit}
+                  value={customName}
+                  onChangeText={setCustomName}
                 />
+
+                <View style={styles.customItemRow}>
+                  <TextInput
+                    style={[styles.customInput, { flex: 1 }]}
+                    placeholder="Unit (pcs, kg, etc.)"
+                    placeholderTextColor="#64748B"
+                    value={customUnit}
+                    onChangeText={setCustomUnit}
+                  />
+                  <TextInput
+                    style={[styles.customInput, { width: 70 }]}
+                    placeholder="Qty"
+                    placeholderTextColor="#64748B"
+                    keyboardType="number-pad"
+                    value={customQty}
+                    onChangeText={setCustomQty}
+                  />
+                </View>
+
                 <TextInput
-                  style={[styles.customInput, { width: 70 }]}
-                  placeholder="Qty"
+                  style={[styles.customInput, { marginBottom: 8, height: 60, textAlignVertical: 'top' }]}
+                  placeholder="Details / Specs (Optional)"
                   placeholderTextColor="#64748B"
-                  keyboardType="number-pad"
-                  value={customQty}
-                  onChangeText={setCustomQty}
+                  multiline
+                  value={customDesc}
+                  onChangeText={setCustomDesc}
                 />
-              </View>
 
-              <TextInput
-                style={[styles.customInput, { marginBottom: 8, height: 60, textAlignVertical: 'top' }]}
-                placeholder="Details / Specs (Optional)"
-                placeholderTextColor="#64748B"
-                multiline
-                value={customDesc}
-                onChangeText={setCustomDesc}
-              />
-
-              <TextInput
-                style={[styles.customInput, { marginBottom: 8 }]}
-                placeholder="Links (comma separated)"
-                placeholderTextColor="#64748B"
-                value={customLinks}
-                onChangeText={setCustomLinks}
-              />
-
-              <View style={styles.customItemRow}>
-                <TouchableOpacity
-                  style={[styles.photoBtn, customPhoto && styles.photoBtnActive]}
-                  onPress={pickCustomPhoto}
-                  disabled={isCompressing}
-                >
-                  {isCompressing ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : customPhoto ? (
-                    <>
-                      <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-                      <Text style={[styles.photoBtnText, { color: '#10B981' }]}>Photo Added</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons name="camera" size={18} color="#64748B" />
-                      <Text style={styles.photoBtnText}>Add Photo</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.addCustomBtn, !customName.trim() && { opacity: 0.4 }]}
-                  onPress={addCustomItem}
-                  disabled={!customName.trim() || isCompressing}
-                >
-                  <Ionicons name="add" size={18} color="#FFF" />
-                  <Text style={styles.addCustomBtnText}>Add Item</Text>
-                </TouchableOpacity>
-              </View>
-
-              {customPhoto && (
-                <Image
-                  source={{ uri: customPhoto }}
-                  style={{ width: 80, height: 80, borderRadius: 10, marginTop: 8 }}
-                  resizeMode="cover"
+                <TextInput
+                  style={[styles.customInput, { marginBottom: 8 }]}
+                  placeholder="Links (comma separated)"
+                  placeholderTextColor="#64748B"
+                  value={customLinks}
+                  onChangeText={setCustomLinks}
                 />
-              )}
-            </View>
+
+                <View style={styles.customItemRow}>
+                  <TouchableOpacity
+                    style={[styles.photoBtn, customPhoto && styles.photoBtnActive]}
+                    onPress={pickCustomPhoto}
+                    disabled={isCompressing}
+                  >
+                    {isCompressing ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : customPhoto ? (
+                      <>
+                        <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                        <Text style={[styles.photoBtnText, { color: '#10B981' }]}>Photo Added</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="camera" size={18} color="#64748B" />
+                        <Text style={styles.photoBtnText}>Add Photo</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.addCustomBtn, !customName.trim() && { opacity: 0.4 }]}
+                    onPress={addCustomItem}
+                    disabled={!customName.trim() || isCompressing}
+                  >
+                    <Ionicons name="add" size={18} color="#FFF" />
+                    <Text style={styles.addCustomBtnText}>Add Item</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {customPhoto && (
+                  <Image
+                    source={{ uri: customPhoto }}
+                    style={{ width: 80, height: 80, borderRadius: 10, marginTop: 8 }}
+                    resizeMode="cover"
+                  />
+                )}
+              </View>
+            )}
 
             {/* Total & Submit */}
             <View style={styles.totalRow}>

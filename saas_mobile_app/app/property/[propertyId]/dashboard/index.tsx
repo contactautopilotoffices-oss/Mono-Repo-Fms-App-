@@ -10,7 +10,7 @@ import LovableMstDashboard from '@/components/dashboard/LovableMstDashboard';
 
 import LovablePropertyAdminDashboard from '@/components/dashboard/LovablePropertyAdminDashboard';
 import SecurityDashboard from '@/components/dashboard/SecurityDashboard';
-import SoftServiceManagerDashboard from '@/components/dashboard/SoftServiceManagerDashboard';
+import LovableSoftServiceManagerDashboard from '@/components/dashboard/LovableSoftServiceManagerDashboard';
 import LovableStaffDashboard from '@/components/dashboard/LovableStaffDashboard';
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 
@@ -103,8 +103,11 @@ export default function DashboardScreen() {
     return <SecurityDashboard propertyId={pid} />;
   }
 
-  // soft_service and staff roles use the new gamified LovableStaffDashboard
-  if (effectiveRole === 'soft_service' || effectiveRole === 'staff') {
+  if (effectiveRole === 'soft_service') {
+    return <LovableSoftServiceManagerDashboard propertyId={pid} />;
+  }
+
+  if (effectiveRole === 'staff') {
     return <LovableStaffDashboard propertyId={pid} />;
   }
 

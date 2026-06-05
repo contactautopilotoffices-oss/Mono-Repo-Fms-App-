@@ -1,7 +1,5 @@
-import { config as dotenvConfig } from 'dotenv';
-// Load server/.env with override:true so our PORT=3001 wins over any PORT=8000
-// inherited when the parent shell sources the shared root .env.shared.local.
-dotenvConfig({ override: true });
+// Bootstrap MUST be the first import to ensure env vars are loaded before any module
+import './bootstrap.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.js';
@@ -9,6 +7,7 @@ import { authRoutes } from './routes/auth.js';
 import { ticketRoutes } from './routes/tickets.js';
 import { propertyRoutes } from './routes/properties.js';
 import { ppmRoutes } from './routes/ppm.js';
+import { vmsRoutes } from './routes/vms.js';
 import { contextPlugin } from './plugins/context.js';
 import { authPlugin } from './plugins/auth.js';
 import { queryRoutes } from './routes/query.js';
@@ -42,6 +41,7 @@ export function buildServer(opts: { logger?: boolean } = {}) {
   fastify.register(queryRoutes);
   fastify.register(ticketRoutes);
   fastify.register(ppmRoutes);
+  fastify.register(vmsRoutes);
   fastify.register(contextPlugin);
 
   // ---------------------------------------------------------------------------

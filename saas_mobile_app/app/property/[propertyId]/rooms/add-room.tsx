@@ -237,6 +237,7 @@ export default function AddRoomScreen() {
         </View>
       </SafeBlurView>
 
+      <View style={{ flex: 1 }}>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"
@@ -419,6 +420,7 @@ export default function AddRoomScreen() {
           </TouchableOpacity>
         </SafeBlurView>
       </ScrollView>
+      </View>
 
       {/* Capacity Modal */}
       <Modal
@@ -508,6 +510,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    flexGrow: 1,
   },
   formCard: {
     borderRadius: 20,

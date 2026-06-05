@@ -74,7 +74,7 @@ export default function ExecutiveSummaryScreen() {
     return (
       <View style={[styles.container, { backgroundColor: bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.loadingWrap}>
-          <Text style={styles.errorText}>{data?.error || 'Failed to load report'}</Text>
+          <Text style={styles.errorText}>{reportData?.error || 'Failed to load report'}</Text>
         </View>
       </View>
     );
@@ -87,12 +87,15 @@ export default function ExecutiveSummaryScreen() {
     ? Math.round(((currMonth.total - prevMonth.total) / prevMonth.total) * 100)
     : 0;
 
+  const prevLabel = prevMonth.label.split(' ')[0] || 'Prev';
+  const currLabel = currMonth.label.split(' ')[0] || 'Current';
+
   const monthBarData = {
-    labels: [prevMonth.label.split(' ')[0], currMonth.label.split(' ')[0]],
+    labels: [prevLabel, currLabel],
     series: [
-      { label: 'Total', data: [prevMonth.total, currMonth.total], color: '#475569' },
-      { label: 'Closed', data: [prevMonth.closed, currMonth.closed], color: '#22C55E' },
-      { label: 'Open', data: [prevMonth.open, currMonth.open], color: '#F97316' },
+      { label: 'Total', data: [prevMonth.total || 0, currMonth.total || 0], color: '#475569' },
+      { label: 'Closed', data: [prevMonth.closed || 0, currMonth.closed || 0], color: '#22C55E' },
+      { label: 'Open', data: [prevMonth.open || 0, currMonth.open || 0], color: '#F97316' },
     ],
   };
 
@@ -102,8 +105,8 @@ export default function ExecutiveSummaryScreen() {
   const trendData = {
     labels: makeLabels(trends.curr.length),
     series: [
-      { label: currMonth.label.split(' ')[0], data: trends.curr, color: '#708F96' },
-      { label: prevMonth.label.split(' ')[0], data: trends.prev, color: '#CBD5E1' },
+      { label: currLabel, data: trends.curr, color: '#708F96' },
+      { label: prevLabel, data: trends.prev, color: '#CBD5E1' },
     ],
   };
 

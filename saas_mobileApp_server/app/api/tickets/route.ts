@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
   const limitParam = searchParams.get("limit");
   const offsetParam = searchParams.get("offset");
   const internalOnly = searchParams.get("internalOnly") === "true";
+  const excludeInternal = searchParams.get("excludeInternal") === "true";
   const materialsRequired = searchParams.get("materialsRequired") === "true";
   const slaBreached = searchParams.get("slaBreached");
   const dateFrom = searchParams.get("dateFrom");
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
   if (assignedTo) query = query.eq("assigned_to", assignedTo);
   if (raisedBy) query = query.eq("raised_by", raisedBy);
   if (internalOnly) query = query.eq("internal", true);
+  if (excludeInternal) query = query.neq("internal", true);
   
   if (slaBreached === 'true') {
     query = query
@@ -130,20 +132,20 @@ export async function GET(request: NextRequest) {
         .select('user_id')
         .eq('property_id', propertyId)
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     } else if (organizationId) {
       membershipQuery = supabase
         .from('property_memberships')
         .select('user_id, properties!inner(organization_id)')
         .eq('properties.organization_id', organizationId)
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     } else {
       membershipQuery = supabase
         .from('property_memberships')
         .select('user_id')
         .eq('role', raisedByRole)
-        .eq('is_active', true);
+        .or('is_active.eq.true,is_active.is.null');
     }
 
     const { data: members, error: memberError } = await membershipQuery;
@@ -252,30 +254,54 @@ export async function POST(request: NextRequest) {
 
   const floorNumber = extractFloorNumber(description);
   const location = extractLocation(description);
-  const slaDeadline = new Date(Date.now() + slaHours * 60 * 60 * 1000).toISOString();
+
+  // Generate ticket number (e.g., TKT-1234567890)
+  const ticketNumber = `TKT-${Date.now()}`;
+
+  const slaHoursVal = slaHours || 24;
+
+  // Priority rank for comparison - both 'urgent' (from LLM) and 'critical' (from user) are valid
+  const priorityRank: Record<string, number> = { low: 0, medium: 1, high: 2, urgent: 3, critical: 3 };
+  const groqPriority = resolution.priority?.toLowerCase() || '';
+  const explicitP = explicitPriority?.toLowerCase() || '';
+  // Use explicit priority if provided, otherwise compare groq vs rule-based
+  const finalPriority = explicitPriority
+    ? explicitPriority
+    : (priorityRank[groqPriority] ?? -1) > (priorityRank[priority] ?? -1)
+      ? groqPriority
+      : priority;
+
+  // is_vague based on zone C (very low confidence)
+  const isVague = resolution.zone === 'C' || resolution.confidence === 'low';
+
+  // Confidence score - EXACTLY matching web app: 90 if LLM used, 100 otherwise
+  const confidenceScore = resolution.llmUsed ? 90 : 100;
 
   const insertPayload = {
-    title: title || description.slice(0, 120),
-    description,
+    ticket_number: ticketNumber,
     property_id: propertyId,
     organization_id: organizationId,
-    raised_by: auth.user.id,
-    assigned_to: assignedTo,
-    internal: isInternal,
-    status: assignedTo ? "assigned" : "open",
-    priority: explicitPriority || resolution.priority?.toLowerCase() || priority,
+    title: title || description.slice(0, 100),
+    description,
     category_id: categoryId,
     skill_group_id: skillGroupId,
+    priority: finalPriority,
+    status: assignedTo ? 'assigned' : 'open',
+    assigned_to: assignedTo || undefined,
+    raised_by: auth.user.id,
+    internal: isInternal,
+    is_vague: isVague,
+    sla_hours: slaHoursVal,
+    floor_number: floorNumber ?? undefined,
+    location: location ?? undefined,
+    issue_code: resolution.issue_code,
     skill_group_code: resolution.skill_group,
-    floor_number: floorNumber,
-    location,
+    confidence: resolution.confidence,
+    secondary_category_code: resolution.secondary_category_code ?? undefined,
+    risk_flag: resolution.risk_flag ?? undefined,
+    llm_reasoning: resolution.llm_reasoning ?? undefined,
     classification_source: resolution.decisionSource,
-    classification_confidence: resolution.confidence,
-    classification_zone: resolution.zone,
-    enhanced_classification: resolution.enhancedClassification,
-    risk_flag: resolution.risk_flag ?? null,
-    llm_reasoning: resolution.llm_reasoning ?? null,
-    sla_deadline: slaDeadline
+    confidence_score: confidenceScore,
   };
 
   const { data: ticket, error } = await supabase.from("tickets").insert(insertPayload).select("*").single();
@@ -285,7 +311,7 @@ export async function POST(request: NextRequest) {
   }
 
   await logClassification(ticket.id, resolution);
-  
+
   // Invalidate cache for dashboard
   await deleteCache(`dashboard:${propertyId}:${auth.user.id}`);
 
@@ -297,12 +323,17 @@ export async function POST(request: NextRequest) {
         issue_code: resolution.issue_code,
         skill_group: resolution.skill_group,
         confidence: resolution.confidence,
-        decisionSource: resolution.decisionSource,
-        priority: resolution.priority || insertPayload.priority,
+        confidence_score: confidenceScore,
+        decision_source: resolution.decisionSource,
+        priority: finalPriority,
         risk_flag: resolution.risk_flag ?? null,
         reasoning: resolution.llm_reasoning ?? null,
-        enhancedClassification: resolution.enhancedClassification,
-        zone: resolution.zone
+        is_vague: isVague,
+        secondary_category_code: resolution.secondary_category_code ?? null,
+        floor_number: floorNumber,
+        location,
+        ticket_number: ticketNumber,
+        sla_hours: slaHoursVal,
       }
     },
     { status: 201 }

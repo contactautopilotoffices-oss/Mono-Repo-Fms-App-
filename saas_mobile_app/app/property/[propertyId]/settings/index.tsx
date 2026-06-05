@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
   Platform,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
@@ -23,7 +24,7 @@ import { Colors, DASHBOARD_BACKGROUNDS, type DashboardBgKey } from '@/constants/
 import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
@@ -173,10 +174,20 @@ export default function SettingsScreen() {
   const requestCamera = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.camera === 'granted' || perms.camera === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
+        return;
+      }
       const { status } = await CameraModule.requestCameraPermissionsAsync();
       setPerms(p => ({ ...p, camera: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera access is needed for scanning and photo features. Please enable it in device settings.');
+        Alert.alert('Permission Required', 'Camera access is needed for scanning and photo features.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Camera permission error:', e);
@@ -186,10 +197,20 @@ export default function SettingsScreen() {
   const requestAudio = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.audio === 'granted' || perms.audio === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
+        return;
+      }
       const { status } = await AudioModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, audio: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Microphone access is needed for voice features. Please enable it in device settings.');
+        Alert.alert('Permission Required', 'Microphone access is needed for voice features.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Audio permission error:', e);
@@ -199,10 +220,20 @@ export default function SettingsScreen() {
   const requestNotifications = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (perms.notifications === 'granted' || perms.notifications === 'denied') {
+        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
+        return;
+      }
       const { status } = await NotificationsModule.requestPermissionsAsync();
       setPerms(p => ({ ...p, notifications: status }));
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Push notifications are needed for alerts. Please enable them in device settings.');
+        Alert.alert('Permission Required', 'Push notifications are needed for alerts.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]);
       }
     } catch (e) {
       console.error('Notification permission error:', e);
@@ -421,13 +452,8 @@ export default function SettingsScreen() {
             title="Camera"
             subtitle={permLabel(perms.camera)}
             onPress={requestCamera}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.camera) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.camera) }]}>
-                  {perms.camera === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.camera === 'granted'}
           />
 
           <MenuRow
@@ -435,13 +461,8 @@ export default function SettingsScreen() {
             title="Microphone"
             subtitle={permLabel(perms.audio)}
             onPress={requestAudio}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.audio) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.audio) }]}>
-                  {perms.audio === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.audio === 'granted'}
           />
 
           <MenuRow
@@ -449,13 +470,8 @@ export default function SettingsScreen() {
             title="Push Notifications"
             subtitle={permLabel(perms.notifications)}
             onPress={requestNotifications}
-            right={
-              <View style={[styles.permBadge, { backgroundColor: permColor(perms.notifications) + '18' }]}>
-                <Text style={[styles.permBadgeText, { color: permColor(perms.notifications) }]}>
-                  {perms.notifications === 'granted' ? 'Granted' : 'Enable'}
-                </Text>
-              </View>
-            }
+            toggle
+            toggleValue={perms.notifications === 'granted'}
           />
         </GlassCard>
 

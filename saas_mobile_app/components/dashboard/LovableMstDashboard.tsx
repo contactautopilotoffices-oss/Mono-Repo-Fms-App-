@@ -11,41 +11,34 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  Alert,
   Dimensions,
-  Modal,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useWeather } from '@/hooks/useWeather';
-import DashboardBackground from '@/components/dashboard/DashboardBackground';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  runOnJS,
-  interpolate,
-  Extrapolate,
-  FadeInUp,
-  FadeInDown,
-} from 'react-native-reanimated';
-import {
-  Gesture,
-  GestureDetector,
-} from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryClient } from '@/utils/queryClient';
-import { invalidate } from '@/utils/queryInvalidation';
-
-// WeatherBackground removed — using static sunny gradient instead
+import SkeletonLoader from './lovable/SkeletonLoader';
+import DashboardBackground from '@/components/dashboard/DashboardBackground';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  runOnJS,
+  interpolate,
+  Extrapolate,
+  FadeInUp,
+} from 'react-native-reanimated';
+import {
+  Gesture,
+  GestureDetector,
+} from 'react-native-gesture-handler';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { LevelBadge } from '@/components/gamification/LevelBadge';
 import { XPBar } from '@/components/gamification/XPBar';
@@ -60,15 +53,17 @@ import {
   type LeaderRow,
 } from '@/lib/gamification';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
-
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import NotificationModal from '@/components/notifications/NotificationModal';
 import MobileFooter from '@/components/shared/MobileFooter';
 import Toast from '@/components/ui/Toast';
+import FloatingMenu from '@/components/ui/FloatingMenu';
 import { Audio } from 'expo-av';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +87,7 @@ interface Ticket {
   sla_due_at?: string;
 }
 
-type Tab = 'dashboard' | 'daily' | 'flow' | 'profile';
+type Tab = 'dashboard' | 'daily' | 'flow' | 'profile' | 'requests' | 'flow-map';
 
 interface Props {
   propertyId: string;
@@ -111,42 +106,6 @@ const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
 ];
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
-
-function StatTile({
-  value,
-  label,
-  tint,
-  wide = false,
-  onPress,
-}: {
-  value: string;
-  label: string;
-  tint: [string, string];
-  wide?: boolean;
-  onPress?: () => void;
-}) {
-  const content = (
-    <LinearGradient
-      colors={tint}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.statTile, wide && styles.statTileWide]}
-    >
-      <View style={styles.statTileGlow} />
-      <Text style={styles.statTileValue}>{value}</Text>
-      <Text style={styles.statTileLabel}>{label}</Text>
-    </LinearGradient>
-  );
-
-  if (onPress) {
-    return (
-      <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={[wide ? { flex: 1 } : { flex: 1 }]}>
-        {content}
-      </TouchableOpacity>
-    );
-  }
-  return content;
-}
 
 function TimeBlock({ val }: { val: number }) {
   return (
@@ -213,35 +172,6 @@ function ProfileStat({
   );
 }
 
-function TabButton({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.tabButton, active && styles.tabButtonActive]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={active ? '#FFFFFF' : 'rgba(255,255,255,0.55)'}
-      />
-      <Text style={[styles.tabButtonLabel, active && styles.tabButtonLabelActive]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
 // ─── Ticket Stack (swipeable) ────────────────────────────────────────────────
 
 const STACK_HEIGHT = 420;
@@ -272,7 +202,7 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
     .onEnd((e) => {
       if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
         const dest = e.translationX > 0 ? SCREEN_W : -SCREEN_W;
-        translateX.value = withSpring(dest, { velocity: e.velocityX, damping: 20, stiffness: 90 }, () => {
+        translateX.value = withTiming(dest, { duration: 150 }, () => {
           runOnJS(sendToBack)();
         });
       } else {
@@ -334,103 +264,101 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
   );
 }
 
-function TicketCard({ ticket }: { ticket: Ticket }) {
-  const priorityColors: Record<string, { bg: string; text: string; border: string }> = {
-    LOW: { bg: 'rgba(100,116,139,0.20)', text: '#94A3B8', border: 'rgba(100,116,139,0.40)' },
-    MEDIUM: { bg: 'rgba(251,191,36,0.15)', text: '#FDE68A', border: 'rgba(251,191,36,0.35)' },
-    HIGH: { bg: 'rgba(239,68,68,0.18)', text: '#FCA5A5', border: 'rgba(239,68,68,0.40)' },
-    URGENT: { bg: 'rgba(239,68,68,0.25)', text: '#FECACA', border: 'rgba(239,68,68,0.50)' },
+const TicketCard = React.memo(function TicketCard({ ticket }: { ticket: Ticket }) {
+  const getPriorityColor = () => {
+    switch (ticket.priority?.toLowerCase()) {
+      case 'urgent':
+      case 'critical':
+        return { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.25)' };
+      case 'high':
+        return { bg: 'rgba(249,115,22,0.15)', text: '#F97316', border: 'rgba(249,115,22,0.25)' };
+      case 'medium':
+        return { bg: 'rgba(71,85,105,0.10)', text: '#475569', border: 'rgba(71,85,105,0.20)' };
+      default:
+        return { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', border: 'rgba(100,116,139,0.25)' };
+    }
   };
-  const p = priorityColors[ticket.priority?.toUpperCase()] || priorityColors.LOW;
 
-  const statusColors: Record<string, { bg: string; text: string; border: string }> = {
-    ASSIGNED: { bg: 'rgba(124,92,250,0.15)', text: '#C4B5FD', border: 'rgba(124,92,250,0.35)' },
-    PENDING: { bg: 'rgba(251,191,36,0.12)', text: '#FDE68A', border: 'rgba(251,191,36,0.30)' },
-    'IN-PROGRESS': { bg: 'rgba(34,211,238,0.12)', text: '#A5F3FC', border: 'rgba(34,211,238,0.30)' },
-  };
-  const s = statusColors[ticket.status?.toUpperCase()] || statusColors.ASSIGNED;
+  const priorityColors = getPriorityColor();
+  
+  const slaTime = ticket.sla_due_at 
+    ? new Date(ticket.sla_due_at).getTime() - Date.now()
+    : null;
+  const slaHours = slaTime ? Math.floor(slaTime / (1000 * 60 * 60)) : 0;
+  const slaMinutes = slaTime ? Math.floor((slaTime % (1000 * 60 * 60)) / (1000 * 60)) : 0;
 
   return (
-    <View style={styles.ticketCard}>
-      <View style={styles.ticketCardInner}>
-        {/* Header */}
-        <View style={styles.ticketHeader}>
-          <View style={styles.ticketIconBox}>
-            <Ionicons name="time" size={20} color="rgba(255,255,255,0.80)" />
-          </View>
-          <View style={styles.ticketHeaderInfo}>
-            <Text style={styles.ticketId} numberOfLines={1}>
-              {ticket.ticket_number}
+    <View style={[styles.ticketCard, { padding: 20 }]}>
+      {/* Header */}
+      <View style={{ marginBottom: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF', flex: 1, lineHeight: 22 }} numberOfLines={2}>
+            {ticket.title}
+          </Text>
+        </View>
+      </View>
+
+      {/* Priority & Status */}
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: priorityColors.bg, borderColor: priorityColors.border }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: priorityColors.text }}>
+            {ticket.priority?.toUpperCase()}
+          </Text>
+        </View>
+        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(139,92,246,0.15)', borderColor: 'rgba(139,92,246,0.25)' }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>
+            ASSIGNED
+          </Text>
+        </View>
+      </View>
+
+      {/* Assignee */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#708F96', justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+            {ticket.assignee?.full_name?.[0] || 'M'}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)' }}>
+          {ticket.assignee?.full_name || 'Unassigned'}
+        </Text>
+      </View>
+
+      {/* SLA */}
+      {slaTime && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <Ionicons name="time-outline" size={14} color="#EF4444" />
+          <Text style={{ fontSize: 12, fontWeight: '600', color: '#EF4444' }}>
+            {slaHours}h {slaMinutes}m
+          </Text>
+        </View>
+      )}
+
+      {/* Bottom Actions Row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          {/* Ticket Score Pill */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(234,179,8,0.15)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(234,179,8,0.3)' }}>
+            <Ionicons name="star" size={12} color="#EAB308" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#EAB308' }}>
+              {(ticket as any).gamification_points || (ticket as any).score || 5} pts
             </Text>
-            <Text style={styles.ticketDate}>
-              {new Date(ticket.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </Text>
           </View>
-          <View style={styles.ticketHeaderActions}>
-            <TouchableOpacity style={styles.ticketActionBtn}>
-              <Ionicons name="share-outline" size={14} color="rgba(255,255,255,0.70)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.ticketActionBtn}>
-              <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.70)" />
-            </TouchableOpacity>
-          </View>
+          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>{ticket.ticket_number}</Text>
         </View>
 
-        {/* Badges */}
-        <View style={styles.ticketBadges}>
-          <View style={[styles.ticketBadge, { backgroundColor: p.bg, borderColor: p.border }]}>
-            <Text style={[styles.ticketBadgeText, { color: p.text }]}>{ticket.priority}</Text>
-          </View>
-          <View style={[styles.ticketBadge, { backgroundColor: s.bg, borderColor: s.border }]}>
-            <Text style={[styles.ticketBadgeText, { color: s.text }]}>{ticket.status}</Text>
-          </View>
-        </View>
-
-        {/* Title */}
-        <Text style={styles.ticketTitle}>{ticket.title}</Text>
-
-        {/* Assignee */}
-        <View style={styles.ticketAssignee}>
-          <View style={styles.ticketAssigneeAvatar}>
-            <Text style={styles.ticketAssigneeInitials}>
-              {ticket.assignee?.full_name?.[0] || 'M'}
-            </Text>
-          </View>
-          <Text style={styles.ticketAssigneeName}>{ticket.assignee?.full_name || 'Unassigned'}</Text>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.ticketFooter}>
-          <View>
-            <Text style={styles.ticketFooterLabel}>SLA Countdown</Text>
-            <View style={styles.ticketSlaBadge}>
-              <Ionicons name="time" size={12} color="#FCA5A5" />
-              <Text style={styles.ticketSlaText}>1d 8h 54m</Text>
-            </View>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.ticketFooterLabel}>Score</Text>
-            <Text style={styles.ticketScore}>+5</Text>
-          </View>
-        </View>
-
-        {/* Actions */}
-        <View style={styles.ticketActionsRow}>
-          <TouchableOpacity style={styles.ticketViewBtn}>
-            <Text style={styles.ticketViewBtnText}>View Ticket</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.ticketAcceptBtn}>
-            <Text style={styles.ticketAcceptBtnText}>Accept Task</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Small Action Button */}
+        <TouchableOpacity 
+          style={{ backgroundColor: '#5A8A8F', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+          activeOpacity={0.8}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>View</Text>
+          <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
     </View>
   );
-}
+});
 
 // ─── CountdownTimer (extracted to prevent full dashboard re-render every second) ──
 // Owns its own state so parent doesn't re-render on every tick.
@@ -477,8 +405,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const { weather } = useWeather();
   const router = useRouter();
 
-  const supabase = useMemo(() => createClient(), []);
-
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
@@ -494,11 +420,10 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const [showSignOut, setShowSignOut] = useState(false);
   const [showPermissionOnboarding, setShowPermissionOnboarding] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showDrawer, setShowDrawer] = useState(false);
   const [toastConfig, setToastConfig] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
 
   // Gamification
-  const { leaderboard: gamifyLb, myStats, loading: gamifyLoading } = useGamification(propertyId);
+  const { leaderboard: gamifyLb, myStats } = useGamification(propertyId);
 
   // ── Server Query ──
   const {
@@ -506,7 +431,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     isLoading,
     isFetching,
     refetch,
-    error,
   } = useServerQuery<{
     property: { name: string } | null;
     tickets: Ticket[];
@@ -514,22 +438,57 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   }>(
     queryKeys.property.mstDashboardLovable(propertyId),
     async () => {
-      const [{ data: propData }, { data: ticketData }, { data: shiftData }] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', propertyId).maybeSingle(),
-        supabase.from('tickets')
-          .select(`*, assignee:users!assigned_to(id, full_name, email, user_photo_url), creator:users!raised_by(id, full_name)`)
-          .eq('property_id', propertyId)
-          .order('created_at', { ascending: false }),
-        supabase.from('resolver_stats').select('is_checked_in').eq('property_id', propertyId).eq('user_id', user?.id ?? '').maybeSingle(),
+      const [propRes, ticketRes, shiftRes] = await Promise.all([
+        serverApi.query<{ name: string }[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.query<Ticket[]>({
+          table: 'tickets',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+        }),
+        serverApi.query<{ is_checked_in: boolean }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'is_checked_in',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+          ],
+          limit: 1,
+        }),
       ]);
       return {
-        property: propData ?? null,
-        tickets: (ticketData as Ticket[]) ?? [],
-        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+        property: propRes.data?.[0] ?? null,
+        tickets: ticketRes.data ?? [],
+        isCheckedIn: shiftRes.data?.[0]?.is_checked_in ?? false,
       };
     },
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(!data);
+
+  // Minimum skeleton duration effect
+  useEffect(() => {
+    // hasValidDashboardData is true when data is loaded and valid
+    const isValid = !!data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as any)?.tickets);
+    if (isValid) {
+      if (showSkeleton) {
+        const timer = setTimeout(() => setShowSkeleton(false), 600);
+        return () => clearTimeout(timer);
+      }
+    } else if (!isLoading) {
+      setShowSkeleton(true);
+    }
+  }, [data, isLoading]);
 
   const hasValidDashboardData =
     !!data &&
@@ -713,61 +672,70 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         </View>
       </Animated.View>
 
-      {/* Scope filter */}
-      <Animated.View entering={FadeInUp.delay(150).duration(500)} style={styles.timeToggleRow}>
-        <TouchableOpacity
-          style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('property')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('my_tasks')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* Time filter */}
-      <Animated.View entering={FadeInUp.delay(170).duration(500)} style={styles.timeToggleRow}>
-        {TICKET_TIME_FILTER_OPTIONS.map((option) => (
-          <TouchableOpacity
-            key={option.key}
-            style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
-            onPress={() => setTimeFilter(option.key)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
-              {option.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </Animated.View>
-
-      {/* Stats card */}
-      <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.statsCardInner}>
-          <View style={styles.statsGrid}>
-            <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-            <StatTile value={String(stats.open)} label="OPEN" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=open`)} />
-            <StatTile value={String(stats.closed)} label="CLOSED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=closed`)} />
+      {/* Stats card matching Property Admin */}
+      <GlassTile label="Tickets" icon="ticket" delay={80} style={{ marginHorizontal: 0 }}>
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {/* Scope filter */}
+          <View style={styles.timeToggleRow}>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('property')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('my_tasks')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.ticketStackSection}>
-            <Text style={styles.ticketStackTitle}>Tickets</Text>
-            {shuffledTickets.length > 0 ? (
-              <TicketStack tickets={shuffledTickets.slice(0, 5)} />
-            ) : (
-              <View style={styles.ticketStackEmpty}>
-                <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
-              </View>
-            )}
+
+          {/* Time filter */}
+          <View style={[styles.timeToggleRow, { marginBottom: 0 }]}>
+            {TICKET_TIME_FILTER_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
+                onPress={() => setTimeFilter(option.key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
-      </Animated.View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ alignItems: 'flex-start' }}>
+            <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.open} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.closed} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+          </View>
+        </View>
+      </GlassTile>
+
+      <View style={{ marginTop: 24 }}>
+        <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', marginBottom: 12, letterSpacing: 1 }}>RECENT TICKETS</Text>
+        {shuffledTickets.length > 0 ? (
+          <TicketStack tickets={shuffledTickets.slice(0, 5)} />
+        ) : (
+          <View style={styles.ticketStackEmpty}>
+            <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+          </View>
+        )}
+      </View>
 
       <ChecklistProgressCard completed={stats.closed} total={stats.total} delay={280} />
     </>
@@ -918,16 +886,12 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading || (isFetching && !hasValidDashboardData)) {
+  if (showSkeleton || isLoading || (isFetching && !hasValidDashboardData)) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
         <DashboardBackground />
-        {/* WeatherBackground removed — DashboardBackground handles theming */}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
+        <SkeletonLoader />
       </View>
     );
   }
@@ -947,9 +911,22 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
         <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
-          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
-            <Ionicons name="menu" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
+          <FloatingMenu
+            title="Maintenance Portal"
+            items={[
+              { label: 'Overview', icon: 'grid-outline', onPress: () => setActiveTab('dashboard') },
+              { label: 'Requests', icon: 'ticket-outline', onPress: () => setActiveTab('requests') },
+              { label: 'Live Flow Map', icon: 'git-branch-outline', onPress: () => setActiveTab('flow') },
+              { label: 'Visitors', icon: 'people-outline', onPress: () => router.push(`/property/${propertyId}/visitors` as any) },
+              { label: 'Diesel Logger', icon: 'flame-outline', onPress: () => router.push(`/property/${propertyId}/diesel` as any) },
+              { label: 'Electricity Logger', icon: 'flash-outline', onPress: () => router.push(`/property/${propertyId}/electricity` as any) },
+              { label: 'Checklists', icon: 'clipboard-outline', onPress: () => router.push(`/property/${propertyId}/checklist` as any) },
+              { label: 'Settings', icon: 'settings-outline', onPress: () => router.push(`/property/${propertyId}/settings` as any) },
+              { label: 'Profile', icon: 'person-outline', onPress: () => setActiveTab('profile') },
+            ]}
+            footer={{ label: 'Sign Out', icon: 'log-out-outline', danger: true, onPress: () => router.push('/(auth)/login' as any) }}
+            buttonStyle={styles.hamburgerBtn}
+          />
           <View style={styles.headerCenter}>
             <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => setActiveTab('profile')}>
               <LinearGradient
@@ -1017,108 +994,27 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         </View>
       </ScrollView>
 
-      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} />
+      <MobileFooter
+        activeTab="dashboard"
+        moreMenuItems={[
+          { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
+          { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
+          { label: 'Live Flow Map', icon: 'git-branch-outline', action: () => setActiveTab('flow') },
+          { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
+          { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
+          { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
+          { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
+          { label: 'Settings', icon: 'settings-outline', route: 'settings' },
+          { label: 'Profile', icon: 'person-outline', action: () => setActiveTab('profile') },
+          { label: 'Sign Out', icon: 'log-out-outline', action: () => setShowSignOut(true), color: '#EF4444' }
+        ]}
+      />
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
       <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
       <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
-      <Modal visible={showDrawer} transparent animationType="fade" onRequestClose={() => setShowDrawer(false)}>
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }]}>
-            <View style={styles.drawerHeader}>
-              <View style={styles.drawerLogoContainer}>
-                <Image
-                  source={require('@/assets/images/autopilot-logo-new.png')}
-                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]}
-                  resizeMode="contain"
-                />
-              </View>
-              <TouchableOpacity onPress={() => setShowDrawer(false)} style={styles.drawerCloseBtn}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.drawerSectionHeader}>
-                <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>DAILY WORK</Text>
-              </View>
-              {[
-                { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-                { label: 'Requests', icon: 'ticket-outline', action: () => setActiveTab('daily') },
-                { label: 'Live Flow Map', icon: 'git-branch-outline', action: () => router.push(`/property/${propertyId}/flow-map` as any) },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.label}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    item.action();
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="hammer-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
-              </View>
-              {[
-                { label: 'Tickets', icon: 'ticket-outline', route: 'tickets' },
-                { label: 'Visitors', icon: 'walk-outline', route: 'visitors' },
-                { label: 'Diesel Logger', icon: 'water-outline', route: 'diesel' },
-                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity' },
-                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.route}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    router.push(`/property/${propertyId}/${item.route}` as any);
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="person-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>SYSTEM & PERSONAL</Text>
-              </View>
-              {[
-                { label: 'Settings', icon: 'settings-outline', route: 'settings', local: false },
-                { label: 'Profile', icon: 'person-outline', local: true },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.label}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    if (item.local) {
-                      setActiveTab('profile');
-                      return;
-                    }
-                    router.push(`/property/${propertyId}/${item.route}` as any);
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.drawerSignOut} onPress={() => { setShowDrawer(false); setShowSignOut(true); }}>
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-              <Text style={styles.drawerSignOutText}>Logout</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.drawerBackdrop} onPress={() => setShowDrawer(false)} />
-        </View>
-      </Modal>
 
       <Toast 
         {...toastConfig} 
@@ -1131,6 +1027,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
   container: {
     flex: 1,
     backgroundColor: '#4A1A1A',
@@ -1167,8 +1065,8 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 12,
+    marginLeft: 16,
+    marginRight: 16,
   },
   profileRow: {
     flexDirection: 'row',
@@ -2111,40 +2009,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginBottom: 20,
-  },
-
-  // Bottom nav
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 30,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.10)',
-  },
-  bottomNavBlur: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 10,
-    backgroundColor: 'rgba(11,15,25,0.85)',
-  },
-  tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-  },
-  tabButtonActive: {},
-  tabButtonLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.55)',
-  },
-  tabButtonLabelActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
   },
 
   // Ask Cassandra

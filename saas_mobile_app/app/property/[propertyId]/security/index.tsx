@@ -1,46 +1,61 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/**
+ * Security Dashboard - Simplified Security Officer Portal
+ *
+ * Features (matching web app):
+ * - Overview: KPI stats, security alerts
+ * - Visitor Management: View visitor logs
+ * - Security Incidents: View/report incidents
+ * - Quick access to Diesel and SOPs
+ */
+
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   Alert,
-  Dimensions,
 } from 'react-native';
-import { useRouter, useGlobalSearchParams } from 'expo-router';
+import { useRouter, useGlobalSearchParams, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp } from 'react-native-reanimated';
-import SafeBlurView from '@/components/ui/SafeBlurView';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
-import { useTheme } from '@/context';
 import { vmsService } from '@/services/vmsService';
 import { ticketService } from '@/services/ticketService';
-
+import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
   Shield,
   Users,
   AlertTriangle,
   Ticket as TicketIcon,
-  LogIn,
-  LogOut,
   ClipboardList,
   Siren,
   ChevronRight,
   UserCheck,
   Clock,
-  MapPin,
-  Phone,
+  Fuel,
+  Eye,
+  Settings,
+  Home,
+  FileText,
+  Box,
+  Settings2,
 } from 'lucide-react-native';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
-const { width: SCREEN_W } = Dimensions.get('window');
-
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface KpiStats {
+  activeVisitors: number;
+  incidentsToday: number;
+  securityAlerts: number;
+  openTickets: number;
+}
 
 interface VisitorLog {
   id: string;
@@ -52,77 +67,64 @@ interface VisitorLog {
   checkin_time: string;
   checkout_time?: string;
   status: 'checked_in' | 'checked_out';
-  photo_url?: string;
 }
 
-interface KpiStats {
-  activeVisitors: number;
-  incidentsToday: number;
-  securityAlerts: number;
-  openTickets: number;
-}
+// ─── KPI Card Component ──────────────────────────────────────────────────────
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function getDuration(checkin: string): string {
-  const start = new Date(checkin);
-  const diffMs = Date.now() - start.getTime();
-  const hours = Math.floor(diffMs / (1000 * 60 * 60));
-  const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-}
-
-// ─── KPI Card ────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label,
-  value,
-  icon,
-  tint,
-  delay,
-  onPress,
-}: {
+function KpiCard({ label, value, icon, color, delay }: {
   label: string;
   value: number | string;
   icon: React.ReactNode;
-  tint: [string, string];
+  color: string;
   delay: number;
-  onPress?: () => void;
 }) {
-  const content = (
-    <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={{ flex: 1 }}>
-      <LinearGradient colors={tint} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.kpiCard}>
-        <View style={styles.kpiIconWrap}>{icon}</View>
-        <Text style={styles.kpiValue}>{value}</Text>
-        <Text style={styles.kpiLabel}>{label}</Text>
+  return (
+    <Animated.View entering={FadeInUp.delay(delay).duration(400)} style={styles.kpiCard}>
+      <View style={[styles.kpiIconWrap, { backgroundColor: color + '20' }]}>
+        {icon}
+      </View>
+      <Text style={styles.kpiValue}>{value}</Text>
+      <Text style={styles.kpiLabel}>{label}</Text>
+    </Animated.View>
+  );
+}
+
+// ─── Visitor Row Component ─────────────────────────────────────────────────
+
+function VisitorRow({ visitor, delay }: { visitor: VisitorLog; delay: number }) {
+  const isActive = visitor.status === 'checked_in';
+
+  return (
+    <Animated.View entering={FadeInUp.delay(delay).duration(400)}>
+      <LinearGradient
+        colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)']}
+        style={styles.visitorRow}
+      >
+        <View style={[styles.visitorAvatar, { backgroundColor: isActive ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.06)' }]}>
+          <UserCheck size={18} color={isActive ? '#10B981' : 'rgba(255,255,255,0.4)'} />
+        </View>
+        <View style={styles.visitorInfo}>
+          <Text style={styles.visitorName}>{visitor.name}</Text>
+          <Text style={styles.visitorMeta}>
+            Meeting: {visitor.whom_to_meet}
+          </Text>
+          <Text style={styles.visitorTime}>
+            {new Date(visitor.checkin_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+        <View style={styles.visitorStatus}>
+          <Text style={[styles.statusBadge, { color: isActive ? '#10B981' : '#64748B' }]}>
+            {isActive ? 'Active' : 'Left'}
+          </Text>
+        </View>
       </LinearGradient>
     </Animated.View>
   );
-  if (onPress) {
-    return (
-      <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={{ flex: 1 }}>
-        {content}
-      </TouchableOpacity>
-    );
-  }
-  return content;
 }
 
-// ─── Quick Action Button ─────────────────────────────────────────────────────
+// ─── Quick Action Button ───────────────────────────────────────────────────
 
-function QuickAction({
-  label,
-  icon,
-  color,
-  bgColor,
-  onPress,
-  delay,
-}: {
+function QuickAction({ label, icon, color, bgColor, onPress, delay }: {
   label: string;
   icon: React.ReactNode;
   color: string;
@@ -131,198 +133,155 @@ function QuickAction({
   delay: number;
 }) {
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={styles.quickActionWrap}>
-      <TouchableOpacity style={[styles.quickAction, { backgroundColor: bgColor }]} onPress={onPress} activeOpacity={0.75}>
-        <View style={[styles.quickActionIcon, { backgroundColor: color + '20' }]}>{icon}</View>
+    <Animated.View entering={FadeInUp.delay(delay).duration(400)} style={styles.quickActionWrap}>
+      <TouchableOpacity
+        style={[styles.quickAction, { backgroundColor: bgColor }]}
+        onPress={onPress}
+        activeOpacity={0.75}
+      >
+        <View style={[styles.quickActionIcon, { backgroundColor: color + '20' }]}>
+          {icon}
+        </View>
         <Text style={[styles.quickActionLabel, { color }]}>{label}</Text>
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
-// ─── Visitor Row ─────────────────────────────────────────────────────────────
+// ─── Main Screen ───────────────────────────────────────────────────────────
 
-function VisitorRow({ visitor, onPress }: { visitor: VisitorLog; onPress: () => void }) {
-  const isCheckedIn = visitor.status === 'checked_in';
-  return (
-    <TouchableOpacity style={styles.visitorRow} onPress={onPress} activeOpacity={0.7}>
-      <SafeBlurView intensity={30} tint="dark" style={[styles.visitorAvatar, { borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }]}>
-        <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(0,0,0,0.05)']} style={StyleSheet.absoluteFillObject} />
-        <UserCheck size={18} color="rgba(255,255,255,0.5)" />
-      </SafeBlurView>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.visitorName} numberOfLines={1}>{visitor.name}</Text>
-        <Text style={styles.visitorMeta}>
-          {visitor.whom_to_meet} · {formatTime(visitor.checkin_time)}
-        </Text>
-        {isCheckedIn && (
-          <Text style={styles.visitorDuration}>On site · {getDuration(visitor.checkin_time)}</Text>
-        )}
-      </View>
-      <View style={[styles.statusBadge, { backgroundColor: isCheckedIn ? 'rgba(16,185,129,0.15)' : 'rgba(148,163,184,0.15)' }]}>
-        <View style={[styles.statusDot, { backgroundColor: isCheckedIn ? '#10B981' : '#94A3B8' }]} />
-        <Text style={[styles.statusText, { color: isCheckedIn ? '#10B981' : '#94A3B8' }]}>
-          {isCheckedIn ? 'On Premise' : 'Out'}
-        </Text>
-      </View>
-      <ChevronRight size={14} color="rgba(255,255,255,0.25)" />
-    </TouchableOpacity>
-  );
-}
-
-// ─── Main Screen ─────────────────────────────────────────────────────────────
-
-export default function SecurityDashboardScreen() {
+export default function SecurityDashboard() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, membership } = useAuth();
-  const { theme: _theme } = useTheme();
+  const { user } = useAuth();
 
-
-  const [propertyName, setPropertyName] = useState('');
-
-  // Fetch property name
-  useEffect(() => {
-    if (!propertyId || !membership) return;
-    const prop = membership.properties?.find((p) => p.id === propertyId);
-    if (prop?.name) setPropertyName(prop.name);
-  }, [propertyId, membership]);
-
-  const fetchDashboardData = useCallback(async () => {
+  // ── Fetch Data ──────────────────────────────────────────────────────────
+  const fetchStats = useCallback(async () => {
     if (!propertyId) return { stats: { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 }, visitors: [] as VisitorLog[] };
+
     try {
-      // 1. Fetch visitors (today, all statuses)
-      const visitorsRes = await vmsService.fetchVisitors(propertyId, {
-        dateFilter: 'today',
-        status: 'all',
-      });
+      // Fetch today's visitors
+      const visitorsRes = await vmsService.getVisitorLogs(propertyId, { dateFilter: 'today' });
+      const visitors: VisitorLog[] = visitorsRes.success ? visitorsRes.data ?? [] : [];
+      const activeVisitors = visitors.filter(v => v.status === 'checked_in').length;
 
-      let activeVisitors = 0;
-      let visitorList: VisitorLog[] = [];
-      if (visitorsRes.success && visitorsRes.data) {
-        visitorList = visitorsRes.data.visitors as VisitorLog[];
-        activeVisitors = visitorList.filter((v) => v.status === 'checked_in').length;
-      }
-
-      // 2. Fetch security alerts (tickets with category = security_incident)
-      let securityAlerts = 0;
+      // Fetch security incidents
+      let incidentsToday = 0;
       try {
-        const ticketRes = await ticketService.getTickets({
+        const incidentRes = await ticketService.getTickets({
           propertyId,
           status: 'open',
           category: 'security_incident',
         });
-        if (ticketRes.data && !ticketRes.error) {
-          securityAlerts = ticketRes.data.length;
+        if (incidentRes.success && incidentRes.data) {
+          incidentsToday = incidentRes.data.length;
         }
-      } catch {
-        // Fallback: ignore
-      }
+      } catch {}
 
-      // 3. Fetch open tickets
+      // Fetch open tickets
       let openTickets = 0;
       try {
-        const allTicketsRes = await ticketService.getTickets({ propertyId, status: 'open' });
-        if (allTicketsRes.data && !allTicketsRes.error) {
-          openTickets = allTicketsRes.data.length;
+        const ticketsRes = await ticketService.getTickets({ propertyId, status: 'open' });
+        if (ticketsRes.success && ticketsRes.data) {
+          openTickets = ticketsRes.data.length;
         }
-      } catch {
-        // Fallback: ignore
-      }
-
-      // 4. Incidents today = security alerts + any incident tickets created today
-      // For now, approximate with securityAlerts
-      const incidentsToday = securityAlerts;
+      } catch {}
 
       return {
-        stats: { activeVisitors, incidentsToday, securityAlerts, openTickets },
-        visitors: visitorList.slice(0, 10), // Show top 10 recent
+        stats: { activeVisitors, incidentsToday, securityAlerts: incidentsToday, openTickets },
+        visitors: visitors.slice(0, 10),
       };
     } catch (err) {
-      console.error('[SecurityDashboard] Error fetching data:', err);
+      console.error('[Security] Fetch error:', err);
       return { stats: { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 }, visitors: [] as VisitorLog[] };
     }
   }, [propertyId]);
 
-  const { data, isLoading, isFetching, refetch } = useServerQuery<{ stats: KpiStats; visitors: VisitorLog[] }>(
+  const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.security(propertyId),
-    fetchDashboardData,
-    { staleTime: 1000 * 60 * 5 }
+    fetchStats,
+    { staleTime: 1000 * 60 }
   );
 
   const stats = data?.stats ?? { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 };
   const visitors = data?.visitors ?? [];
 
-  const handleRefresh = () => refetch();
-
+  // ── SOS Emergency ───────────────────────────────────────────────────────
   const handleSOS = () => {
     Alert.alert(
-      '🚨 EMERGENCY SOS',
-      'This will broadcast an emergency alert to all staff and administrators. Are you sure?',
+      'Emergency SOS',
+      'This will create an emergency security ticket. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Send SOS',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert('SOS Sent', 'Emergency alert broadcasted to all staff.');
+          onPress: async () => {
+            try {
+              await ticketService.createTicket({
+                propertyId: propertyId!,
+                title: 'EMERGENCY - Security Alert',
+                description: 'Emergency SOS triggered from mobile app',
+                category: 'security_incident',
+                priority: 'urgent',
+              });
+              Alert.alert('SOS Sent', 'Emergency ticket created. Help is being dispatched.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
           },
         },
       ]
     );
   };
 
-  if (isLoading) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
-        <LinearGradient colors={['#0B1B2A', '#0F2D3D', '#113B4D']} style={StyleSheet.absoluteFillObject} />
-        <ActivityIndicator size="large" color="#708F96" />
-        <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 16, fontFamily: 'Urbanist-Medium' }}>
-          Loading Security Portal...
-        </Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <LinearGradient colors={['#0B1B2A', '#0F2D3D', '#113B4D']} style={StyleSheet.absoluteFillObject} />
+    <View style={{ flex: 1, backgroundColor: '#0F1521' }}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <LinearGradient colors={['#0F1521', '#121824', '#090d16']} style={StyleSheet.absoluteFillObject} />
+
+      {/* Modern Header - Same as other pages */}
+      <SafeBlurView intensity={80} tint="dark" style={[styles.modernHeader, { paddingTop: insets.top + 10 }]}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <View style={styles.headerIconCenter}>
+            <Shield size={22} color="#3B82F6" />
+          </View>
+          <Text style={styles.headerTitleMain}>Security</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <Text style={styles.headerSubtitle}>Officer Portal</Text>
+      </SafeBlurView>
+
+      {/* Live Badge */}
+      <View style={styles.liveBadge}>
+        <View style={styles.liveDot} />
+        <Text style={styles.liveText}>LIVE</Text>
+      </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 80 }]}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="#fff" />}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor="#708F96" />}
       >
-        {/* ── Header ── */}
-        <Animated.View entering={FadeInUp.duration(400)} style={styles.header}>
-          <View style={styles.headerTop}>
-            <View>
-              <Text style={styles.headerTitle}>Security Portal</Text>
-              <Text style={styles.headerSubtitle}>{propertyName || 'Property'}</Text>
-            </View>
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* ── KPI Cards ── */}
+        {/* KPIs */}
         <View style={styles.kpiRow}>
           <KpiCard
             label="Active Visitors"
             value={stats.activeVisitors}
-            icon={<Users size={18} color="#60A5FA" />}
-            tint={['rgba(59,130,246,0.18)', 'rgba(59,130,246,0.04)']}
+            icon={<Users size={20} color="#3B82F6" />}
+            color="#3B82F6"
             delay={0}
-            onPress={() => router.push(`/property/${propertyId}/visitors` as never)}
           />
           <KpiCard
             label="Incidents"
             value={stats.incidentsToday}
-            icon={<AlertTriangle size={18} color="#FBBF24" />}
-            tint={['rgba(245,158,11,0.18)', 'rgba(245,158,11,0.04)']}
+            icon={<AlertTriangle size={20} color="#F59E0B" />}
+            color="#F59E0B"
             delay={80}
           />
         </View>
@@ -330,100 +289,106 @@ export default function SecurityDashboardScreen() {
           <KpiCard
             label="Security Alerts"
             value={stats.securityAlerts}
-            icon={<Shield size={18} color="#FCA5A5" />}
-            tint={['rgba(239,68,68,0.18)', 'rgba(239,68,68,0.04)']}
+            icon={<Siren size={20} color="#EF4444" />}
+            color="#EF4444"
             delay={160}
-            onPress={() => router.push(`/property/${propertyId}/tickets` as never)}
           />
           <KpiCard
             label="Open Tickets"
             value={stats.openTickets}
-            icon={<TicketIcon size={18} color="#6EE7B7" />}
-            tint={['rgba(16,185,129,0.18)', 'rgba(16,185,129,0.04)']}
+            icon={<TicketIcon size={20} color="#10B981" />}
+            color="#10B981"
             delay={240}
-            onPress={() => router.push(`/property/${propertyId}/tickets` as never)}
           />
         </View>
 
-        {/* ── Quick Actions ── */}
-        <Animated.View entering={FadeInUp.delay(300).duration(500)}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-        </Animated.View>
-        <View style={styles.quickActionsGrid}>
-          <QuickAction
-            label="Check In"
-            icon={<LogIn size={20} color="#10B981" />}
-            color="#10B981"
-            bgColor="rgba(16,185,129,0.10)"
-            onPress={() => router.push(`/property/${propertyId}/visitors` as never)}
-            delay={320}
-          />
-          <QuickAction
-            label="Check Out"
-            icon={<LogOut size={20} color="#EF4444" />}
-            color="#EF4444"
-            bgColor="rgba(239,68,68,0.10)"
-            onPress={() => router.push(`/property/${propertyId}/visitors` as never)}
-            delay={360}
-          />
+        {/* Quick Actions */}
+        <Text style={styles.sectionTitle}>Quick Access</Text>
+        <View style={styles.quickActions}>
           <QuickAction
             label="Visitors"
-            icon={<Users size={20} color="#60A5FA" />}
-            color="#60A5FA"
-            bgColor="rgba(59,130,246,0.10)"
-            onPress={() => router.push(`/property/${propertyId}/visitors` as never)}
-            delay={400}
+            icon={<Users size={22} color="#3B82F6" />}
+            color="#3B82F6"
+            bgColor="rgba(59,130,246,0.15)"
+            onPress={() => router.push(`/property/${propertyId}/visitors` as any)}
+            delay={300}
           />
           <QuickAction
-            label="Report"
-            icon={<ClipboardList size={20} color="#AA895F" />}
-            color="#AA895F"
-            bgColor="rgba(170,137,95,0.10)"
-            onPress={() => router.push(`/property/${propertyId}/tickets` as never)}
-            delay={440}
+            label="Incidents"
+            icon={<AlertTriangle size={22} color="#F59E0B" />}
+            color="#F59E0B"
+            bgColor="rgba(245,158,11,0.15)"
+            onPress={() => router.push(`/property/${propertyId}/tickets?category=security_incident` as any)}
+            delay={360}
+          />
+        </View>
+        <View style={styles.quickActions}>
+          <QuickAction
+            label="Diesel"
+            icon={<Fuel size={22} color="#6B7280" />}
+            color="#6B7280"
+            bgColor="rgba(107,114,128,0.15)"
+            onPress={() => router.push(`/property/${propertyId}/diesel` as any)}
+            delay={420}
+          />
+          <QuickAction
+            label="SOPs"
+            icon={<ClipboardList size={22} color="#8B5CF6" />}
+            color="#8B5CF6"
+            bgColor="rgba(139,92,246,0.15)"
+            onPress={() => router.push(`/property/${propertyId}/checklist` as any)}
+            delay={480}
           />
         </View>
 
         {/* SOS Button */}
-        <Animated.View entering={FadeInUp.delay(480).duration(500)}>
+        <Animated.View entering={FadeInUp.delay(520).duration(400)}>
           <TouchableOpacity style={styles.sosBtn} onPress={handleSOS} activeOpacity={0.8}>
-            <LinearGradient colors={['rgba(239,68,68,0.2)', 'rgba(239,68,68,0.05)']} style={StyleSheet.absoluteFillObject} />
             <Siren size={22} color="#EF4444" />
             <Text style={styles.sosText}>EMERGENCY SOS</Text>
           </TouchableOpacity>
         </Animated.View>
 
-        {/* ── Recent Visitors ── */}
-        <Animated.View entering={FadeInUp.delay(520).duration(500)}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Visitors</Text>
-            <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/visitors` as never)}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
+        {/* Recent Visitors */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Visitors</Text>
+          <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
+            <Text style={styles.seeAll}>View All</Text>
+          </TouchableOpacity>
+        </View>
 
         {visitors.length === 0 ? (
-          <Animated.View entering={FadeInUp.delay(560).duration(500)} style={styles.emptyState}>
+          <Animated.View entering={FadeInUp.delay(560).duration(400)} style={styles.emptyState}>
             <Users size={40} color="rgba(255,255,255,0.15)" />
             <Text style={styles.emptyTitle}>No visitors today</Text>
-            <Text style={styles.emptySub}>Tap Check In to log a visitor</Text>
+            <Text style={styles.emptySub}>Visitor logs will appear here</Text>
           </Animated.View>
         ) : (
-          <SafeBlurView intensity={35} tint="dark" style={[styles.visitorsCard, { borderColor: 'rgba(255,255,255,0.08)' }]}>
-            <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFillObject} />
-            {visitors.map((v, i) => (
-              <VisitorRow
-                key={v.id}
-                visitor={v}
-                onPress={() => router.push(`/property/${propertyId}/visitors` as never)}
-              />
-            ))}
-          </SafeBlurView>
+          visitors.slice(0, 5).map((v, i) => (
+            <VisitorRow key={v.id} visitor={v} delay={560 + i * 60} />
+          ))
         )}
-
-        <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Bottom Tab Bar - Same as other pages */}
+      <SafeBlurView intensity={60} tint="dark" style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
+        <LinearGradient colors={['rgba(15,21,33,0.95)', 'rgba(15,21,33,0.98)']} style={StyleSheet.absoluteFill} />
+        <View style={styles.bottomNavInner}>
+          {[
+            { icon: <Home size={22} color="#708F96" />, label: 'Home', route: `/property/${propertyId}` },
+            { icon: <FileText size={22} color="#708F96" />, label: 'Requests', route: `/property/${propertyId}/tickets` },
+            { icon: <Shield size={22} color="#3B82F6" />, label: 'Security', route: `/property/${propertyId}/security`, active: true },
+            { icon: <Box size={22} color="#708F96" />, label: 'Stock', route: `/property/${propertyId}/stock` },
+            { icon: <Settings2 size={22} color="#708F96" />, label: 'Settings', route: `/property/${propertyId}/profile` },
+          ].map((item) => (
+            <TouchableOpacity key={item.label} style={styles.navItem} onPress={() => router.push(item.route as any)}>
+              {item.active && <View style={styles.activeDot} />}
+              {item.icon}
+              <Text style={[styles.navLabel, item.active && styles.navLabelActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </SafeBlurView>
     </View>
   );
 }
@@ -432,53 +397,172 @@ export default function SecurityDashboardScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { padding: 16, paddingTop: 8, gap: 14 },
-
-  // Header
-  header: { marginBottom: 6 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  headerTitle: { fontSize: 24, fontFamily: 'Poppins-Bold', color: '#FFFFFF', letterSpacing: -0.5 },
-  headerSubtitle: { fontSize: 13, fontFamily: 'Urbanist-Medium', color: 'rgba(255,255,255,0.5)', marginTop: 2 },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(16,185,129,0.12)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
+  modernHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.12)',
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerIconCenter: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59,130,246,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitleMain: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
+  headerSubtitle: { fontSize: 12, color: '#708F96', fontWeight: '600' },
+  settingsBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    alignSelf: 'flex-start',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.25)',
+  },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
-  liveText: { fontSize: 10, fontFamily: 'Urbanist-Bold', color: '#10B981', letterSpacing: 1 },
-
-  // KPI
+  liveText: { fontSize: 10, fontWeight: '700', color: '#10B981', letterSpacing: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 16, paddingTop: 8, gap: 14 },
   kpiRow: { flexDirection: 'row', gap: 10 },
-  kpiCard: { flex: 1, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', minHeight: 110 },
-  kpiIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  kpiValue: { fontSize: 28, fontFamily: 'Poppins-Bold', color: '#FFFFFF', letterSpacing: -0.5 },
-  kpiLabel: { fontSize: 11, fontFamily: 'Urbanist-Bold', color: 'rgba(255,255,255,0.5)', marginTop: 4, textTransform: 'capitalize', letterSpacing: 0.5 },
-
-  // Section
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  sectionTitle: { fontSize: 16, fontFamily: 'Poppins-Bold', color: '#FFFFFF', letterSpacing: -0.3 },
-  seeAll: { fontSize: 12, fontFamily: 'Urbanist-Bold', color: '#708F96' },
-
-  // Quick Actions
-  quickActionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  quickActionWrap: { width: (SCREEN_W - 42) / 2 },
-  quickAction: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  quickActionIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  quickActionLabel: { fontSize: 13, fontFamily: 'Poppins-Bold' },
-
-  // SOS
-  sosBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)', overflow: 'hidden' },
-  sosText: { fontSize: 14, fontFamily: 'Poppins-Bold', color: '#EF4444', letterSpacing: 1 },
-
-  // Visitors Card
-  visitorsCard: { borderRadius: 20, borderWidth: 1, overflow: 'hidden', paddingVertical: 8 },
-  visitorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  visitorAvatar: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  visitorName: { fontSize: 14, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
-  visitorMeta: { fontSize: 11, fontFamily: 'Urbanist-Medium', color: 'rgba(255,255,255,0.45)', marginTop: 2 },
-  visitorDuration: { fontSize: 10, fontFamily: 'Urbanist-Bold', color: '#10B981', marginTop: 2 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, marginRight: 6 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 9, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase' },
-
-  // Empty
-  emptyState: { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyTitle: { fontSize: 15, fontFamily: 'Poppins-Bold', color: 'rgba(255,255,255,0.5)' },
-  emptySub: { fontSize: 13, fontFamily: 'Urbanist-Regular', color: 'rgba(255,255,255,0.35)' },
+  kpiCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  kpiIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  kpiValue: { fontSize: 28, fontWeight: '700', color: '#FFFFFF' },
+  kpiLabel: { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  seeAll: { fontSize: 12, color: '#708F96' },
+  quickActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  quickActionWrap: { flex: 1 },
+  quickAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+  },
+  quickActionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickActionLabel: { fontSize: 13, fontWeight: '600' },
+  sosBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    marginTop: 8,
+  },
+  sosText: { fontSize: 14, fontWeight: '700', color: '#EF4444' },
+  emptyState: { alignItems: 'center', paddingVertical: 40, gap: 8 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: 'rgba(255,255,255,0.6)' },
+  emptySub: { fontSize: 13, color: 'rgba(255,255,255,0.4)' },
+  visitorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 8,
+  },
+  visitorAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  visitorInfo: { flex: 1 },
+  visitorName: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
+  visitorMeta: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
+  visitorTime: { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  visitorStatus: { alignItems: 'flex-end' },
+  statusBadge: { fontSize: 11, fontWeight: '600' },
+  bottomNav: {
+    flexDirection: 'row',
+    paddingTop: 8,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  bottomNavInner: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: 4,
+  },
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3B82F6',
+    position: 'absolute',
+    top: 0,
+  },
+  navLabel: { fontSize: 10, color: '#708F96', fontWeight: '600' },
+  navLabelActive: { color: '#3B82F6' },
 });

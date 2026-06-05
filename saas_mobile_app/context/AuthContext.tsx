@@ -8,7 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { User, Session } from '@supabase/supabase-js';
 
 import { createClient } from '@/utils/supabase/client';
@@ -252,8 +252,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           properties: builtProperties,
         };
 
-        // Also initialise dashboardStore with the first property so signIn can prefetch
-        if (builtProperties.length > 0 && !useDashboardStore.getState().loadedPropertyId) {
+        // Always initialize dashboardStore with the first property from fresh membership data.
+        // This overrides any stale persisted propertyId from a previous session.
+        if (builtProperties.length > 0) {
           useDashboardStore.getState().setDashboardData({ loadedPropertyId: builtProperties[0].id });
         }
 

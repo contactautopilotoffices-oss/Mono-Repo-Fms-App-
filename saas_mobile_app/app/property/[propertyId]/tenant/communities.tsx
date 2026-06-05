@@ -15,7 +15,7 @@ import { useRouter, useGlobalSearchParams } from 'expo-router';
 import { useWeather } from '@/hooks/useWeather';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import SafeBlurView from '@/components/ui/SafeBlurView';
-import TenantBottomNav from '@/components/tenant/TenantBottomNav';
+
 import { SPACING } from '@/constants/designSystem';
 
 const FONT_DISPLAY = Platform.select({
@@ -92,7 +92,7 @@ export default function TenantCommunitiesPage() {
         </Animated.View>
       </View>
 
-      <TenantBottomNav />
+      
     </View>
   );
 }

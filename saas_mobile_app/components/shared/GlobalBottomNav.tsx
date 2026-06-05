@@ -54,6 +54,14 @@ export default function GlobalBottomNav() {
   const orgId = membership?.org_id ?? '';
   const ticketChatCount = useUnreadStore((s) => s.ticketChatCount);
 
+  const propRole = useMemo(() => {
+    const prop = membership?.properties?.find((p: any) => p.id === propertyId);
+    return (prop?.role || membership?.org_role || 'staff').toLowerCase().replace(/\s+/g, '_');
+  }, [membership, propertyId]);
+
+  const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
+  const isSoftServicesStaff = (propRole.includes('soft_service') || propRole.includes('housekeeping')) && !isManager;
+
   // Detect active tab from current pathname
   const activeTab = useMemo(() => {
     if (!pathname) return 'more';
@@ -61,12 +69,18 @@ export default function GlobalBottomNav() {
     if (p.endsWith('/dashboard') || p.endsWith('/property/' + propertyId?.toLowerCase()) || p.match(/\/property\/[^\/]+$/)) return 'dashboard';
     if (p.includes('/tickets')) return 'tickets';
     if (p.includes('/stock')) return 'stock';
+    if (p.includes('/checklist')) return 'checklist';
     return 'more';
   }, [pathname, propertyId]);
 
   const navigate = (route: string) => {
-    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId}`);
-    router.push(`/property/${propertyId}/${route}` as any);
+    // Ensure we don't navigate to /property/undefined/tickets
+    const validPropId = (propertyId && propertyId !== 'undefined' && propertyId !== 'null') 
+      ? propertyId 
+      : (membership?.properties?.[0]?.id ?? 'all');
+      
+    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId} | Final: ${validPropId}`);
+    router.push(`/property/${validPropId}/${route}` as any);
   };
 
   return (
@@ -115,18 +129,33 @@ export default function GlobalBottomNav() {
             <Text style={styles.navLabel}>Cassandra</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.navItem, activeTab === 'stock' && styles.navItemActive]}
-            onPress={() => navigate('stock')}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={activeTab === 'stock' ? 'business' : 'business-outline'}
-              size={22}
-              color={activeTab === 'stock' ? '#FFF' : 'rgba(255,255,255,0.4)'}
-            />
-            <Text style={[styles.navLabel, activeTab === 'stock' && styles.navLabelActive]}>Stock</Text>
-          </TouchableOpacity>
+          {isSoftServicesStaff ? (
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'checklist' && styles.navItemActive]}
+              onPress={() => navigate('checklist')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={activeTab === 'checklist' ? 'checkbox' : 'checkbox-outline'}
+                size={22}
+                color={activeTab === 'checklist' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+              />
+              <Text style={[styles.navLabel, activeTab === 'checklist' && styles.navLabelActive]}>Checklists</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'stock' && styles.navItemActive]}
+              onPress={() => navigate('stock')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={activeTab === 'stock' ? 'business' : 'business-outline'}
+                size={22}
+                color={activeTab === 'stock' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+              />
+              <Text style={[styles.navLabel, activeTab === 'stock' && styles.navLabelActive]}>Stock</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'more' && styles.navItemActive]}

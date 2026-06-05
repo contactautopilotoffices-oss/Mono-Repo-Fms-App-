@@ -5,27 +5,59 @@ import Animated, {
   useAnimatedStyle,
   withRepeat,
   withTiming,
+  withDelay,
   Easing,
+  interpolate,
 } from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 
-const SkeletonItem = ({ style }: { style: any }) => {
-  const opacity = useSharedValue(0.3);
+import { LinearGradient } from 'expo-linear-gradient';
+
+/**
+ * Enhanced SkeletonItem with Instagram-like shimmer wave effect
+ */
+const SkeletonItem = ({ style, delay = 0 }: { style: any; delay?: number }) => {
+  const shimmerX = useSharedValue(0);
 
   useEffect(() => {
-    opacity.value = withRepeat(
-      withTiming(0.7, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
+    // A single continuous smooth animation loop
+    shimmerX.value = withDelay(
+      delay,
+      withRepeat(
+        withTiming(1, { duration: 1500, easing: Easing.bezier(0.25, 0.1, 0.25, 1) }),
+        -1,
+        false
+      )
     );
-  }, [opacity]);
+  }, [shimmerX, delay]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
+  const shimmerStyle = useAnimatedStyle(() => {
+    // Translate from far left (-width) to far right (+width)
+    const translateX = interpolate(shimmerX.value, [0, 1], [-width, width]);
+    return {
+      transform: [{ translateX }],
+    };
+  });
 
-  return <Animated.View style={[styles.skeletonBase, style, animatedStyle]} />;
+  return (
+    <View style={[styles.skeletonBase, style]}>
+      <Animated.View style={[StyleSheet.absoluteFill, shimmerStyle, { width: width * 1.5 }]}>
+        <LinearGradient
+          colors={[
+            'rgba(255,255,255,0)',
+            'rgba(255,255,255,0.04)',
+            'rgba(255,255,255,0.12)',
+            'rgba(255,255,255,0.04)',
+            'rgba(255,255,255,0)',
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+    </View>
+  );
 };
 
 export default function SkeletonLoader() {
@@ -34,18 +66,26 @@ export default function SkeletonLoader() {
       {/* Header Skeleton */}
       <View style={styles.header}>
         <View>
-          <SkeletonItem style={styles.title} />
-          <SkeletonItem style={styles.subtitle} />
+          <SkeletonItem style={styles.title} delay={0} />
+          <SkeletonItem style={styles.subtitle} delay={100} />
         </View>
-        <SkeletonItem style={styles.avatar} />
+        <SkeletonItem style={styles.avatar} delay={50} />
       </View>
 
-      {/* Search Bar Skeleton */}
-      <SkeletonItem style={styles.searchBar} />
+      {/* Stats Row Skeleton */}
+      <View style={styles.statsRow}>
+        <SkeletonItem style={styles.statCard} delay={150} />
+        <SkeletonItem style={styles.statCard} delay={200} />
+      </View>
 
-      {/* Cards Skeleton */}
-      {[1, 2, 3, 4].map((i) => (
-        <SkeletonItem key={i} style={styles.card} />
+      {/* KPI Cards Skeleton */}
+      {[1, 2].map((i) => (
+        <SkeletonItem key={i} style={styles.kpiCard} delay={250 + i * 50} />
+      ))}
+
+      {/* List Items Skeleton */}
+      {[1, 2, 3].map((i) => (
+        <SkeletonItem key={i} style={styles.listItem} delay={350 + i * 80} />
       ))}
     </View>
   );
@@ -57,42 +97,61 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   skeletonBase: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
+    overflow: 'hidden',
+  },
+  shimmer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 100,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    transform: [{ skewX: '-20deg' }],
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
     marginTop: 12,
   },
   title: {
     width: 140,
-    height: 32,
+    height: 28,
     marginBottom: 8,
     borderRadius: 8,
   },
   subtitle: {
     width: 180,
-    height: 16,
+    height: 14,
     borderRadius: 4,
   },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
+  statCard: {
+    flex: 1,
+    height: 90,
+    borderRadius: 16,
+  },
+  kpiCard: {
+    width: '100%',
+    height: 140,
     borderRadius: 20,
-  },
-  searchBar: {
-    width: '100%',
-    height: 48,
-    borderRadius: 14,
-    marginBottom: 24,
-  },
-  card: {
-    width: '100%',
-    height: 120,
-    borderRadius: 24,
     marginBottom: 14,
+  },
+  listItem: {
+    width: '100%',
+    height: 72,
+    borderRadius: 16,
+    marginBottom: 10,
   },
 });

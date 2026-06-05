@@ -19,7 +19,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
-import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -201,10 +200,10 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
   const { user, signOut, membership } = useAuth();
   const { weather } = useWeather();
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
 
   // ── State ──
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [propertyName, setPropertyName] = useState('');
@@ -241,11 +240,19 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     return { total, lowStock, outStock };
   }, [stockItems]);
 
+  const filteredTickets = useMemo(() => {
+    let result = [...tickets];
+    if (scopeFilter === 'my_tasks') {
+      result = result.filter(t => t.assigned_to === user?.id);
+    }
+    return result;
+  }, [tickets, scopeFilter, user?.id]);
+
   const ticketStats = useMemo(() => {
-    const open   = tickets.filter(t => ['open', 'in_progress', 'assigned', 'client_raised'].includes(t.status)).length;
-    const mine   = tickets.filter(t => t.assigned_to === user?.id).length;
-    return { total: tickets.length, open, mine };
-  }, [tickets, user?.id]);
+    const open   = filteredTickets.filter(t => ['open', 'in_progress', 'assigned', 'client_raised'].includes(t.status)).length;
+    const mine   = filteredTickets.filter(t => t.assigned_to === user?.id).length;
+    return { total: filteredTickets.length, open, mine };
+  }, [filteredTickets, user?.id]);
 
   // ── Fetch ──
   const fetchData = useCallback(async () => {
@@ -574,9 +581,26 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
         </View>
       </Animated.View>
 
-      {tickets.length === 0
+      <View style={sSection.timeToggleRow}>
+        <TouchableOpacity
+          style={[sSection.timeToggleBtn, scopeFilter === 'property' && sSection.timeToggleBtnActive]}
+          onPress={() => setScopeFilter('property')}
+          activeOpacity={0.7}
+        >
+          <Text style={[sSection.timeToggleText, scopeFilter === 'property' && sSection.timeToggleTextActive]}>Property Level</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[sSection.timeToggleBtn, scopeFilter === 'my_tasks' && sSection.timeToggleBtnActive]}
+          onPress={() => setScopeFilter('my_tasks')}
+          activeOpacity={0.7}
+        >
+          <Text style={[sSection.timeToggleText, scopeFilter === 'my_tasks' && sSection.timeToggleTextActive]}>My Tasks</Text>
+        </TouchableOpacity>
+      </View>
+
+      {filteredTickets.length === 0
         ? <Empty icon="ticket-outline" title="No tickets" sub="No active tickets for this property." />
-        : tickets.slice(0, 30).map((t, i) => (
+        : filteredTickets.slice(0, 30).map((t, i) => (
             <TicketRow
               key={t.id}
               ticket={t}
@@ -769,6 +793,31 @@ const sSection = StyleSheet.create({
   chipLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
   fullCta: { borderRadius: 14, borderWidth: 1, borderColor: `${SSM_ACCENT}33`, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, overflow: 'hidden', marginTop: 10 },
   fullCtaText: { color: SSM_ACCENT, fontSize: 14, fontWeight: '700' },
+  timeToggleRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    padding: 4,
+    width: '100%',
+    marginBottom: 14,
+  },
+  timeToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  timeToggleBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  timeToggleText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  timeToggleTextActive: {
+    color: '#FFF',
+  },
 });
 
 const sCl = StyleSheet.create({

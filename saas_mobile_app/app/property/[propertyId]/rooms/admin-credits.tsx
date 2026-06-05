@@ -131,8 +131,7 @@ export default function AdminCreditsScreen() {
     }
   };
 
-  const loadUsers = async () => {
-    if (usersList.length > 0) return;
+  const loadUsers = async (companyId: string) => {
     setIsUsersLoading(true);
     try {
       const res = await fetchUsersList(undefined, propertyId);
@@ -141,40 +140,46 @@ export default function AdminCreditsScreen() {
         return;
       }
 
-      // 1. Find all user_ids already assigned to ANY company in this property
-      const { data: companies } = await serverApi.query<{id: string}[]>({
+      // 1. Get all companies in this property
+      const { data: allCompanies } = await serverApi.query<{id: string}[]>({
         table: 'companies',
         action: 'select',
         select: 'id',
         filters: [{ op: 'eq', column: 'property_id', value: propertyId }]
       });
-      const companyIds = (companies || []).map((c: any) => c.id);
+      const allCompanyIds = (allCompanies || []).map((c: any) => c.id);
 
+      // 2. Get users already assigned to OTHER companies (not the selected one)
+      const otherCompanyIds = allCompanyIds.filter((id: string) => id !== companyId);
       let assignedUserIds = new Set<string>();
-      if (companyIds.length > 0) {
+      if (otherCompanyIds.length > 0) {
         const { data: members } = await serverApi.query<{user_id: string}[]>({
           table: 'company_members',
           action: 'select',
           select: 'user_id',
-          filters: [{ op: 'in', column: 'company_id', value: companyIds }]
+          filters: [{ op: 'in', column: 'company_id', value: otherCompanyIds }]
         });
         assignedUserIds = new Set((members || []).map((m: any) => m.user_id));
       }
 
-      // 2. Filter: client/tenant roles only AND not already in a company
+      // 3. Also exclude users already in the selected company
+      const { data: selectedMembers } = await serverApi.query<{user_id: string}[]>({
+        table: 'company_members',
+        action: 'select',
+        select: 'user_id',
+        filters: [{ op: 'eq', column: 'company_id', value: companyId }]
+      });
+      const selectedMemberIds = new Set((selectedMembers || []).map((m: any) => m.user_id));
+      selectedMemberIds.forEach(id => assignedUserIds.add(id));
+
+      // 4. Filter: client/tenant roles only AND not already in another company
       const CLIENT_ROLES = new Set([
-        'tenant',
-        'vendor',
-        'food_vendor',
-        'maintenance_vendor',
-        'super_tenant',
+        'tenant', 'vendor', 'food_vendor', 'maintenance_vendor', 'super_tenant',
       ]);
 
       const eligibleUsers = res.users.filter((u: any) => {
         const role = (u.propertyRole || '').toLowerCase();
-        const isClientRole = CLIENT_ROLES.has(role);
-        const isNotAssigned = !assignedUserIds.has(u.id);
-        return isClientRole && isNotAssigned;
+        return CLIENT_ROLES.has(role) && !assignedUserIds.has(u.id);
       });
 
       setUsersList(eligibleUsers);
@@ -284,8 +289,8 @@ export default function AdminCreditsScreen() {
                 <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Aligned Tenants</Text>
                 <TouchableOpacity 
                   onPress={() => { 
-                    setSelectedCompanyId(item.id); 
-                    loadUsers(); 
+                    setSelectedCompanyId(item.id);
+                    loadUsers(item.id); 
                     addMemberSheetRef.current?.present(); 
                   }}
                 >

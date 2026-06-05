@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { createClient } from '@supabase/supabase-js';
 
-const fmsSupabaseUrl = process.env.FMS_SUPABASE_URL!;
-const fmsAnonKey = process.env.FMS_SUPABASE_ANON_KEY!;
+// Uses same FMS Supabase project as mobile app (xvucakstcmtfoanmgcql)
+const fmsSupabaseUrl = process.env.FMS_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const fmsAnonKey = process.env.FMS_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 export function createAuthenticatedClient(jwt: string) {
   return createClient(fmsSupabaseUrl, fmsAnonKey, {

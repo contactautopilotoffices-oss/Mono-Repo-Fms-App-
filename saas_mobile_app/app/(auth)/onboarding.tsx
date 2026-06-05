@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { createClient } from '@/utils/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { serverApi } from '@/lib/serverApi';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { Colors, DesignTokens } from '@/constants/Colors';
 import { useOnboardingStore } from '@/store/onboardingStore';
 
@@ -178,29 +179,22 @@ export default function OnboardingScreen() {
       if (nameFromMeta) {
         setUserName(nameFromMeta.split(' ')[0]);
       } else {
-        const { data: dbUser } = await supabase
-          .from('users')
-          .select('full_name, phone')
-          .eq('id', user.id)
-          .maybeSingle() as { data: DbUser | null };
-
+        // Fetch user profile via API
+        const profileRes = await apiFetch<{ success: boolean; data: { full_name?: string; phone?: string } }>(`/api/users/${user.id}`);
+        const dbUser = profileRes.success ? profileRes.data : null;
         setUserName(dbUser?.full_name?.split(' ')[0] ?? 'there');
         if (dbUser?.phone) setPhoneNumber(dbUser.phone);
       }
 
-      // Check if already voice enrolled
-      const { data: emb } = await supabase
-        .from('user_voice_embeddings' as any)
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (emb) setVoiceEnrolled(true);
+      // Check if already voice enrolled via API
+      const voiceRes = await apiFetch<{ success: boolean; enrolled: boolean }>('/api/users/me/voice-enrollment');
+      if (voiceRes.success && voiceRes.enrolled) setVoiceEnrolled(true);
 
       setLoading(false);
     };
 
     init();
-  }, [user, supabase]);
+  }, [user]);
 
   // ─── Fetch properties ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -213,13 +207,9 @@ export default function OnboardingScreen() {
         // Resolve org ID: env var first, then query DB fallback
         let orgId = AUTOPILOT_ORG_ID;
         if (!orgId) {
-          const { data: org } = await supabase
-            .from('organizations')
-            .select('id')
-            .or(`code.eq.autopilot,name.ilike.%autopilot%`)
-            .limit(1)
-            .maybeSingle() as { data: OrgRow | null };
-          orgId = org?.id;
+          // Fetch autopilot org via API
+          const orgRes = await apiFetch<{ success: boolean; data: { id: string } | null }>('/api/organizations/autopilot');
+          orgId = orgRes.success ? orgRes.data?.id : undefined;
         }
         setResolvedOrgId(orgId ?? null);
 
@@ -229,14 +219,10 @@ export default function OnboardingScreen() {
           return;
         }
 
-        const { data, error: err } = await supabase
-          .from('properties')
-          .select('id, name, code, organization_id')
-          .eq('organization_id', orgId)
-          .order('name');
-
-        if (err) throw err;
-        setProperties((data as Property[]) ?? []);
+        // Fetch properties via API
+        const propsRes = await apiFetch<{ success: boolean; data: Property[] }>(`/api/organizations/${orgId}/properties`);
+        if (!propsRes.success) throw new Error('Failed to load properties');
+        setProperties(propsRes.data ?? []);
       } catch (e: any) {
         console.error('Properties fetch error:', e);
         setError(e.message || 'Failed to load properties.');
@@ -246,7 +232,7 @@ export default function OnboardingScreen() {
     };
 
     fetchProps();
-  }, [step, supabase]);
+  }, [step]);
 
   // ─── Animate step transitions ───────────────────────────────────────────────
   const animateToStep = (nextStep: number) => {
@@ -341,25 +327,17 @@ export default function OnboardingScreen() {
         if (!orgId) {
           throw new Error('No organization configured. Please contact support.');
         }
-        const { data: rp } = await supabase
-          .from('properties')
-          .select('id')
-          .eq('organization_id', orgId)
-          .limit(1)
-          .maybeSingle() as { data: { id: string } | null };
+        // Fetch first property via API
+        const propsRes = await apiFetch<{ success: boolean; data: Array<{ id: string }> }>(`/api/organizations/${orgId}/properties`);
+        const rp = propsRes.success && propsRes.data?.length ? propsRes.data[0] : null;
         if (rp) finalPropId = rp.id;
         else throw new Error('No properties found for this organization. Please contact support.');
       }
 
       let targetOrgId = resolvedOrgId ?? AUTOPILOT_ORG_ID ?? '';
       if (!targetOrgId) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('id')
-          .or(`code.eq.autopilot,name.ilike.%autopilot%`)
-          .limit(1)
-          .maybeSingle() as { data: OrgRow | null };
-        if (org) targetOrgId = org.id;
+        const orgRes = await apiFetch<{ success: boolean; data: { id: string } | null }>('/api/organizations/autopilot');
+        if (orgRes.success && orgRes.data) targetOrgId = orgRes.data.id;
       }
 
       // Validate UUIDs before insert
@@ -374,19 +352,20 @@ export default function OnboardingScreen() {
         ? 'soft_service_manager'
         : selectedRole;
 
-      // Insert property membership
-      const { error: memErr } = await (supabase
-        .from('property_memberships')
-        .insert({
+      // Insert property membership via API
+      const memRes = await apiFetch<{ success: boolean; error?: string }>('/api/memberships/property', {
+        method: 'POST',
+        body: JSON.stringify({
           user_id: authUser.id,
           organization_id: targetOrgId,
           property_id: finalPropId,
           role: finalRole,
           is_active: true,
-        } as any) as any);
+        }),
+      });
 
-      if (memErr && !memErr.message.toLowerCase().includes('duplicate')) {
-        throw memErr;
+      if (memRes.error && !memRes.error.toLowerCase().includes('duplicate')) {
+        throw new Error(memRes.error);
       }
 
       // Vendor record
@@ -441,13 +420,12 @@ export default function OnboardingScreen() {
         }
       }
 
-      // Upsert user profile (upsert = safety net in case the row doesn't exist yet,
+      // Upsert user profile via API (upsert = safety net in case the row doesn't exist yet,
       // e.g. signup happened through a path that didn't create the users row)
       const cleanPhone = phoneNumber.trim();
       const profileUpsert: Record<string, string> = {};
       if (cleanPhone.length >= 10) profileUpsert.phone = cleanPhone;
       profileUpsert.full_name = authUser.user_metadata?.full_name ?? userName;
-      // TODO: onboarding_completed does not exist on the users table
 
       const userRes = await serverApi.query({
         table: 'users',

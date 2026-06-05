@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  RefreshControl, 
+import React, { useState, useCallback, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
   ActivityIndicator,
   Dimensions,
   Platform
@@ -13,16 +13,12 @@ import {
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { serverApi } from '@/lib/serverApi';
-import { createClient } from '@/utils/supabase/client';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { useTheme } from '@/context';
 import TicketCard from '@/components/shared/TicketCard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
-
-
-const supabase = createClient();
 
 const { width: FLOWMAP_WIDTH, height: FLOWMAP_HEIGHT } = Dimensions.get('window');
 
@@ -84,27 +80,18 @@ export default function LiveFlowMap() {
   const fetchFlowData = async () => {
     if (!propertyId) return { tickets: [] as Ticket[], propertyName: 'Property', validationEnabled: false };
 
-    // Fetch Property Name
-    let propertyName = 'Property';
-    const propRes = await serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], single: true });
-    if (propRes.data) propertyName = (propRes.data as { name: string }).name;
+    try {
+      const response = await apiFetch<{
+        success: boolean;
+        data: { tickets: Ticket[]; propertyName: string; validationEnabled: boolean };
+      }>(`/api/properties/${propertyId}/flow-map`);
 
-    // Fetch Validation Feature Status
-    const featRes = await serverApi.query({ table: 'property_features', action: 'select', select: 'is_enabled', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'feature_key', value: 'ticket_validation' }], maybeSingle: true });
-    const validationEnabled = (featRes.data as { is_enabled: boolean } | null)?.is_enabled === true;
-
-    const { data, error } = await (supabase
-      .from('tickets')
-      .select(`
-        *,
-        assignee:users!assigned_to(id, full_name, user_photo_url),
-        creator:users!raised_by(id, full_name),
-        ticket_escalation_logs(from_level, to_level, escalated_at, from_employee:users!from_employee_id(full_name, user_photo_url), to_employee:users!to_employee_id(full_name, user_photo_url))
-      `)
-      .eq('property_id', propertyId)
-      .order('created_at', { ascending: false }) as any);
-
-    return { tickets: (!error ? data || [] : []) as Ticket[], propertyName, validationEnabled };
+      if (!response.success) throw new Error(response.error);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching flow data:', error);
+      return { tickets: [] as Ticket[], propertyName: 'Property', validationEnabled: false };
+    }
   };
 
   const { data, isLoading, isFetching, refetch } = useServerQuery<{ tickets: Ticket[]; propertyName: string; validationEnabled: boolean }>(
@@ -154,9 +141,15 @@ export default function LiveFlowMap() {
         updatePayload.status = 'resolved';
     }
 
-    const { error } = await ((supabase as any).from('tickets').update(updatePayload).eq('id', ticketId));
-    if (!error) {
-        refetch();
+    try {
+      const response = await apiFetch(`/api/tickets/${ticketId}/flow-update`, {
+        method: 'PATCH',
+        body: JSON.stringify(updatePayload),
+      });
+      if (!response.success) throw new Error(response.error);
+      refetch();
+    } catch (error) {
+      console.error('Error updating ticket status:', error);
     }
   };
 
