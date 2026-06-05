@@ -71,7 +71,7 @@ const FONT_BODY = Platform.select({
   default: 'Urbanist',
 });
 
-type TabType = 'rooms' | 'myBookings';
+type TabType = 'rooms' | 'myBookings' | 'allBookings';
 
 export default function TenantRoomsPage() {
   const router = useRouter();
@@ -91,31 +91,63 @@ export default function TenantRoomsPage() {
   const [bookingEndTime, setBookingEndTime] = useState('');
   const [bookingAttendees, setBookingAttendees] = useState('');
 
-  const fetchData = useCallback(async () => {
-    if (!propertyId) return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[] };
+  // Fetch rooms
+  const fetchRooms = useCallback(async () => {
+    if (!propertyId) return { rooms: [] as MeetingRoom[] };
     try {
-      const [roomsRes, bookingsRes] = await Promise.all([
-        getMeetingRooms(propertyId as string),
-        getMeetingRoomBookings(propertyId as string, undefined, user?.id),
-      ]);
-      return {
-        rooms: roomsRes.rooms || [],
-        bookings: bookingsRes.bookings || [],
-      };
+      const roomsRes = await getMeetingRooms(propertyId as string);
+      return { rooms: roomsRes.rooms || [] };
     } catch (err) {
       console.error('[TenantRooms] Fetch error:', err);
-      return { rooms: [] as MeetingRoom[], bookings: [] as MeetingRoomBooking[] };
+      return { rooms: [] as MeetingRoom[] };
+    }
+  }, [propertyId]);
+
+  // Fetch user's bookings
+  const fetchMyBookings = useCallback(async () => {
+    if (!propertyId || !user?.id) return { bookings: [] as MeetingRoomBooking[] };
+    try {
+      const bookingsRes = await getMeetingRoomBookings(propertyId as string, undefined, user.id);
+      return { bookings: bookingsRes.bookings || [] };
+    } catch (err) {
+      console.error('[TenantRooms] Fetch error:', err);
+      return { bookings: [] as MeetingRoomBooking[] };
     }
   }, [propertyId, user?.id]);
 
-  const { data, isLoading, isFetching, refetch } = useServerQuery<{ rooms: MeetingRoom[]; bookings: MeetingRoomBooking[] }>(
+  // Fetch all bookings
+  const fetchAllBookings = useCallback(async () => {
+    if (!propertyId) return { allBookings: [] as MeetingRoomBooking[] };
+    try {
+      const bookingsRes = await getMeetingRoomBookings(propertyId as string);
+      return { allBookings: bookingsRes.bookings || [] };
+    } catch (err) {
+      console.error('[TenantRooms] Fetch error:', err);
+      return { allBookings: [] as MeetingRoomBooking[] };
+    }
+  }, [propertyId]);
+
+  const { data: roomsData, isLoading: isLoadingRooms, refetch: refetchRooms } = useServerQuery<{ rooms: MeetingRoom[] }>(
     queryKeys.property.tenantRooms(propertyId),
-    fetchData,
+    fetchRooms,
     { staleTime: 1000 * 60 * 5 }
   );
 
-  const rooms = data?.rooms ?? [];
-  const bookings = data?.bookings ?? [];
+  const { data: myBookingsData, isLoading: isLoadingMyBookings, refetch: refetchMyBookings } = useServerQuery<{ bookings: MeetingRoomBooking[] }>(
+    ['tenant-rooms-my-bookings', propertyId],
+    fetchMyBookings,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const { data: allBookingsData, isLoading: isLoadingAllBookings, refetch: refetchAllBookings } = useServerQuery<{ allBookings: MeetingRoomBooking[] }>(
+    ['tenant-rooms-all-bookings', propertyId],
+    fetchAllBookings,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  const rooms = roomsData?.rooms ?? [];
+  const myBookings = myBookingsData?.bookings ?? [];
+  const allBookings = allBookingsData?.allBookings ?? [];
 
   const handleBookRoom = async () => {
     if (!selectedRoom || !bookingTitle || !bookingDate || !bookingStartTime || !bookingEndTime) {
@@ -138,7 +170,7 @@ export default function TenantRoomsPage() {
         Alert.alert('Success', 'Room booked successfully!');
         setShowBookingModal(false);
         resetBookingForm();
-        refetch();
+        refetchMyBookings();
       } else {
         Alert.alert('Error', res.error || 'Could not book room. Please try again.');
       }
@@ -154,7 +186,7 @@ export default function TenantRoomsPage() {
         text: 'Yes',
         onPress: async () => {
           await cancelMeetingRoomBookingApi(bookingId);
-          refetch();
+          refetchMyBookings();
         },
       },
     ]);
@@ -323,17 +355,23 @@ export default function TenantRoomsPage() {
         >
           <Text style={[styles.tabText, activeTab === 'myBookings' && styles.tabTextActive]}>My Bookings</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'allBookings' && styles.tabActive]}
+          onPress={() => setActiveTab('allBookings')}
+        >
+          <Text style={[styles.tabText, activeTab === 'allBookings' && styles.tabTextActive]}>All History</Text>
+        </TouchableOpacity>
       </View>
 
       {activeTab === 'rooms' ? (
         <View style={{ flex: 1, paddingTop: 8 }}>
           <RoomBookingTab propertyId={propertyId as string} userId={user?.id || ''} />
         </View>
-      ) : (
+      ) : activeTab === 'myBookings' ? (
         <FlatList
-          data={bookings}
+          data={myBookings}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor="rgba(255,255,255,0.6)" />}
+          refreshControl={<RefreshControl refreshing={isLoadingMyBookings} onRefresh={refetchMyBookings} tintColor="rgba(255,255,255,0.6)" />}
           contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
           showsVerticalScrollIndicator={false}
           renderItem={renderBookingCard}
@@ -342,6 +380,22 @@ export default function TenantRoomsPage() {
               <Ionicons name="calendar" size={48} color="rgba(255,255,255,0.2)" />
               <Text style={styles.emptyTitle}>No bookings yet</Text>
               <Text style={styles.emptySubtitle}>Book a room from the All Rooms tab</Text>
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={allBookings}
+          keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={isLoadingAllBookings} onRefresh={refetchAllBookings} tintColor="rgba(255,255,255,0.6)" />}
+          contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
+          showsVerticalScrollIndicator={false}
+          renderItem={renderBookingCard}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar" size={48} color="rgba(255,255,255,0.2)" />
+              <Text style={styles.emptyTitle}>No bookings found</Text>
+              <Text style={styles.emptySubtitle}>All booking history will appear here</Text>
             </View>
           }
         />
