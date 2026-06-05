@@ -143,7 +143,6 @@ export async function POST(request: NextRequest) {
         mobile: body.mobile ?? null,
         coming_from: body.coming_from ?? null,
         whom_to_meet: body.whom_to_meet,
-        whom_to_meet_uid: body.whom_to_meet_uid ?? null,
         purpose: body.purpose ?? null,
         photo_url: body.photo_url ?? null,
         checkin_time: new Date().toISOString(),
