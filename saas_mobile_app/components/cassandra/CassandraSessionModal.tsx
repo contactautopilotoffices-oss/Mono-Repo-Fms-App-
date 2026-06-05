@@ -378,6 +378,15 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
   useEffect(() => {
     if (visible) {
+      // Warm up Render instance the moment the modal opens.
+      // Render free tier spins down after 15 min of inactivity — this fire-and-forget
+      // /health ping ensures the container is awake BEFORE the user sends the first
+      // message, eliminating the 30-60 s cold-start delay on "first Hi".
+      fetch(`${process.env.EXPO_PUBLIC_CASSANDRA_API_URL || ''}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => { /* silent — warmup best-effort */ });
+
       // FIX: Intro message when Cassandra opens (once per modal session)
       if (!introShownRef.current && messageHistory.length === 0 && view === 'home') {
         introShownRef.current = true;
