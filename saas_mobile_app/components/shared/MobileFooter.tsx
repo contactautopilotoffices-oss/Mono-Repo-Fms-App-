@@ -34,7 +34,15 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
 
   const orgId = membership?.org_id ?? '211e1330-ad83-446d-941f-dcea48396798';
 
+  // Determine user role from membership
+  const userRole = membership?.properties?.[0]?.role || membership?.org_role || 'tenant';
+  const isTenant = userRole === 'tenant';
+  const isSuperTenant = userRole === 'super_tenant' || userRole === 'org_super_admin';
+
   const activeTab = propActiveTab || 'dashboard';
+
+  // Tenant/Super Tenant tickets route
+  const tenantTicketsRoute = '/tenant/requests';
 
   const navTo = (route: string) => {
     if (propertyId) {
@@ -77,7 +85,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
 
         <TouchableOpacity
           style={styles.navItem}
-          onPress={() => router.push(`/property/${propertyId}/tickets` as any)}
+          onPress={() => router.push(`/property/${propertyId}${tenantTicketsRoute}` as any)}
         >
           <Ionicons
             name={activeTab === 'tickets' ? 'ticket' : 'ticket-outline'}
