@@ -68,11 +68,10 @@ export default function ProfileScreen() {
   const fetchProfile = useCallback(async () => {
     if (!user) return null;
     try {
-      const response = await apiFetch<{ success: boolean; data: UserProfile }>(
-        `/api/users/${user.id}`
-      );
-      if (!response.success) throw new Error(response.error);
-      return response.data || null;
+      const response = await apiFetch<any>(`/api/users/${user.id}`);
+      if (response.success && response.data) return response.data;
+      if (response.id || response.full_name) return response;
+      return null;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;

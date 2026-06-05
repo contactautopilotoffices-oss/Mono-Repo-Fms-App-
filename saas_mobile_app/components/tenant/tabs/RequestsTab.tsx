@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, RefreshControl, TouchableOpacity, Platform } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { TenantTicketCard } from '../TenantTicketCard';
+import TicketCard from '@/components/shared/TicketCard';
 
 interface Ticket {
   id: string;
@@ -92,7 +92,18 @@ export function RequestsTab({ tickets, onRefresh, refreshing, onTicketPress, onC
         keyExtractor={(item) => item.id}
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeInDown.delay(index * 60).springify()} style={styles.cardWrapper}>
-            <TenantTicketCard ticket={item} onPress={() => onTicketPress?.(item)} />
+            <TicketCard
+              id={item.id}
+              title={item.title || ''}
+              priority={item.priority as any}
+              status={item.status as any}
+              ticketNumber={item.ticket_number || ''}
+              createdAt={item.created_at}
+              assignedTo={item.assignee?.full_name}
+              assigneePhotoUrl={item.assignee?.user_photo_url}
+              onClick={() => onTicketPress?.(item)}
+              glass
+            />
           </Animated.View>
         )}
         contentContainerStyle={styles.listContent}

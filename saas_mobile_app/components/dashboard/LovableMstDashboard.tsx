@@ -473,22 +473,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     { staleTime: 1000 * 60 * 5 }
   );
 
-  // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(!data);
 
-  // Minimum skeleton duration effect
-  useEffect(() => {
-    // hasValidDashboardData is true when data is loaded and valid
-    const isValid = !!data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as any)?.tickets);
-    if (isValid) {
-      if (showSkeleton) {
-        const timer = setTimeout(() => setShowSkeleton(false), 600);
-        return () => clearTimeout(timer);
-      }
-    } else if (!isLoading) {
-      setShowSkeleton(true);
-    }
-  }, [data, isLoading]);
 
   const hasValidDashboardData =
     !!data &&
@@ -886,7 +871,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (showSkeleton || isLoading || (isFetching && !hasValidDashboardData)) {
+  if (!hasValidDashboardData && isLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
@@ -902,15 +887,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       <DashboardBackground />
       {/* WeatherBackground removed — DashboardBackground handles theming */}
 
-      <ScrollView
-        style={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
-        }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
-      >
-        <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
+      <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <FloatingMenu
             title="Maintenance Portal"
             items={[
@@ -985,6 +962,14 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           </View>
         </Animated.View>
 
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+        }
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
+      >
         {/* Tab content */}
         <View style={styles.tabContent}>
           {activeTab === 'dashboard' && renderMyDashboard()}

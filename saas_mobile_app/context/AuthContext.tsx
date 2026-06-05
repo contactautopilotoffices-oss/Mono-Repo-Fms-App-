@@ -438,7 +438,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await clearMembershipCache(user.id);
     }
     setMembership(null);
-    queryClient.clear(); // Clear React Query cache on sign-out
+    useDashboardStore.getState().clearCache();
+    queryClient.removeQueries(); // Completely purge cache rather than just clear()
+    queryClient.clear();
     await supabase.auth.signOut();
   }, [supabase, user?.id]);
 

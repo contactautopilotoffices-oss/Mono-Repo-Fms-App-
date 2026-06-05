@@ -9,7 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { TenantGlassHeader } from '../TenantGlassHeader';
 import { TenantStatsCard } from '../TenantStatsCard';
-import { TenantTicketCard } from '../TenantTicketCard';
+import TicketCard from '@/components/shared/TicketCard';
 import { useAuth } from '@/hooks/useAuth';
 import { WeatherData } from '@/hooks/useWeather';
 import Svg, { Path, Circle, Rect, G } from 'react-native-svg';
@@ -273,9 +273,17 @@ export function OverviewTab({
               entering={FadeInDown.delay(i * 100 + 100).springify()}
               style={styles.ticketWrapper}
             >
-              <TenantTicketCard
-                ticket={ticket}
-                onPress={() => onTicketPress?.(ticket)}
+              <TicketCard
+                id={ticket.id}
+                title={ticket.title || ''}
+                priority={ticket.priority as any}
+                status={ticket.status as any}
+                ticketNumber={ticket.ticket_number || ''}
+                createdAt={ticket.created_at}
+                assignedTo={ticket.assignee?.full_name}
+                assigneePhotoUrl={ticket.assignee?.user_photo_url}
+                onClick={() => onTicketPress?.(ticket)}
+                glass
               />
             </Animated.View>
           ))

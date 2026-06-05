@@ -90,19 +90,6 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
   const { tickets, loading: ticketsLoading, refetch: refetchTickets } = useTenantTickets(selectedPropertyId, user?.id);
   const { properties: superTenantProperties } = useSuperTenantProperties(isSuperTenant ? user?.id : undefined);
 
-  // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(ticketsLoading);
-
-  useEffect(() => {
-    if (!ticketsLoading) {
-      if (showSkeleton) {
-        const timer = setTimeout(() => setShowSkeleton(false), 600);
-        return () => clearTimeout(timer);
-      }
-    } else {
-      setShowSkeleton(true);
-    }
-  }, [ticketsLoading]);
 
   useEffect(() => {
     if (!selectedPropertyId) return;
@@ -144,7 +131,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
   };
 
   // Show skeleton on first load
-  if (showSkeleton) {
+  if (ticketsLoading) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -171,16 +158,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
       <DashboardBackground />
       {weather && <WeatherBackground condition={weather.condition} />}
 
-      <ScrollView
-        style={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={ticketsLoading} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
-        }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
-      >
-        {/* Header — EXACT match to screenshot */}
-        <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <View style={styles.headerLeft}>
             <TouchableOpacity style={styles.iconPill} onPress={() => setShowDrawer(true)} activeOpacity={0.8}>
               <Ionicons name="menu" size={22} color="#FFFFFF" />
@@ -215,6 +193,14 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
           </View>
         </Animated.View>
 
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={ticketsLoading} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+        }
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
+      >
         {/* Super Tenant Property Picker */}
         {isSuperTenant && superTenantProperties && superTenantProperties.length > 1 && (
           <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.propertyPicker}>

@@ -884,7 +884,7 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior="padding"
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
           {view === 'history' ? (

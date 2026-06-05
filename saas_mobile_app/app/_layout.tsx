@@ -168,7 +168,7 @@ function AppContent({ colorScheme }: { colorScheme: any }) {
   return (
     <>
       <NotificationBanner />
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </>
   );

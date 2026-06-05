@@ -35,21 +35,11 @@ export function ProfileTab({ onSignOut }: ProfileTabProps) {
     if (!user?.id) return null;
     try {
       // Use server API to fetch user profile
-      const response = await apiFetch<{
-        success: boolean;
-        data: {
-          id: string;
-          full_name: string;
-          email: string;
-          phone?: string;
-          user_photo_url?: string;
-          role?: string;
-          designation?: string;
-        };
-      }>(`/api/users/${user.id}`);
+      const response = await apiFetch<any>(`/api/users/${user.id}`);
 
-      if (!response.success || !response.data) return null;
-      return response.data;
+      if (response.success && response.data) return response.data;
+      if (response.id || response.full_name) return response;
+      return null;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;

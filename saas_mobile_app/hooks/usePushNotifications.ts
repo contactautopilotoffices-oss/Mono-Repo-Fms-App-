@@ -156,9 +156,6 @@ async function storePushToken(
       values: {
         user_id: userId,
         token,
-        provider: 'fcm',
-        platform: Platform.OS,
-        app_type: 'mobile',
         device_info: `${Platform.OS} ${Device.modelName || 'unknown'}`,
         browser: `fcm-${Platform.OS}`,
         is_active: true,

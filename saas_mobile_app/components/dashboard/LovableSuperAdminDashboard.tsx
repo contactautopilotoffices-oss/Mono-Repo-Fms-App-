@@ -295,18 +295,7 @@ export default function LovableSuperAdminDashboard() {
             onShowTileDetail={(detail) => setShowTileDetail(detail)}
           />
         ) : screen === 'properties' ? (
-          <Animated.ScrollView
-            style={styles.mainScroll}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={onRefresh}
-                tintColor="rgba(255,255,255,0.6)"
-              />
-            }
-            contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
-          >
+          <>
             {/* Header */}
             <View style={[styles.mainHeader, { paddingTop: insets.top + 12 }]}>
               <View>
@@ -332,6 +321,18 @@ export default function LovableSuperAdminDashboard() {
               </View>
             </View>
 
+          <Animated.ScrollView
+            style={styles.mainScroll}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={onRefresh}
+                tintColor="rgba(255,255,255,0.6)"
+              />
+            }
+            contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+          >
             {/* Search */}
             <View style={styles.searchBar}>
               <Ionicons name="search" size={18} color="rgba(255,255,255,0.45)" />
@@ -379,6 +380,7 @@ export default function LovableSuperAdminDashboard() {
               )}
             </View>
           </Animated.ScrollView>
+          </>
         ) : screen === 'console' ? (
           <View style={{ flex: 1 }}>
             <View style={[styles.consoleTabs, { marginTop: insets.top + 12 }]}>

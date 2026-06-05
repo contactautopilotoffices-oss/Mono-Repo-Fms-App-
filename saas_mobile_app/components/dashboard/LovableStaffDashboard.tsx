@@ -476,20 +476,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const [ppmOverdue, setPpmOverdue] = useState(staffCache?.ppmOverdue ?? 0);
   const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
 
-  // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(!hasStaffCache);
 
-  // Minimum skeleton duration effect
-  useEffect(() => {
-    if (hasStaffCache) {
-      if (showSkeleton) {
-        const timer = setTimeout(() => setShowSkeleton(false), 600);
-        return () => clearTimeout(timer);
-      }
-    } else {
-      setShowSkeleton(true);
-    }
-  }, [hasStaffCache]);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -1103,7 +1090,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (showSkeleton || isLoading) {
+  if (!hasStaffCache && isLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
@@ -1119,15 +1106,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       <DashboardBackground />
       {/* WeatherBackground removed — DashboardBackground handles theming */}
 
-      <ScrollView
-        style={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
-        }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
-      >
-        <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
+      <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
             <Ionicons name="menu" size={28} color="#FFFFFF" />
           </TouchableOpacity>
@@ -1187,6 +1166,14 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
           </View>
         </Animated.View>
 
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+        }
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
+      >
         {/* Tab content */}
         <View style={styles.tabContent}>
           {activeTab === 'dashboard' && renderMyDashboard()}
