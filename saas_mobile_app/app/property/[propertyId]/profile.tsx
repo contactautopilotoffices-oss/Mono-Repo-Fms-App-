@@ -21,6 +21,8 @@ import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors } from '@/constants/Colors';
 import { apiFetch } from '@/utils/api/mobileApi';
+import { serverApi } from '@/lib/serverApi';
+import { createClient } from '@/lib/supabase';
 import { readFileAsArrayBuffer, compressImage } from '@/utils/mediaUtils';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -68,10 +70,18 @@ export default function ProfileScreen() {
   const fetchProfile = useCallback(async () => {
     if (!user) return null;
     try {
-      const response = await apiFetch<any>(`/api/users/${user.id}`);
-      if (response.success && response.data) return response.data;
-      if (response.id || response.full_name) return response;
-      return null;
+      const response = await serverApi.query<UserProfile>({
+        table: 'users',
+        action: 'select',
+        filters: [{ op: 'eq', column: 'id', value: user.id }],
+        single: true
+      });
+
+      if (response.error) {
+        console.error('Error fetching profile:', response.error.message);
+        return null;
+      }
+      return response.data;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;
@@ -104,14 +114,16 @@ export default function ProfileScreen() {
     }
     setIsSaving(true);
     try {
-      const response = await apiFetch(`/api/users/${profile.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
+      const response = await serverApi.query({
+        table: 'users',
+        action: 'update',
+        filters: [{ op: 'eq', column: 'id', value: profile.id }],
+        values: {
           full_name: editName.trim(),
           phone: editPhone.trim() || null,
-        }),
+        }
       });
-      if (!response.success) throw new Error(response.error);
+      if (response.error) throw new Error(response.error.message);
 
       Alert.alert('Success', 'Profile updated successfully');
       refetch();
@@ -165,20 +177,36 @@ export default function ProfileScreen() {
       }
 
       const compressedUri = await compressImage(uri);
-      const formData = new FormData();
-      formData.append('file', {
-        uri: compressedUri,
-        name: 'photo.jpg',
-        type: 'image/jpeg',
-      } as any);
+      const arrayBuffer = await readFileAsArrayBuffer(compressedUri);
+      
+      const ext = uri.split('.').pop() || 'jpg';
+      const filename = `${profile.id}/${Date.now()}.${ext}`;
+      
+      const supabase = createClient();
+      
+      const { error: uploadError } = await supabase.storage
+        .from('user-photos')
+        .upload(filename, arrayBuffer, {
+          contentType: `image/${ext}`,
+          upsert: true,
+        });
 
-      // Upload via server API
-      const response = await apiFetch(`/api/users/${profile.id}/photo`, {
-        method: 'POST',
-        body: formData as any,
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('user-photos').getPublicUrl(filename);
+      const publicUrl = urlData.publicUrl;
+
+      // Update profile
+      const response = await serverApi.query({
+        table: 'users',
+        action: 'update',
+        filters: [{ op: 'eq', column: 'id', value: profile.id }],
+        values: {
+          user_photo_url: publicUrl,
+        }
       });
 
-      if (!response.success) throw new Error(response.error);
+      if (response.error) throw new Error(response.error.message);
 
       refetch();
     } catch (error) {
