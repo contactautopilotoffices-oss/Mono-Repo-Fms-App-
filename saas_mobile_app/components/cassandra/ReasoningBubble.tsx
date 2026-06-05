@@ -254,6 +254,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: CassSpacing.md,
     paddingBottom: CassSpacing.md,
     paddingTop: CassSpacing.xs,
+    // Hard cap so an expanded bubble never stretches to fill the screen
+    maxHeight: 220,
+    overflow: 'hidden',
   },
   stepRow: {
     flexDirection: 'row',
@@ -275,11 +278,10 @@ const styles = StyleSheet.create({
   },
   timelineLine: {
     width: 1,
-    flex: 1,
+    height: 16,       // fixed — never flex-stretches to fill the screen
     backgroundColor: Colors.violet,
     opacity: 0.2,
     marginTop: 2,
-    minHeight: 16,
   },
   stepText: {
     ...Typography.bodySmall,

@@ -870,8 +870,8 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={80}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           {view === 'history' ? (
             /* ─── HISTORY VIEW: previous sessions ─── */
@@ -971,7 +971,9 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
                 <View style={styles.bubbleRowLeft}>
                   <ReasoningBubble
                     steps={reasoningSteps}
-                    isActive={isReasoningActive}
+                    // Stop button only while thinking AND before first answer token
+                    // (isTyping = true means we already got tokens → no longer "thinking")
+                    isActive={isReasoningActive && !isTyping}
                     onAbort={() => {
                       abortRef.current?.abort();
                       setIsReasoningActive(false);
@@ -990,8 +992,9 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
                   </View>
                 </View>
               )}
-              {/* Suggestions strip at bottom of chat */}
-              {!isTyping && (
+              {/* Suggestions strip — hidden while Cassandra is thinking or typing
+                  to avoid extra vertical padding that gaps the input bar */}
+              {!isTyping && !isReasoningActive && (
                 <View style={styles.suggestionsStrip}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsStripContent}>
                     {WHAT_I_CAN_DO.map((item) => (
@@ -1199,7 +1202,7 @@ const styles = StyleSheet.create({
   chatScrollContent: {
     paddingHorizontal: CassSpacing.lg,
     paddingTop: SPACING.lg,
-    paddingBottom: SPACING.md,
+    paddingBottom: CassSpacing.sm,  // minimal — input bar sits right below scrollview
     flexGrow: 1,
     justifyContent: 'flex-end',
   },
