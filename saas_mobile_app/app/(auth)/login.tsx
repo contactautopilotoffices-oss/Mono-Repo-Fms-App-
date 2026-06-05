@@ -191,10 +191,13 @@ export default function LoginScreen() {
       return;
     }
 
-    // Fetch user profile via API
-    const profileRes = await apiFetch<{ success: boolean; data: { id: string } | null }>(`/api/users/${authUserId}`);
-    if (!profileRes.success || !profileRes.data) {
-      throw new Error('User profile not found.');
+    // Fetch user profile via API - if not found, continue without it (new users)
+    let profileRes;
+    try {
+      profileRes = await apiFetch<{ success: boolean; data: { id: string } | null }>(`/api/users/${authUserId}`);
+    } catch {
+      // User profile might not exist yet for new users - continue anyway
+      profileRes = { success: true, data: null };
     }
 
     // Fetch organization memberships via API
