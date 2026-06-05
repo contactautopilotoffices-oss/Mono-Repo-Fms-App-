@@ -184,14 +184,32 @@ export const vmsService = {
   // ── Search Hosts (property members) ──────────────────────────────────────────
   async searchHosts(propertyId: string, query: string): Promise<ApiResponse<HostResult[]>> {
     try {
-      const result = await serverApi.get<{ hosts: HostResult[] }>('/api/visitors/hosts', {
-        propertyId,
-        query,
+      const res = await serverApi.query<any[]>({
+        table: 'property_memberships',
+        action: 'select',
+        select: 'user_id, role, users:user_id(id, full_name, email)',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'is_active', value: true }
+        ],
+        limit: 50,
       });
 
-      if (result.error) throw new Error(result.error.message);
+      if (res.error) throw new Error(res.error.message);
 
-      return { success: true, data: result.data?.hosts ?? [], status: 200 };
+      const lq = query.toLowerCase();
+      const hosts = (res.data ?? [])
+        .map((m: any) => ({
+          id: m.user_id,
+          name: m.users?.full_name || 'Unknown',
+          full_name: m.users?.full_name || 'Unknown',
+          email: m.users?.email || '',
+          role: m.role || '',
+        }))
+        .filter((h: any) => h.id && (query.length < 2 || h.name.toLowerCase().includes(lq) || h.email.toLowerCase().includes(lq)))
+        .slice(0, 20);
+
+      return { success: true, data: hosts, status: 200 };
     } catch (err: any) {
       return { success: false, data: [], error: err.message, status: 500 };
     }
@@ -232,5 +250,22 @@ export const vmsService = {
     } catch (err: any) {
       return { success: false, data: '', error: err.message, status: 500 };
     }
+  },
+
+  // ── getVisitorLogs (alias for backward compatibility) ────────────────────────
+  async getVisitorLogs(
+    propertyId: string,
+    options?: {
+      dateFilter?: DateFilter;
+      customDate?: string;
+      status?: 'checked_in' | 'checked_out' | 'all';
+      search?: string;
+    }
+  ): Promise<ApiResponse<VisitorLog[]>> {
+    const result = await vmsService.fetchVisitors(propertyId, options);
+    if (result.success && result.data) {
+      return { success: true, data: result.data.visitors, status: 200 };
+    }
+    return { success: false, data: [], error: result.error ?? 'Failed to fetch visitors', status: 500 };
   },
 };
