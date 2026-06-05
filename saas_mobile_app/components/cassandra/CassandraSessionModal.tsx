@@ -712,7 +712,12 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       abortRef.current.signal,
       chatOptions,
       (step) => {
-        // onReasoning callback — append new step
+        // onReasoning callback — append new step.
+        // Skip transient status pings ("queued", generic "thinking") — they are not
+        // real reasoning steps. Keeping them would (a) pollute the trace and (b) make
+        // a no-tool answer's collapsed label echo "Cassandra is thinking…" forever.
+        const transient = /^(cassandra is thinking|request queued|queued)/i.test(step.trim());
+        if (transient) return;
         setReasoningSteps((prev) => {
           // Avoid duplicate consecutive steps
           if (prev.length > 0 && prev[prev.length - 1] === step) {
