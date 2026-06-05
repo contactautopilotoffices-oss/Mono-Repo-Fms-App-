@@ -297,7 +297,7 @@ export const serverApi = {
 
   async rpc<T = unknown>(functionName: string, params?: Record<string, unknown>): Promise<ServerApiResponse<T>> {
     try {
-      const result = (await serverFetch('/api/rpc', { functionName, params })) as ServerApiResponse<T>;
+      const result = (await serverFetch('/api/rpc', { fn: functionName, params })) as ServerApiResponse<T>;
       return result;
     } catch (err) {
       if (err instanceof ServerApiError) {

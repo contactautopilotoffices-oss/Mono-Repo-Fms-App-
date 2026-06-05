@@ -23,9 +23,10 @@ export interface FloatingMenuProps {
   items: MenuItem[];
   footer?: { label: string; icon: string; onPress: () => void; danger?: boolean };
   title?: string;
+  buttonStyle?: object;
 }
 
-export default function FloatingMenu({ items, footer, title }: FloatingMenuProps) {
+export default function FloatingMenu({ items, footer, title, buttonStyle }: FloatingMenuProps) {
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -33,7 +34,7 @@ export default function FloatingMenu({ items, footer, title }: FloatingMenuProps
     <>
       {/* Floating hamburger button */}
       <TouchableOpacity
-        style={[styles.fab, { top: insets.top + 12 }]}
+        style={[styles.fab, buttonStyle]}
         onPress={() => setOpen(true)}
         activeOpacity={0.85}
       >
@@ -85,8 +86,6 @@ const DRAWER_W = 260;
 
 const styles = StyleSheet.create({
   fab: {
-    position: 'absolute',
-    left: 16,
     zIndex: 50,
   },
   fabInner: {

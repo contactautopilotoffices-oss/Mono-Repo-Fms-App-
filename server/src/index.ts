@@ -1,7 +1,5 @@
-import { config as dotenvConfig } from 'dotenv';
-// Load server/.env with override:true so our PORT=3001 wins over any PORT=8000
-// inherited when the parent shell sources the shared root .env.shared.local.
-dotenvConfig({ override: true });
+// Bootstrap MUST be the first import to ensure env vars are loaded before any module
+import './bootstrap.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.js';

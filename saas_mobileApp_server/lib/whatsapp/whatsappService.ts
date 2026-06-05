@@ -14,10 +14,10 @@ const WHATSAPP_ENABLED = process.env.WHATSAPP_ENABLED !== 'false';
 function formatPhone(phone: string | null | undefined): string | null {
   if (!phone) return null;
   const digits = phone.replace(/\D/g, '');
-  if (digits.length === 10) return '91' + digits;
-  if (digits.length === 12 && digits.startsWith('91')) return digits;
-  if (digits.length === 11 && digits.startsWith('0')) return '91' + digits.slice(1);
-  return digits;
+  if (digits.length === 10) return '+91' + digits;
+  if (digits.length === 12 && digits.startsWith('91')) return '+' + digits;
+  if (digits.length === 11 && digits.startsWith('0')) return '+91' + digits.slice(1);
+  return '+' + digits;
 }
 
 // ── Send WhatsApp Message ──────────────────────────────────────────────────────
@@ -47,17 +47,15 @@ export async function sendWhatsAppMessage(
   }
 
   try {
-    const response = await fetch(`${WHATSAPP_API_URL}/messages/send`, {
+    const response = await fetch(`${WHATSAPP_API_URL}/send-message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${WHATSAPP_API_KEY}`,
       },
       body: JSON.stringify({
-        number: formattedPhone,
-        sender: WHATSAPP_SENDER_ID,
-        message,
-        priority: 10,
+        to: formattedPhone,
+        text: message,
       }),
     });
 

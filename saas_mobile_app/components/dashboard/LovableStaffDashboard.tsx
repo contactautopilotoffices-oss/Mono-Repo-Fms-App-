@@ -1196,7 +1196,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         </View>
       </ScrollView>
 
-      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} />
+      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} moreMenuItems={[{ label: "Overview", icon: "grid-outline", action: () => { setShowDrawer(false); setActiveTab("dashboard"); } },{ label: "Requests", icon: "ticket-outline", route: "tickets" },{ label: "Live Flow Map", icon: "git-branch-outline", route: "flow-map" },{ label: "Visitors", icon: "people-outline", route: "visitors" },{ label: "Diesel Logger", icon: "flame-outline", route: "diesel", color: "#F97316" },{ label: "Electricity Logger", icon: "flash-outline", route: "electricity", color: "#EAB308" },{ label: "Checklists", icon: "clipboard-outline", route: "checklist" },{ label: "Settings", icon: "settings-outline", route: "settings" },{ label: "Profile", icon: "person-outline", action: () => { setShowDrawer(false); setActiveTab("profile"); } },{ label: "Sign Out", icon: "log-out-outline", action: () => { setShowDrawer(false); setShowSignOut(true); }, color: "#EF4444" }]} />
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
@@ -1220,57 +1220,41 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.drawerSectionHeader}>
-                <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>DAILY WORK</Text>
+                <Ionicons name="construct-outline" size={14} color="rgba(255,255,255,0.3)" />
+                <Text style={styles.drawerSectionLabel}>MAINTENANCE PORTAL</Text>
               </View>
               {[
                 { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-                { label: 'Daily Board', icon: 'podium-outline', action: () => setActiveTab('daily') },
-                { label: 'Operations', icon: 'briefcase-outline', action: () => setActiveTab('operations') },
+                { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
+                { label: 'Live Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
+                { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
+                { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
+                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
+                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
               ].map((item) => (
                 <TouchableOpacity
                   key={item.label}
                   style={styles.drawerItem}
                   onPress={() => {
                     setShowDrawer(false);
-                    item.action();
+                    if (item.action) {
+                      item.action();
+                    } else if (item.route) {
+                      router.push(`/property/${propertyId}/${item.route}` as any);
+                    }
                   }}
                 >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="hammer-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
-              </View>
-              {[
-                { label: 'Tickets', icon: 'ticket-outline', route: 'tickets' },
-                { label: 'Visitors', icon: 'walk-outline', route: 'visitors' },
-                { label: 'Diesel Logger', icon: 'water-outline', route: 'diesel' },
-                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity' },
-                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.route}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    router.push(`/property/${propertyId}/${item.route}` as any);
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
+                  <Ionicons name={item.icon as any} size={20} color={item.color || 'rgba(255,255,255,0.6)'} />
+                  <Text style={[styles.drawerItemLabel, item.color && { color: item.color }]}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
 
               <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
                 <Ionicons name="person-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>SYSTEM & PERSONAL</Text>
+                <Text style={styles.drawerSectionLabel}>ACCOUNT</Text>
               </View>
               {[
-                { label: 'Settings', icon: 'settings-outline', route: 'settings', local: false },
+                { label: 'Settings', icon: 'settings-outline', route: 'settings' },
                 { label: 'Profile', icon: 'person-outline', local: true },
               ].map((item) => (
                 <TouchableOpacity

@@ -11,15 +11,19 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  Alert,
   Dimensions,
-  Modal,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useWeather } from '@/hooks/useWeather';
+import { useRouter } from 'expo-router';
+import { serverApi } from '@/lib/serverApi';
+import { useAuth } from '@/hooks/useAuth';
+import { useGamification } from '@/hooks/mst/useGamification';
+import { queryKeys } from '@/utils/queryKeys';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { queryClient } from '@/utils/queryClient';
+import SkeletonLoader from './lovable/SkeletonLoader';
 import DashboardBackground from '@/components/dashboard/DashboardBackground';
 import Animated, {
   useSharedValue,
@@ -30,23 +34,11 @@ import Animated, {
   interpolate,
   Extrapolate,
   FadeInUp,
-  FadeInDown,
 } from 'react-native-reanimated';
 import {
   Gesture,
   GestureDetector,
 } from 'react-native-gesture-handler';
-import { useRouter } from 'expo-router';
-import { serverApi } from '@/lib/serverApi';
-import { useAuth } from '@/hooks/useAuth';
-import { useGamification } from '@/hooks/mst/useGamification';
-import { queryKeys } from '@/utils/queryKeys';
-import { useServerQuery } from '@/hooks/useServerQuery';
-import { queryClient } from '@/utils/queryClient';
-import { invalidate } from '@/utils/queryInvalidation';
-import SkeletonLoader from './lovable/SkeletonLoader';
-
-// WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { LevelBadge } from '@/components/gamification/LevelBadge';
 import { XPBar } from '@/components/gamification/XPBar';
@@ -63,17 +55,15 @@ import {
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
 import { GlassTile } from './DashboardComponents';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
-
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import NotificationModal from '@/components/notifications/NotificationModal';
 import MobileFooter from '@/components/shared/MobileFooter';
 import Toast from '@/components/ui/Toast';
 import FloatingMenu from '@/components/ui/FloatingMenu';
-import { BlurView } from 'expo-blur';
 import { Audio } from 'expo-av';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +87,7 @@ interface Ticket {
   sla_due_at?: string;
 }
 
-type Tab = 'dashboard' | 'daily' | 'flow' | 'profile';
+type Tab = 'dashboard' | 'daily' | 'flow' | 'profile' | 'requests' | 'flow-map';
 
 interface Props {
   propertyId: string;
@@ -116,42 +106,6 @@ const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
 ];
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
-
-function StatTile({
-  value,
-  label,
-  tint,
-  wide = false,
-  onPress,
-}: {
-  value: string;
-  label: string;
-  tint: [string, string];
-  wide?: boolean;
-  onPress?: () => void;
-}) {
-  const content = (
-    <LinearGradient
-      colors={tint}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.statTile, wide && styles.statTileWide]}
-    >
-      <View style={styles.statTileGlow} />
-      <Text style={styles.statTileValue}>{value}</Text>
-      <Text style={styles.statTileLabel}>{label}</Text>
-    </LinearGradient>
-  );
-
-  if (onPress) {
-    return (
-      <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={[wide ? { flex: 1 } : { flex: 1 }]}>
-        {content}
-      </TouchableOpacity>
-    );
-  }
-  return content;
-}
 
 function TimeBlock({ val }: { val: number }) {
   return (
@@ -215,35 +169,6 @@ function ProfileStat({
       <Text style={styles.profileStatValue}>{value}</Text>
       <Text style={styles.profileStatLabel}>{label}</Text>
     </View>
-  );
-}
-
-function TabButton({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.tabButton, active && styles.tabButtonActive]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={active ? '#FFFFFF' : 'rgba(255,255,255,0.55)'}
-      />
-      <Text style={[styles.tabButtonLabel, active && styles.tabButtonLabelActive]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
   );
 }
 
@@ -498,10 +423,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const [toastConfig, setToastConfig] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
 
   // Gamification
-  const { leaderboard: gamifyLb, myStats, loading: gamifyLoading } = useGamification(propertyId);
-
-  // Minimum skeleton duration state
-  const [showSkeleton, setShowSkeleton] = useState(!data);
+  const { leaderboard: gamifyLb, myStats } = useGamification(propertyId);
 
   // ── Server Query ──
   const {
@@ -509,7 +431,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     isLoading,
     isFetching,
     refetch,
-    error,
   } = useServerQuery<{
     property: { name: string } | null;
     tickets: Ticket[];
@@ -551,6 +472,9 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     },
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Minimum skeleton duration state
+  const [showSkeleton, setShowSkeleton] = useState(!data);
 
   // Minimum skeleton duration effect
   useEffect(() => {
@@ -990,18 +914,18 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           <FloatingMenu
             title="Maintenance Portal"
             items={[
-              { label: 'Overview', icon: 'grid', onPress: () => setActiveTab('dashboard') },
-              { label: 'Requests', icon: 'ticket', onPress: () => setActiveTab('requests') },
-              { label: 'Leaderboard', icon: 'trophy', onPress: () => setActiveTab('daily-board') },
-              { label: 'Flow Map', icon: 'pulse', onPress: () => setActiveTab('flow-map') },
-              { label: 'Visitors', icon: 'people', onPress: () => router.push(`/property/${propertyId}/visitors` as any) },
-              { label: 'Diesel', icon: 'flame', onPress: () => router.push(`/property/${propertyId}/diesel` as any) },
-              { label: 'Electricity', icon: 'flash', onPress: () => router.push(`/property/${propertyId}/electricity` as any) },
-              { label: 'Checklists', icon: 'checkbox', onPress: () => router.push(`/property/${propertyId}/checklist` as any) },
-              { label: 'Settings', icon: 'settings', onPress: () => router.push(`/property/${propertyId}/settings` as any) },
-              { label: 'Profile', icon: 'person', onPress: () => setActiveTab('profile') },
+              { label: 'Overview', icon: 'grid-outline', onPress: () => setActiveTab('dashboard') },
+              { label: 'Requests', icon: 'ticket-outline', onPress: () => setActiveTab('requests') },
+              { label: 'Live Flow Map', icon: 'git-branch-outline', onPress: () => setActiveTab('flow') },
+              { label: 'Visitors', icon: 'people-outline', onPress: () => router.push(`/property/${propertyId}/visitors` as any) },
+              { label: 'Diesel Logger', icon: 'flame-outline', onPress: () => router.push(`/property/${propertyId}/diesel` as any) },
+              { label: 'Electricity Logger', icon: 'flash-outline', onPress: () => router.push(`/property/${propertyId}/electricity` as any) },
+              { label: 'Checklists', icon: 'clipboard-outline', onPress: () => router.push(`/property/${propertyId}/checklist` as any) },
+              { label: 'Settings', icon: 'settings-outline', onPress: () => router.push(`/property/${propertyId}/settings` as any) },
+              { label: 'Profile', icon: 'person-outline', onPress: () => setActiveTab('profile') },
             ]}
             footer={{ label: 'Sign Out', icon: 'log-out-outline', danger: true, onPress: () => router.push('/(auth)/login' as any) }}
+            buttonStyle={styles.hamburgerBtn}
           />
           <View style={styles.headerCenter}>
             <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => setActiveTab('profile')}>
@@ -1070,17 +994,16 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         </View>
       </ScrollView>
 
-      <MobileFooter 
-        activeTab="dashboard" 
+      <MobileFooter
+        activeTab="dashboard"
         moreMenuItems={[
           { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-          { label: 'Requests', icon: 'ticket-outline', action: () => setActiveTab('requests') },
-          { label: 'Leaderboard', icon: 'trophy-outline', action: () => setActiveTab('daily-board') },
-          { label: 'Flow Map', icon: 'pulse-outline', action: () => setActiveTab('flow-map') },
+          { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
+          { label: 'Live Flow Map', icon: 'git-branch-outline', action: () => setActiveTab('flow') },
           { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
-          { label: 'Diesel', icon: 'flame-outline', route: 'diesel' },
-          { label: 'Electricity', icon: 'flash-outline', route: 'electricity' },
-          { label: 'Checklists', icon: 'checkbox-outline', route: 'checklist' },
+          { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
+          { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
+          { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
           { label: 'Settings', icon: 'settings-outline', route: 'settings' },
           { label: 'Profile', icon: 'person-outline', action: () => setActiveTab('profile') },
           { label: 'Sign Out', icon: 'log-out-outline', action: () => setShowSignOut(true), color: '#EF4444' }
@@ -1142,8 +1065,8 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 12,
+    marginLeft: 16,
+    marginRight: 16,
   },
   profileRow: {
     flexDirection: 'row',
@@ -2086,40 +2009,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginBottom: 20,
-  },
-
-  // Bottom nav
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 30,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.10)',
-  },
-  bottomNavBlur: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 10,
-    backgroundColor: 'rgba(11,15,25,0.85)',
-  },
-  tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-  },
-  tabButtonActive: {},
-  tabButtonLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.55)',
-  },
-  tabButtonLabelActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
   },
 
   // Ask Cassandra

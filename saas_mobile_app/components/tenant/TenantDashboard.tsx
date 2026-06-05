@@ -303,7 +303,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               </View>
             ) : (
               tickets.filter(t => !['resolved', 'closed'].includes(t.status as string)).map((ticket: any, index: number) => (
-                <TouchableOpacity key={ticket.id} style={styles.ticketCard} onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
+                <TouchableOpacity key={ticket.id} style={styles.ticketCard} onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}>
                   <View style={styles.ticketLeft}>
                     <Text style={styles.ticketTitle} numberOfLines={1}>{ticket.title || 'Request'}</Text>
                     <Text style={styles.ticketMeta}>#{ticket.ticket_number || ticket.id.slice(0, 8)}</Text>
@@ -368,7 +368,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               badge={ticketStats.open > 0 ? ticketStats.open : undefined}
               statusLine={`${ticketStats.open} ACTIVE • ${ticketStats.completed} COMPLETED`}
               delay={120}
-              onPress={() => router.push(`/property/${propertyId}/tickets` as any)}
+              onPress={() => router.push(`/property/${propertyId}/tenant/requests` as any)}
             />
 
             <GlassModuleCard

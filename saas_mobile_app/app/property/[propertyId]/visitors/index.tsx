@@ -528,10 +528,10 @@ function DetailRow({
   const colors = Colors[theme];
   return (
     <View style={styles.detailRow}>
-      <View style={styles.detailRowIcon}>{icon}</View>
-      <View>
+      <View style={[styles.detailRowIcon, { backgroundColor: colors.card }]}>{icon}</View>
+      <View style={{ flex: 1 }}>
         <Text style={[styles.detailRowLabel, { color: colors.textTertiary }]}>{label}</Text>
-        <Text style={[styles.detailRowValue, { color: colors.text }]}>{value}</Text>
+        <Text style={[styles.detailRowValue, { color: colors.text }]} numberOfLines={1}>{value}</Text>
       </View>
     </View>
   );
@@ -1077,7 +1077,7 @@ export default function VisitorsScreen() {
     if (!selectedVisitor) return;
     setCheckoutLoading(true);
     try {
-      const res = await vmsService.checkOut(selectedVisitor.id, propertyId);
+      const res = await vmsService.checkOut(selectedVisitor.visitor_id, propertyId);
       if (res.success) {
         toast.success(`${selectedVisitor.name} checked out`);
         setIsVisitorDetailVisible(false);
@@ -1299,8 +1299,7 @@ export default function VisitorsScreen() {
           style={styles.modalOverlay} 
           onPress={() => setIsVisitorDetailVisible(false)}
         >
-          <SafeBlurView intensity={50} tint="dark" style={[styles.detailModalContainer, { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }]}>
-            <LinearGradient colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0.15)']} style={StyleSheet.absoluteFillObject} />
+          <View style={[styles.detailModalContainer, { backgroundColor: colors.background, borderColor: colors.border, overflow: 'hidden' }]}>
             {selectedVisitor && (
               <VisitorDetailSheet
                 visitor={selectedVisitor}
@@ -1309,7 +1308,7 @@ export default function VisitorsScreen() {
                 loading={checkoutLoading}
               />
             )}
-          </SafeBlurView>
+          </View>
         </Pressable>
       </Modal>
     </View>
@@ -1532,7 +1531,7 @@ const styles = StyleSheet.create({
   detailVisitorId: { fontSize: 12, fontFamily: 'monospace', color: 'rgba(255,255,255,0.7)', marginTop: 4 },
   detailInfoGrid: { padding: 16, gap: 14 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  detailRowIcon: { width: 32, height: 32, borderRadius: 8, backgroundColor: Colors.light.card, alignItems: 'center', justifyContent: 'center' },
+  detailRowIcon: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   detailRowLabel: { fontSize: 10, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 },
   detailRowValue: { fontSize: 14, fontFamily: 'Urbanist-Medium' },
   checkoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 14, borderRadius: 12, marginTop: 8 },

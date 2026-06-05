@@ -70,7 +70,7 @@ export default function TenantBottomNav() {
         router.navigate(`/property/${propertyId}/tenant` as any);
         break;
       case 'tickets':
-        router.navigate(`/property/${propertyId}/tickets` as any);
+        router.navigate(`/property/${propertyId}/tenant/requests` as any);
         break;
       case 'cassandra':
         setShowChat(true);

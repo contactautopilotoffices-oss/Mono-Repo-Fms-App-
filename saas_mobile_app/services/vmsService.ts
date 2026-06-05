@@ -64,10 +64,10 @@ export const vmsService = {
   ): Promise<ApiResponse<{ visitors: VisitorLog[]; stats: VisitorStats }>> {
     try {
       const result = await serverApi.get<{ visitors: VisitorLog[]; stats: VisitorStats }>(
-        '/api/vms/visitors',
+        '/api/visitors',
         {
-          property_id: propertyId,
-          date_filter: options?.dateFilter ?? 'today',
+          propertyId: propertyId,
+          date: options?.dateFilter ?? 'today',
           custom_date: options?.customDate,
           status: options?.status ?? 'all',
           search: options?.search,
@@ -81,22 +81,21 @@ export const vmsService = {
     }
   },
 
-  // ── Fetch Stats ─────────────────────────────────────────────────────────────
   async fetchStats(propertyId: string): Promise<ApiResponse<VisitorStats>> {
     try {
-      const result = await serverApi.get<VisitorStats>('/api/vms/stats', {
-        property_id: propertyId,
+      const result = await serverApi.get<{ stats: VisitorStats }>('/api/visitors', {
+        propertyId: propertyId,
       });
 
       if (result.error) throw new Error(result.error.message);
-      return { success: true, data: result.data!, status: 200 };
+      return { success: true, data: result.data!.stats, status: 200 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
   },
 
   // ── Check In ────────────────────────────────────────────────────────────────
-  // POST /api/vms/check-in — generates visitor_id server-side
+  // POST /api/visitors — generates visitor_id server-side
   async checkIn(payload: {
     propertyId: string;
     name: string;
@@ -109,8 +108,8 @@ export const vmsService = {
     photo_url?: string;
   }): Promise<ApiResponse<{ visitor: VisitorLog; visitorId: string; visitor_id: string }>> {
     try {
-      const result = await serverApi.post<VisitorLog>('/api/vms/check-in', {
-        property_id: payload.propertyId,
+      const result = await serverApi.post<VisitorLog>('/api/visitors', {
+        propertyId: payload.propertyId,
         name: payload.name,
         mobile: payload.mobile,
         category: payload.category ?? 'visitor',
@@ -146,13 +145,10 @@ export const vmsService = {
   },
 
   // ── Check Out ──────────────────────────────────────────────────────────────
-  // PATCH /api/vms/check-out — validates status server-side
+  // PATCH /api/visitors/[visitorId]/checkout
   async checkOut(visitorId: string, propertyId: string): Promise<ApiResponse<VisitorLog>> {
     try {
-      const result = await serverApi.patch<VisitorLog>('/api/vms/check-out', {
-        visitor_id: visitorId,
-        property_id: propertyId,
-      });
+      const result = await serverApi.patch<VisitorLog>(`/api/visitors/${visitorId}/checkout?propertyId=${propertyId}`);
 
       if (result.error) throw new Error(result.error.message);
       return { success: true, data: result.data!, status: 200 };
@@ -168,9 +164,8 @@ export const vmsService = {
     reason?: string
   ): Promise<ApiResponse<VisitorLog>> {
     try {
-      const result = await serverApi.post<VisitorLog>('/api/vms/force-checkout', {
+      const result = await serverApi.post<VisitorLog>(`/api/visitors/force-checkout?propertyId=${propertyId || ''}`, {
         visitor_log_id: visitorLogId,
-        property_id: propertyId,
         reason,
       });
 

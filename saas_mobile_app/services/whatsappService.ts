@@ -173,29 +173,15 @@ export const whatsappService = {
    */
   async sendToUser(userId: string, options: WhatsAppOptions): Promise<WhatsAppResult> {
     try {
-      const userRes = await serverApi.query<UserPhone[]>({
-        table: 'users',
-        action: 'select',
-        select: 'id, phone, user_metadata',
-        filters: [{ op: 'eq', column: 'id', value: userId }],
-        limit: 1,
+      const result = await serverApi.post<WhatsAppResult>('/api/whatsapp/send', {
+        userId,
+        message: options.message,
       });
-
-      if (userRes.error) {
-        return { success: false, error: userRes.error.message };
+      
+      if (result.error) {
+        return { success: false, error: result.error.message };
       }
-
-      const user = userRes.data?.[0];
-      if (!user) {
-        return { success: false, error: 'User not found' };
-      }
-
-      const phone = user.user_metadata?.phone || user.phone;
-      if (!phone) {
-        return { success: false, error: 'User has no phone number' };
-      }
-
-      return this.sendToPhone(phone, options);
+      return result.data ?? { success: true };
     } catch (err: any) {
       console.error('[WhatsApp] sendToUser error:', err);
       return { success: false, error: err.message };
@@ -216,37 +202,15 @@ export const whatsappService = {
   async sendToPhone(phone: string, options: WhatsAppOptions): Promise<WhatsAppResult> {
     try {
       const formattedPhone = formatPhone(phone);
-      const apiUrl = process.env.EXPO_PUBLIC_WHATSAPP_API_URL;
-      const apiKey = process.env.EXPO_PUBLIC_WHATSAPP_API_KEY;
-      const senderId = process.env.EXPO_PUBLIC_WHATSAPP_SENDER_ID;
-
-      if (!apiUrl || !apiKey || !senderId) {
-        console.warn('[WhatsApp] API not configured, skipping message');
-        return { success: false, error: 'WhatsApp API not configured' };
-      }
-
-      const response = await fetch(`${apiUrl}/messages/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          number: formattedPhone,
-          sender: senderId,
-          message: options.message,
-          priority: 10,
-        }),
+      const result = await serverApi.post<WhatsAppResult>('/api/whatsapp/send', {
+        phone: formattedPhone,
+        message: options.message,
       });
 
-      if (!response.ok) {
-        const error = await response.text();
-        console.error('[WhatsApp] API error:', error);
-        return { success: false, error };
+      if (result.error) {
+        return { success: false, error: result.error.message };
       }
-
-      const result = await response.json();
-      return { success: true, messageId: result.id };
+      return result.data ?? { success: true };
     } catch (err: any) {
       console.error('[WhatsApp] sendToPhone error:', err);
       return { success: false, error: err.message };

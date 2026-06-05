@@ -577,13 +577,16 @@ export default function PropertyLayout() {
   console.log('[PropertyLayout] Access granted — role:', role);
 
 
+  const isTenantRoute = pathname?.includes('/tenant');
+  const showTenantNav = role === 'tenant' || role === 'super_tenant' || isTenantRoute;
+
   // ---- Unified sidebar layout for ALL roles (unless full-screen) ----
   if (isFullScreen) {
     return (
       <PropertyContext.Provider value={propertyInfo}>
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <Slot />
-          {role !== 'tenant' && role !== 'super_tenant' ? <GlobalBottomNav /> : <TenantBottomNav />}
+          {showTenantNav ? <TenantBottomNav /> : <GlobalBottomNav />}
         </View>
       </PropertyContext.Provider>
     );
@@ -628,7 +631,7 @@ export default function PropertyLayout() {
             organizationId={membership?.org_id ?? ''}
             role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
           />
-          {role !== 'tenant' && role !== 'super_tenant' ? <GlobalBottomNav /> : <TenantBottomNav />}
+          {showTenantNav ? <TenantBottomNav /> : <GlobalBottomNav />}
         </View>
       </SidebarToggleContext.Provider>
     </PropertyContext.Provider>
