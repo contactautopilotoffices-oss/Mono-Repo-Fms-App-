@@ -5,6 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, usePathname } from 'expo-router';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import SidekickFace from '@/components/dashboard/SidekickFace';
+import { useAuth } from '@/hooks/useAuth';
+import { useCassandraStore } from '@/stores/cassandraStore';
 
 const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
 
@@ -26,11 +28,25 @@ const rightItems: NavItemDef[] = [
   { id: 'communities', icon: 'people', label: 'Communities' },
 ];
 
-export default function TenantBottomNav() {
+interface TenantBottomNavProps {
+  onOpenChat?: () => void;
+}
+
+export default function TenantBottomNav({ onOpenChat }: TenantBottomNavProps) {
   const router = useRouter();
   const { propertyId } = useLocalSearchParams<{ propertyId: string }>();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { membership } = useAuth();
+  const voiceState = useCassandraStore((s) => s.voiceState);
+
+  // Convert voiceState to FaceState for SidekickFace
+  const faceState = (() => {
+    if (voiceState === 'recording' || voiceState === 'processing' || voiceState === 'connecting') return 'listening';
+    if (voiceState === 'speaking') return 'speaking';
+    if (voiceState === 'error') return 'alert';
+    return 'idle';
+  })();
 
   const activeId: NavId = (() => {
     const parts = pathname.split('/').filter(Boolean);
@@ -46,21 +62,29 @@ export default function TenantBottomNav() {
   })();
 
   const handlePress = (id: NavId) => {
-    if (!propertyId) return;
     switch (id) {
       case 'home':
+        if (!propertyId) return;
         router.navigate(`/property/${propertyId}/tenant` as any);
         break;
       case 'tickets':
+        if (!propertyId) return;
         router.navigate(`/property/${propertyId}/tenant/requests` as any);
         break;
       case 'cassandra':
-        router.navigate(`/cassandra?propertyId=${propertyId}` as any);
+        // Open Cassandra modal via callback if available, otherwise navigate
+        if (onOpenChat) {
+          onOpenChat();
+        } else if (propertyId) {
+          router.navigate(`/cassandra?propertyId=${propertyId}` as any);
+        }
         break;
       case 'rooms':
+        if (!propertyId) return;
         router.navigate(`/property/${propertyId}/rooms` as any);
         break;
       case 'communities':
+        if (!propertyId) return;
         router.navigate(`/property/${propertyId}/tenant/communities` as any);
         break;
     }
@@ -99,7 +123,7 @@ export default function TenantBottomNav() {
           onPress={() => handlePress('cassandra')}
           activeOpacity={0.85}
         >
-          <SidekickFace compact size={44} state="idle" />
+          <SidekickFace compact size={44} state={faceState as any} />
           <Text style={[styles.navLabel, activeId === 'cassandra' && styles.navLabelActive]}>
             AI Assistant
           </Text>
