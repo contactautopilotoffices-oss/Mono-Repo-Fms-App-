@@ -57,28 +57,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             </View>
             
             <ScrollView showsVerticalScrollIndicator={false}>
-
-              {/* SECURITY SECTION */}
-              <View style={styles.securityBadge}>
-                <Ionicons name="shield-checkmark" size={14} color="#3B82F6" />
-                <Text style={styles.securityBadgeText}>SECURITY PORTAL</Text>
-              </View>
-
-              <Text style={[styles.drawerSectionLabel, { marginTop: 8 }]}>SECURITY</Text>
-              {[
-                { label: 'Overview', route: 'security', icon: 'shield-outline' },
-                { label: 'Check In / Out', route: 'security/checkinout', icon: 'log-in-outline' },
-                { label: 'Visitor Registry', route: 'visitors', icon: 'people-outline' },
-                { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline' },
-                { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
-              ].map((item) => (
-                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => navigateTo(item.route)}>
-                  <Ionicons name={item.icon as any} size={20} color="#3B82F6" />
-                  <Text style={[styles.drawerItemLabel, { color: '#3B82F6' }]}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <Text style={[styles.drawerSectionLabel, { marginTop: 20 }]}>OPERATIONS</Text>
+              <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
               {[
                 { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
                 { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
