@@ -378,6 +378,15 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
   useEffect(() => {
     if (visible) {
+      // Warm up Render instance the moment the modal opens.
+      // Render free tier spins down after 15 min of inactivity — this fire-and-forget
+      // /health ping ensures the container is awake BEFORE the user sends the first
+      // message, eliminating the 30-60 s cold-start delay on "first Hi".
+      fetch(`${process.env.EXPO_PUBLIC_CASSANDRA_API_URL || ''}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => { /* silent — warmup best-effort */ });
+
       // FIX: Intro message when Cassandra opens (once per modal session)
       if (!introShownRef.current && messageHistory.length === 0 && view === 'home') {
         introShownRef.current = true;
@@ -870,8 +879,8 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={80}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           {view === 'history' ? (
             /* ─── HISTORY VIEW: previous sessions ─── */
@@ -971,7 +980,9 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
                 <View style={styles.bubbleRowLeft}>
                   <ReasoningBubble
                     steps={reasoningSteps}
-                    isActive={isReasoningActive}
+                    // Stop button only while thinking AND before first answer token
+                    // (isTyping = true means we already got tokens → no longer "thinking")
+                    isActive={isReasoningActive && !isTyping}
                     onAbort={() => {
                       abortRef.current?.abort();
                       setIsReasoningActive(false);
@@ -990,8 +1001,9 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
                   </View>
                 </View>
               )}
-              {/* Suggestions strip at bottom of chat */}
-              {!isTyping && (
+              {/* Suggestions strip — hidden while Cassandra is thinking or typing
+                  to avoid extra vertical padding that gaps the input bar */}
+              {!isTyping && !isReasoningActive && (
                 <View style={styles.suggestionsStrip}>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsStripContent}>
                     {WHAT_I_CAN_DO.map((item) => (
@@ -1199,7 +1211,7 @@ const styles = StyleSheet.create({
   chatScrollContent: {
     paddingHorizontal: CassSpacing.lg,
     paddingTop: SPACING.lg,
-    paddingBottom: SPACING.md,
+    paddingBottom: CassSpacing.sm,  // minimal — input bar sits right below scrollview
     flexGrow: 1,
     justifyContent: 'flex-end',
   },
