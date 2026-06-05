@@ -993,7 +993,7 @@ export default function ChecklistScreen() {
     >
   >({});
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [liveNow, setLiveNow] = useState(() => new Date());
   const [adminUnlocked, setAdminUnlocked] = useState(false);
 
@@ -1432,7 +1432,7 @@ export default function ChecklistScreen() {
         fullCompletion = (res.completion || {}) as SOPCompletion;
       } catch (err: any) {
         Alert.alert("Error", err.message || "Failed to start checklist");
-        setIsLoading(false);
+        setIsStarting(false);
         return;
       }
 
@@ -1444,7 +1444,7 @@ export default function ChecklistScreen() {
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to start checklist");
     } finally {
-      setIsLoading(false);
+      setIsStarting(false);
     }
   };
 
@@ -1831,7 +1831,7 @@ export default function ChecklistScreen() {
 
       if (editingTemplate) {
         // Update existing template via API
-        const res = await checklistService.updateTemplate(editingTemplate.id, {
+        await checklistService.updateTemplate(editingTemplate.id, {
           title: tplTitle.trim(),
           description: tplDesc.trim() || null,
           category: tplCategory,
@@ -1841,10 +1841,9 @@ export default function ChecklistScreen() {
           end_time: tplEndTime || null,
           items,
         });
-        if (res.error) throw new Error(res.error);
       } else {
         // Create new template via API
-        const res = await checklistService.createTemplate({
+        await checklistService.createTemplate({
           property_id: propertyId,
           organization_id: orgId,
           title: tplTitle.trim(),
@@ -1858,7 +1857,6 @@ export default function ChecklistScreen() {
           end_time: tplEndTime || null,
           items,
         });
-        if (res.error) throw new Error(res.error);
       }
 
       setShowCreateTemplate(false);
@@ -2917,8 +2915,8 @@ export default function ChecklistScreen() {
           </View>
         </View>
         <FlashList
-          data={template?.items || []}
-          keyExtractor={(item) => item.id}
+          data={(template?.items || []) as any[]}
+          keyExtractor={(item) => (item as any).id}
           contentContainerStyle={{
             paddingHorizontal: 16,
             paddingTop: 16,
@@ -3153,8 +3151,8 @@ export default function ChecklistScreen() {
         <FlashList
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
-          data={filteredTemplates}
-          keyExtractor={(item) => item.id}
+          data={filteredTemplates as SOPTemplate[]}
+          keyExtractor={(item) => (item as SOPTemplate).id}
           estimatedItemSize={120}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#4F93E4" />}
           ListHeaderComponent={

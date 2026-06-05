@@ -69,9 +69,9 @@ export default function ChecklistScanScreen() {
       }
 
       const res = await checklistService.fetchChecklistData(propertyId);
-      if (!res.success) throw new Error(String(res.error || 'Lookup failed'));
+      if (res.error) throw new Error(String(res.error || 'Lookup failed'));
 
-      const templates = res.data?.templates || [];
+      const templates = res.templates || [];
       const found = templates.find((t: any) => t.id === templateId && t.is_active);
 
       if (found) {

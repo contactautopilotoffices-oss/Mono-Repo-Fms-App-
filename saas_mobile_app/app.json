@@ -84,8 +84,8 @@
       [
         "@sentry/react-native/expo",
         {
-          "organization": "my-org",
-          "project": "my-project"
+          "organization": "autopilot-fms",
+          "project": "autopilot-mobile"
         }
       ],
       "@react-native-firebase/app",

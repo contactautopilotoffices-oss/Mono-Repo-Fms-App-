@@ -116,11 +116,12 @@ function FloatingShape({
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
-    transform: [
-      { translateY: floatY.value },
-      { translateX: floatX.value },
-    ],
-  }));
+    transform: [{
+      translateY: floatY.value,
+    }, {
+      translateX: floatX.value,
+    }],
+  })) as any;
 
   return (
     <Animated.View

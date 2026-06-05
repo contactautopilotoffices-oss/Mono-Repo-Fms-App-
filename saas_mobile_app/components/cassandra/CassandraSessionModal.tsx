@@ -382,10 +382,15 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       // Render free tier spins down after 15 min of inactivity — this fire-and-forget
       // /health ping ensures the container is awake BEFORE the user sends the first
       // message, eliminating the 30-60 s cold-start delay on "first Hi".
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       fetch(`${process.env.EXPO_PUBLIC_CASSANDRA_API_URL || ''}/health`, {
         method: 'GET',
-        signal: AbortSignal.timeout(10_000),
-      }).catch(() => { /* silent — warmup best-effort */ });
+        signal: controller.signal,
+      })
+        .finally(() => clearTimeout(timeoutId))
+        .catch(() => { /* silent — warmup best-effort */ });
 
       // FIX: Intro message when Cassandra opens (once per modal session)
       if (!introShownRef.current && messageHistory.length === 0 && view === 'home') {
@@ -879,8 +884,8 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior="padding"
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
           {view === 'history' ? (
             /* ─── HISTORY VIEW: previous sessions ─── */
