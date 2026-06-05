@@ -156,7 +156,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
 
   const drawerItems = [
     { label: 'Dashboard', route: 'tenant', icon: 'grid-outline' as const },
-    { label: 'My Tickets', route: 'tickets', icon: 'ticket-outline' as const },
+    { label: 'My Tickets', route: 'tenant/requests', icon: 'ticket-outline' as const },
     { label: 'Meeting Rooms', route: 'rooms', icon: 'calendar-outline' as const },
     { label: 'Visitors', route: 'tenant/visitors', icon: 'people-outline' as const },
     { label: 'Communities', route: 'tenant/communities', icon: 'chatbubbles-outline' as const },

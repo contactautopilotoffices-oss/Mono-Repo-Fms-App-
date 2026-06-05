@@ -52,7 +52,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
 
   // Default MST quick-access menu
   const defaultMoreMenuItems: MoreMenuItem[] = [
-    { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
+    { label: 'Requests', icon: 'ticket-outline', route: isTenant || isSuperTenant ? 'tenant/requests' : 'tickets' },
     { label: 'Visitors', icon: 'walk-outline', route: 'visitors' },
     { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
     { label: 'Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
