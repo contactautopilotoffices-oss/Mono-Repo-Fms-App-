@@ -57,7 +57,28 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             </View>
             
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.drawerSectionLabel}>OPERATIONS</Text>
+
+              {/* SECURITY SECTION */}
+              <View style={styles.securityBadge}>
+                <Ionicons name="shield-checkmark" size={14} color="#3B82F6" />
+                <Text style={styles.securityBadgeText}>SECURITY PORTAL</Text>
+              </View>
+
+              <Text style={[styles.drawerSectionLabel, { marginTop: 8 }]}>SECURITY</Text>
+              {[
+                { label: 'Overview', route: 'security', icon: 'shield-outline' },
+                { label: 'Check In / Out', route: 'security/checkinout', icon: 'log-in-outline' },
+                { label: 'Visitor Registry', route: 'visitors', icon: 'people-outline' },
+                { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline' },
+                { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
+              ].map((item) => (
+                <TouchableOpacity key={item.route} style={styles.drawerItem} onPress={() => navigateTo(item.route)}>
+                  <Ionicons name={item.icon as any} size={20} color="#3B82F6" />
+                  <Text style={[styles.drawerItemLabel, { color: '#3B82F6' }]}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+
+              <Text style={[styles.drawerSectionLabel, { marginTop: 20 }]}>OPERATIONS</Text>
               {[
                 { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
                 { label: 'Tickets', route: 'tickets', icon: 'ticket-outline' },
@@ -125,6 +146,8 @@ const styles = StyleSheet.create({
   drawerItem: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 14, paddingHorizontal: 8, borderRadius: 12 },
   drawerItemLabel: {  fontSize: 15, fontWeight: '500', color: '#FFF' },
   drawerSectionLabel: {  fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.35)', letterSpacing: 1.5, marginBottom: 10, paddingHorizontal: 8, marginTop: 6 },
+  securityBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(59,130,246,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
+  securityBadgeText: { fontSize: 10, fontWeight: '800', color: '#3B82F6', letterSpacing: 1.5 },
   drawerSignOut: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', marginBottom: 40, paddingHorizontal: 8 },
   drawerSignOutText: { color: '#EF4444', fontWeight: '700', fontSize: 15 },
 });
