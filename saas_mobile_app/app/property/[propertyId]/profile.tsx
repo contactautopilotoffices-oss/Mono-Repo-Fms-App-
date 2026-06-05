@@ -22,7 +22,7 @@ import { queryKeys } from '@/utils/queryKeys';
 import { Colors } from '@/constants/Colors';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { serverApi } from '@/lib/serverApi';
-import { createClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client';
 import { readFileAsArrayBuffer, compressImage } from '@/utils/mediaUtils';
 
 import { LinearGradient } from 'expo-linear-gradient';
