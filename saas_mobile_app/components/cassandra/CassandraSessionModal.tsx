@@ -110,6 +110,7 @@ interface ChatMessage {
     photoUrl?: string | null; // FIX C0-16: Show before-photo on ticket card
   };
   blockedReason?: string;
+  confirmState?: 'pending' | 'yes' | 'no';
 }
 
 const ChatBubble = ({
@@ -272,6 +273,7 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
     voiceState,
     isConnected,
     addMessage,
+    updateMessage,
     messageHistory,
     setVoiceState,
   } = useCassandraStore();
@@ -293,6 +295,10 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
   // ── Reasoning state (PRD: SSE Streaming) ────────────────────────────────
   const [reasoningSteps, setReasoningSteps] = useState<string[]>([]);
   const [isReasoningActive, setIsReasoningActive] = useState(false);
+  // Mirror of reasoningSteps that's always current inside the memoized handleSend
+  // closure (state captured there can be stale). Used by onDone for accurate
+  // substantive-answer detection and committing the final steps.
+  const reasoningStepsRef = useRef<string[]>([]);
 
   // ── Attachment / Property state ───────────────────────────────────────────
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
@@ -472,14 +478,44 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
   // ── Image helpers ─────────────────────────────────────────────────────────
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      setAttachedImage(result.assets[0].uri);
-    }
+    Alert.alert(
+      'Attach Photo',
+      'Choose a source for the issue photo',
+      [
+        {
+          text: '📷  Take Photo',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              toast.error('Camera permission is required to take photos.');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ['images'],
+              quality: 0.85,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets?.[0]) {
+              setAttachedImage(result.assets[0].uri);
+            }
+          },
+        },
+        {
+          text: '🖼  Choose from Library',
+          onPress: async () => {
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              quality: 0.85,
+              allowsEditing: false,
+            });
+            if (!result.canceled && result.assets?.[0]) {
+              setAttachedImage(result.assets[0].uri);
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const uploadImageToStorage = useCallback(async (localUri: string): Promise<string | null> => {
@@ -489,34 +525,25 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
         [{ resize: { width: 1200 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
       );
-
-      // Create FormData for file upload via API
-      const formData = new FormData();
-      const path = `cassandra-chat/${user?.id ?? 'anon'}/${Date.now()}`;
-      formData.append('file', {
-        uri: compressed.uri,
-        name: 'image.jpg',
-        type: 'image/jpeg',
-      } as any);
-      formData.append('path', path);
-
-      // Upload via server API
-      const res = await apiFetch<{ success: boolean; data?: { url: string }; error?: string }>('/api/upload', {
-        method: 'POST',
-        body: formData as any,
+      const arrayBuffer = await readFileAsArrayBuffer(compressed.uri);
+      // Store under the same bucket/path structure the FMS uses for ticket before-photos:
+      // ticket_photos/{propertyId}/{userId}/{timestamp}.jpg
+      const propId = selectedPropertyId ?? 'no-property';
+      const uid = user?.id ?? 'anon';
+      const path = `before-photos/${propId}/${uid}/${Date.now()}.jpg`;
+      const { error } = await supabase.storage.from('ticket_photos').upload(path, arrayBuffer, {
+        contentType: 'image/jpeg',
+        upsert: true,
       });
-
-      if (!res.success || !res.data?.url) {
-        throw new Error(res.error || 'Upload failed');
-      }
-
-      return res.data.url;
+      if (error) throw error;
+      const { data: publicUrlData } = supabase.storage.from('ticket_photos').getPublicUrl(path);
+      return publicUrlData.publicUrl;
     } catch (err: any) {
       console.error('[uploadImageToStorage] failed:', err);
       toast.error('Failed to upload image: ' + (err?.message ?? 'unknown error'));
       return null;
     }
-  }, [user?.id]);
+  }, [user?.id, selectedPropertyId]);
 
   // ── Response parsers ──────────────────────────────────────────────────────
   const parseToolCall = (text: string): { isToolCall: boolean; toolData?: ChatMessage['toolData']; cleanText?: string } => {
@@ -579,6 +606,25 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
     );
   };
 
+  // Strip internal/sensitive artifacts the LLM sometimes dumps into prose:
+  // raw Supabase storage URLs, markdown photo links, and unresolved [id] templates.
+  // The real before-photo still renders via the ticket card (toolData.photoUrl);
+  // this only cleans the human-readable text. NOTE: leaves <!--TICKET_DATA--> intact.
+  const stripSensitive = (text: string): string => {
+    if (!text) return text;
+    return text
+      // markdown image: ![Photo](https://...storage...jpg) → "📷 Photo"
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '📷 Photo')
+      // bare Supabase storage URLs
+      .replace(/https?:\/\/[^\s)]*supabase\.co\/storage\/[^\s)]*/gi, '📷 Photo')
+      // any leftover unresolved [id] path fragments
+      .replace(/\/?\[id\]\/?/gi, '')
+      // tidy dangling " - 📷 Photo" / repeated separators
+      .replace(/\s*-\s*📷 Photo/g, ' — 📷 Photo')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  };
+
   const handleSend = useCallback(async (message: string) => {
     // ── State Gate: org_id must be present ────────────────────────────────
     if (!resolvedOrgId) {
@@ -617,12 +663,20 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
     // Reset reasoning for new message
     setReasoningSteps([]);
+    reasoningStepsRef.current = [];
     setIsReasoningActive(true);
 
     streamChat(
       message,
       currentSessionId ?? sessionId,
       (token) => {
+        // The moment the answer begins streaming, the agent is done "thinking".
+        // Resolve the reasoning indicator here — do NOT wait for the terminal
+        // `done` event, which can be delayed/dropped and leave "thinking" stuck.
+        if (!fullResponse) {
+          setIsReasoningActive(false);
+          setIsTyping(true);
+        }
         fullResponse += token;
         setCurrentResponse(fullResponse);
       },
@@ -631,19 +685,25 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
         setIsTyping(false);
         setIsReasoningActive(false);
 
+        // Read steps from the ref (state in this closure can be stale).
+        const finalSteps = reasoningStepsRef.current;
+
         // Don't add empty messages — happens when stream is aborted before any tokens
         if (!fullResponse.trim()) return;
+
+        // Clean internal/sensitive artifacts (storage URLs, photo markdown) for display.
+        const cleanFull = stripSensitive(fullResponse);
 
         // Parse special response types
         if (isBlockedResponse(fullResponse)) {
           addMessage({
             role: 'cassandra',
-            text: fullResponse,
+            text: cleanFull,
             variant: 'blocked',
-            blockedReason: fullResponse,
-            reasoningSteps,
+            blockedReason: cleanFull,
+            reasoningSteps: finalSteps,
           });
-          persistMessage('cassandra', fullResponse);
+          persistMessage('cassandra', cleanFull);
           if (inputMode === 'voice') {
             setVoiceState('speaking');
             await speak(fullResponse);
@@ -654,14 +714,15 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
 
         const toolResult = parseToolCall(fullResponse);
         if (toolResult.isToolCall && toolResult.toolData) {
+          const cleanCard = stripSensitive(toolResult.cleanText || fullResponse);
           addMessage({
             role: 'cassandra',
-            text: toolResult.cleanText || fullResponse,
+            text: cleanCard,
             variant: 'tool_call',
             toolData: toolResult.toolData,
-            reasoningSteps,
+            reasoningSteps: finalSteps,
           });
-          persistMessage('cassandra', fullResponse);
+          persistMessage('cassandra', cleanCard);
           if (inputMode === 'voice') {
             setVoiceState('speaking');
             await speak(toolResult.cleanText || 'Ticket created successfully');
@@ -670,8 +731,17 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
           return;
         }
 
-        addMessage({ role: 'cassandra', text: fullResponse, reasoningSteps });
-        persistMessage('cassandra', fullResponse);
+        // Graceful query-closure loop: only offer "Did this answer your question?"
+        // on substantive, tool-backed answers (those with reasoning steps). Casual
+        // chat gets no footer — so we never pester on every message.
+        const isSubstantive = finalSteps.length > 0;
+        addMessage({
+          role: 'cassandra',
+          text: cleanFull,
+          reasoningSteps: finalSteps,
+          ...(isSubstantive ? { confirmState: 'pending' as const } : {}),
+        });
+        persistMessage('cassandra', cleanFull);
         // Speak the response if voice mode is active
         if (inputMode === 'voice') {
           setVoiceState('speaking');
@@ -691,17 +761,40 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       abortRef.current.signal,
       chatOptions,
       (step) => {
-        // onReasoning callback — append new step
+        // onReasoning callback — append new step.
+        // Skip transient status pings ("queued", generic "thinking") — they are not
+        // real reasoning steps. Keeping them would (a) pollute the trace and (b) make
+        // a no-tool answer's collapsed label echo "Cassandra is thinking…" forever.
+        const transient = /^(cassandra is thinking|request queued|queued)/i.test(step.trim());
+        if (transient) return;
         setReasoningSteps((prev) => {
           // Avoid duplicate consecutive steps
           if (prev.length > 0 && prev[prev.length - 1] === step) {
             return prev;
           }
-          return [...prev, step];
+          const next = [...prev, step];
+          reasoningStepsRef.current = next;
+          return next;
         });
       },
     );
   }, [sessionId, currentSessionId, addMessage, inputMode, speak, setVoiceState, persistMessage, attachedImage, selectedPropertyId, uploadImageToStorage]);
+
+  // ── Graceful query-closure loop ────────────────────────────────────────────
+  // "Yes" → close gracefully (no further agent call).
+  const handleConfirmYes = useCallback((id: string) => {
+    updateMessage(id, { confirmState: 'yes' });
+  }, [updateMessage]);
+
+  // "No, rethink" → re-enter the O→A loop. We post a short follow-up so Cassandra
+  // reconsiders with the full prior context (conversation history carries the
+  // original question + answer), producing a fresh chain-of-thought.
+  const handleConfirmNo = useCallback((id: string) => {
+    updateMessage(id, { confirmState: 'no' });
+    const retryPrompt = "That didn't fully answer my question. Please reconsider and give a more complete, specific answer.";
+    addMessage({ role: 'user', text: retryPrompt });
+    handleSend(retryPrompt);
+  }, [updateMessage, addMessage, handleSend]);
 
   // All skill chips just send a pre-filled message to /chat — no client-side routing.
 
@@ -830,17 +923,49 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {messageHistory.map((msg) => (
-                <ChatBubble
-                  key={msg.id}
-                  message={msg as ChatMessage}
-                  onRaiseRequest={() => {
-                    const text = 'I would like to raise a request';
-                    addMessage({ role: 'user', text });
-                    handleSend(text);
-                  }}
-                />
-              ))}
+              {messageHistory.map((msg, idx) => {
+                const m = msg as ChatMessage;
+                const isLast = idx === messageHistory.length - 1;
+                return (
+                  <React.Fragment key={m.id}>
+                    <ChatBubble
+                      message={m}
+                      onRaiseRequest={() => {
+                        const text = 'I would like to raise a request';
+                        addMessage({ role: 'user', text });
+                        handleSend(text);
+                      }}
+                    />
+                    {/* Graceful closure footer — only on the most recent answer */}
+                    {m.role === 'cassandra' && m.confirmState === 'pending' && isLast && (
+                      <View style={[styles.bubbleRowLeft, styles.confirmRow]}>
+                        <Text style={styles.confirmPrompt}>Did this answer your question?</Text>
+                        <View style={styles.confirmBtns}>
+                          <TouchableOpacity
+                            onPress={() => handleConfirmYes(m.id)}
+                            activeOpacity={0.8}
+                            style={[styles.confirmChip, styles.confirmChipYes]}
+                          >
+                            <Text style={styles.confirmChipYesText}>Yes 👍</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => handleConfirmNo(m.id)}
+                            activeOpacity={0.8}
+                            style={styles.confirmChip}
+                          >
+                            <Text style={styles.confirmChipText}>No, rethink</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                    {m.role === 'cassandra' && m.confirmState === 'yes' && (
+                      <View style={[styles.bubbleRowLeft, styles.confirmRow]}>
+                        <Text style={styles.confirmResolved}>Glad I could help 🙌</Text>
+                      </View>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {/* Reasoning bubble — shows Chain of Thought while streaming */}
               {(isReasoningActive || reasoningSteps.length > 0) && (
                 <View style={styles.bubbleRowLeft}>
@@ -860,7 +985,7 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
                 <View style={[styles.bubbleRow, styles.bubbleRowLeft]}>
                   <View style={[styles.bubble, styles.bubbleBot]}>
                     <Text style={[styles.bubbleText, styles.bubbleTextBot]}>
-                      {currentResponse || 'Cassandra is typing…'}
+                      {currentResponse ? stripSensitive(currentResponse) : 'Cassandra is typing…'}
                     </Text>
                   </View>
                 </View>
@@ -1087,6 +1212,49 @@ const styles = StyleSheet.create({
   },
   bubbleRowRight: {
     alignItems: 'flex-end',
+  },
+  // ── Graceful closure footer ────────────────────────────────────────────────
+  confirmRow: {
+    marginTop: 2,
+    marginBottom: CassSpacing.sm,
+    paddingLeft: CassSpacing.xs,
+  },
+  confirmPrompt: {
+    ...Typography.bodySmall,
+    color: Colors.textMuted,
+    marginBottom: 6,
+  },
+  confirmBtns: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  confirmChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  confirmChipText: {
+    ...Typography.bodySmall,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  confirmChipYes: {
+    borderColor: 'rgba(139,92,246,0.4)',
+    backgroundColor: 'rgba(139,92,246,0.12)',
+  },
+  confirmChipYesText: {
+    ...Typography.bodySmall,
+    color: Colors.violet,
+    fontWeight: '600',
+  },
+  confirmResolved: {
+    ...Typography.bodySmall,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+    marginBottom: CassSpacing.sm,
   },
   bubble: {
     maxWidth: '80%',

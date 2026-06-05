@@ -100,16 +100,13 @@ export function streamChat(
   onCitation?: (sources: unknown[]) => void,
 ) {
   const propertyId = options?.propertyId || '';
+  // propertyId may be empty for org-wide queries ("All Properties") — that's valid.
+  // The server uses the session token's org_id as the safety scope in all cases.
 
-  if (!propertyId) {
-    onError('No property selected. Please select a property first.');
-    return;
-  }
+  console.log('[streamChat] Starting. propertyId:', propertyId || '(org-wide)', 'message:', message.substring(0, 30));
 
-  console.log('[streamChat] Starting. propertyId:', propertyId, 'message:', message.substring(0, 30));
-
-  // Get session token, then make the request
-  getValidToken(propertyId)
+  // Get session token — if no property, use any cached valid token (org-level scope)
+  getValidToken(propertyId || undefined)
     .then((token) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${BASE_URL}/chat/stream`);
