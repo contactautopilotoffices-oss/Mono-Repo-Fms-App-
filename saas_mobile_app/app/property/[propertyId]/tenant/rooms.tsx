@@ -107,7 +107,9 @@ export default function TenantRoomsPage() {
   const fetchMyBookings = useCallback(async () => {
     if (!propertyId || !user?.id) return { bookings: [] as MeetingRoomBooking[] };
     try {
+      console.log('[TenantRooms] Fetching MY bookings for user:', user.id);
       const bookingsRes = await getMeetingRoomBookings(propertyId as string, undefined, user.id);
+      console.log('[TenantRooms] MY bookings result:', bookingsRes.bookings?.length, 'bookings');
       return { bookings: bookingsRes.bookings || [] };
     } catch (err) {
       console.error('[TenantRooms] Fetch error:', err);
@@ -134,7 +136,7 @@ export default function TenantRoomsPage() {
   );
 
   const { data: myBookingsData, isLoading: isLoadingMyBookings, refetch: refetchMyBookings } = useServerQuery<{ bookings: MeetingRoomBooking[] }>(
-    ['tenant-rooms-my-bookings', propertyId],
+    ['tenant-rooms-my-bookings', propertyId, user?.id || 'no-user'],
     fetchMyBookings,
     { staleTime: 1000 * 60 * 5 }
   );
