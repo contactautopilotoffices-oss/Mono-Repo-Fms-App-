@@ -12,7 +12,7 @@
  * - Property-scoped: separate cache per property
  * - No Zustand duplication: data lives in React Query only
  */
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { serverApi } from '@/lib/serverApi';
 import { ppmService } from '@/services/ppmService';
 import { queryKeys } from '@/utils/queryKeys';
@@ -135,7 +135,7 @@ export async function fetchDashboardData(propertyId: string): Promise<DashboardD
   // Bulk queries
   const bulkResults = await Promise.all([
     safeFetch(serverApi.query({ table: 'properties', action: 'select', select: 'name, image_url', filters: [idFilter], single: true }), null),
-    safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, raised_by, photo_before_url', filters: [propFilter], orders: [{ column: 'created_at', ascending: false }], limit: 150 }), []),
+    safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, raised_by, photo_before_url', filters: [propFilter], orders: [{ column: 'created_at', ascending: false }], limit: 150 }), []),
     safeFetch(serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [propFilter, { op: 'eq', column: 'is_active', value: true }] }), []),
     safeFetch(serverApi.query({ table: 'sop_completions', action: 'select', select: 'status', filters: [propFilter, { op: 'eq', column: 'completion_date', value: todayStr }] }), []),
     safeFetch(serverApi.query({ table: 'visitor_logs', action: 'select', select: 'status', filters: [propFilter] }), []),
@@ -275,12 +275,13 @@ export function useDashboardQuery(
     refetchOnWindowFocus: false,
     retry: 2,
     networkMode: 'offlineFirst',
-    placeholderData: keepPreviousData, // Keep showing old data until new arrives
   });
 
   return {
     data: queryResult.data,
-    isLoading: initialLoadingOnMount ? queryResult.isLoading : (!queryResult.data ? queryResult.isLoading : false),
+    // Show loading ONLY on initial mount (first time, no cache)
+    // After initial mount, never show loading - use cached data or background refetch
+    isLoading: queryResult.isLoading && (initialLoadingOnMount || !queryResult.data),
     isFetching: queryResult.isFetching,
     isStale: queryResult.isStale,
     error: queryResult.error,

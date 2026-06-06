@@ -55,7 +55,7 @@ export function GlassTile({
   const statusColor = status ? STATUS_COLORS[status].bg : null;
 
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={{ width: '100%' }}>
+    <Animated.View  style={{ width: '100%' }}>
       <TouchableOpacity activeOpacity={0.9} onPress={onPress} disabled={!onPress}>
         <SafeBlurView intensity={45} style={[styles.tile, style]} tint="dark">
           <LinearGradient
@@ -130,7 +130,7 @@ export function AttentionCard({ item, index, onAction }: { item: any; index: num
     item.type === 'sop_missed' ? 'checkbox-outline' : 'information-circle-outline';
 
   return (
-    <Animated.View entering={FadeInUp.delay(index * 100).duration(500)}>
+    <Animated.View >
       <TouchableOpacity
         activeOpacity={0.85}
         onPress={onAction}

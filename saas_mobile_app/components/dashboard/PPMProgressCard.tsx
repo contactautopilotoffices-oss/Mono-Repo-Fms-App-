@@ -148,7 +148,7 @@ export const PPMProgressCard: React.FC<PPMProgressCardProps> = ({
   };
 
   return (
-    <Animated.View entering={FadeInUp.delay(delay)} style={styles.wrapper}>
+    <Animated.View  style={styles.wrapper}>
       <TouchableOpacity onPress={onPress} activeOpacity={0.92} style={styles.card}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
 

@@ -636,7 +636,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const renderMyDashboard = () => (
     <>
       {/* Gamification strip */}
-      <Animated.View entering={FadeInUp.delay(100).duration(600)} style={styles.gamifyCard}>
+      <Animated.View  style={styles.gamifyCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.gamifyInner}>
           <LevelBadge level={mstUser.level} size="md" />
@@ -728,11 +728,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const renderDailyBoard = () => (
     <>
-      <Animated.View entering={FadeInUp.duration(500)}>
+      <Animated.View >
         <Text style={styles.heroTitle}>Daily Board</Text>
       </Animated.View>
 
-      <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.countdownCard}>
+      <Animated.View  style={styles.countdownCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.countdownInner}>
           <View style={styles.countdownLabelRow}>
@@ -754,12 +754,12 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const renderLiveFlow = () => (
     <>
-      <Animated.View entering={FadeInUp.duration(500)}>
+      <Animated.View >
         <Text style={styles.heroTitle}>Live Flow</Text>
       </Animated.View>
 
       {/* Weekly Champion */}
-      <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.championCard}>
+      <Animated.View  style={styles.championCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.championInner}>
           <View style={styles.championAvatarWrap}>
@@ -811,7 +811,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     return (
       <>
         {/* Identity card */}
-        <Animated.View entering={FadeInUp.duration(500)} style={styles.identityCard}>
+        <Animated.View  style={styles.identityCard}>
           <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
           <View style={styles.identityInner}>
             <View style={styles.identityTop}>
@@ -871,7 +871,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (isLoading && !data) {
+  // BLOCK rendering until we have actual data (prevents empty UI flash)
+  if (!data) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
@@ -886,7 +887,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       <StatusBar barStyle="light-content" />
       <WeatherBackground condition={undefined} />
 
-      <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
+      <Animated.View  style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <FloatingMenu
             title="Maintenance Portal"
             items={[

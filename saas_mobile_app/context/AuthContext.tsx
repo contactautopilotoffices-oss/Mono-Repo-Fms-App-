@@ -441,6 +441,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useDashboardStore.getState().clearUIState();
     queryClient.removeQueries(); // Completely purge cache rather than just clear()
     queryClient.clear();
+    
+    // Clear MMKV persisted query cache
+    try {
+      const { MMKV } = require('react-native-mmkv');
+      const mmkvStorage = new MMKV({ id: 'react-query-cache' });
+      mmkvStorage.delete('autopilot-react-query-cache');
+    } catch (e) {}
+
+    const { resetAnimatedNumber } = require('@/components/ui/AnimatedNumber');
+    resetAnimatedNumber();
+
     await supabase.auth.signOut();
   }, [supabase, user?.id]);
 

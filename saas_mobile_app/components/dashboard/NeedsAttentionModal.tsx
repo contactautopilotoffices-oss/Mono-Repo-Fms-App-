@@ -223,7 +223,7 @@ export default function NeedsAttentionModal({
               return (
                 <Animated.View
                   key={itemKey}
-                  entering={FadeInUp.delay(index * 50).duration(350)}
+                  
                   style={{ marginHorizontal: SPACING.xl, marginBottom: 10 }}
                 >
                   <TouchableOpacity

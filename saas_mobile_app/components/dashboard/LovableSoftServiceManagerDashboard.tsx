@@ -79,7 +79,7 @@ function KPICard({ value, label, color, icon, delay = 0 }: {
   icon: keyof typeof Ionicons.glyphMap; delay?: number;
 }) {
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(450)} style={[sKPI.card, { borderColor: `${color}22` }]}>
+    <Animated.View  style={[sKPI.card, { borderColor: `${color}22` }]}>
       <LinearGradient colors={[`${color}1A`, 'transparent']} style={StyleSheet.absoluteFillObject} />
       <View style={[sKPI.iconWrap, { backgroundColor: `${color}1A` }]}>
         <Ionicons name={icon} size={18} color={color} />
@@ -104,7 +104,7 @@ function StockRow({ item, index }: { item: StockItem; index: number }) {
   const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
 
   return (
-    <Animated.View entering={FadeInUp.delay(index * 40).duration(400)} style={sStock.row}>
+    <Animated.View  style={sStock.row}>
       <LinearGradient colors={['rgba(255,255,255,0.05)', 'transparent']} style={StyleSheet.absoluteFillObject} />
       <View style={[sStock.dot, { backgroundColor: color }]} />
       <View style={sStock.mid}>
@@ -138,7 +138,7 @@ function TicketRow({ ticket, index, onPress }: { ticket: Ticket; index: number; 
   const color = pc[ticket.priority?.toLowerCase()] ?? '#6B7280';
 
   return (
-    <Animated.View entering={FadeInUp.delay(index * 40).duration(400)}>
+    <Animated.View >
       <TouchableOpacity style={sTkt.row} onPress={onPress} activeOpacity={0.82}>
         <LinearGradient colors={['rgba(255,255,255,0.05)', 'transparent']} style={StyleSheet.absoluteFillObject} />
         <View style={[sTkt.prio, { backgroundColor: color }]} />
@@ -209,7 +209,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
   const [isTogglingShift, setIsTogglingShift] = useState(false);
 
   // ─── NEW: Unified React Query Data (Source of Truth) ───
-  const { data: dashboardData, isLoading, refetch, forceRefresh } = useServerQuery<{
+  const { data: dashboardData, refetch, forceRefresh } = useServerQuery<{
     propertyName: string;
     tickets: Ticket[];
     stockItems: StockItem[];
@@ -347,7 +347,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_ACCENT} />}
     >
       {/* Hero greeting */}
-      <Animated.View entering={FadeInDown.duration(400)} style={sOv.hero}>
+      <Animated.View  style={sOv.hero}>
         <SafeBlurView intensity={25} tint="dark" style={StyleSheet.absoluteFillObject} />
         <LinearGradient
           colors={[`${SSM_ACCENT}22`, 'transparent']}
@@ -382,7 +382,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       </Animated.View>
 
       {/* KPI Row */}
-      <Animated.View entering={FadeInDown.delay(80).duration(400)} style={sOv.kpiRow}>
+      <Animated.View  style={sOv.kpiRow}>
         <KPICard value={ticketStats.open}   label="Open Tickets" color="#3B82F6" icon="ticket-outline" delay={0} />
         <KPICard value={stockStats.total}   label="Stock Items"  color={SSM_ACCENT}  icon="cube-outline"   delay={60} />
         <KPICard value={`${sopTotal > 0 ? Math.round(sopDone / sopTotal * 100) : 100}%`} label="SOP Done" color={SSM_GREEN} icon="checkbox-outline" delay={120} />
@@ -390,7 +390,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
 
       {/* Stock alerts */}
       {(stockStats.lowStock > 0 || stockStats.outStock > 0) && (
-        <Animated.View entering={FadeInDown.delay(160).duration(400)} style={sOv.alertCard}>
+        <Animated.View  style={sOv.alertCard}>
           <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
           <View style={sOv.alertRow}>
             <Ionicons name="warning-outline" size={16} color={SSM_AMBER} />
@@ -436,7 +436,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
 
       {/* Quick actions */}
-      <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+      <Animated.View >
         <Text style={sOv.secTitle}>Quick Actions</Text>
         <View style={sOv.actionsRow}>
           {[
@@ -469,7 +469,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_ACCENT} />}
     >
       {/* Header row */}
-      <Animated.View entering={FadeInDown.duration(400)} style={sSection.header}>
+      <Animated.View  style={sSection.header}>
         <Text style={sSection.title}>Stock / Inventory</Text>
         <TouchableOpacity
           style={sSection.scanBtn}
@@ -481,7 +481,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       </Animated.View>
 
       {/* Summary chips */}
-      <Animated.View entering={FadeInDown.delay(60).duration(400)} style={sSection.chips}>
+      <Animated.View  style={sSection.chips}>
         <View style={sSection.chip}><Text style={sSection.chipNum}>{stockStats.total}</Text><Text style={sSection.chipLabel}>Total</Text></View>
         <View style={[sSection.chip, { borderColor: `${SSM_AMBER}33` }]}><Text style={[sSection.chipNum, { color: SSM_AMBER }]}>{stockStats.lowStock}</Text><Text style={sSection.chipLabel}>Low</Text></View>
         <View style={[sSection.chip, { borderColor: 'rgba(239,68,68,0.3)' }]}><Text style={[sSection.chipNum, { color: '#EF4444' }]}>{stockStats.outStock}</Text><Text style={sSection.chipLabel}>Out</Text></View>
@@ -507,12 +507,12 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_GREEN} />}
     >
-      <Animated.View entering={FadeInDown.duration(400)} style={sSection.header}>
+      <Animated.View  style={sSection.header}>
         <Text style={sSection.title}>Checklists & SOP</Text>
       </Animated.View>
 
       {/* Progress visual */}
-      <Animated.View entering={FadeInDown.delay(80).duration(400)} style={sCl.progressCard}>
+      <Animated.View  style={sCl.progressCard}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
         <LinearGradient colors={[`${SSM_GREEN}18`, 'transparent']} style={StyleSheet.absoluteFillObject} />
         <View style={sCl.progressRow}>
@@ -548,7 +548,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
       refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#3B82F6" />}
     >
-      <Animated.View entering={FadeInDown.duration(400)} style={sSection.header}>
+      <Animated.View  style={sSection.header}>
         <Text style={sSection.title}>Tickets</Text>
         <View style={sSection.chips}>
           <View style={sSection.chip}><Text style={sSection.chipNum}>{ticketStats.open}</Text><Text style={sSection.chipLabel}>Open</Text></View>
@@ -599,7 +599,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
     >
       {/* Profile card */}
-      <Animated.View entering={FadeInDown.duration(400)} style={sPro.card}>
+      <Animated.View  style={sPro.card}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
         <LinearGradient colors={[`${SSM_ACCENT}22`, 'transparent']} style={StyleSheet.absoluteFillObject} />
         <View style={sPro.avatarWrap}>
@@ -637,7 +637,8 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
   );
 
   // ── Loading (only if no cached data) ──
-  if (isLoading && !dashboardData) {
+  // BLOCK rendering until we have actual data (prevents empty UI flash)
+  if (!dashboardData) {
     return (
       <View style={[sMain.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <LinearGradient colors={[...BG]} style={StyleSheet.absoluteFillObject} />
@@ -655,7 +656,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
       <WeatherBackground condition={weather?.condition} />
 
       {/* ── Header ── */}
-      <Animated.View entering={FadeInDown.duration(400)} style={sMain.header}>
+      <Animated.View  style={sMain.header}>
         <Image
           source={require('@/assets/images/autopilot-logo-new.png')}
           style={sMain.logo}

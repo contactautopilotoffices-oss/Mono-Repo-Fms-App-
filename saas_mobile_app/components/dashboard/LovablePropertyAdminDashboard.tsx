@@ -137,7 +137,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     tickets.forEach((t) => {
       if (RESOLVED_STATUSES.includes(t.status)) return;
 
-      if (t.internal === false && t.raised_by && tenantUserIds.includes(t.raised_by) && !seenIds.has(t.id)) {
+      if (t.raised_by && tenantUserIds.includes(t.raised_by) && !seenIds.has(t.id)) {
         items.push({ id: `tenant-${t.id}`, entity_id: t.id, entity_type: 'ticket', severity: 'high', type: 'tenant_ticket', title: 'Client Ticket', description: t.title || 'Client raised ticket', action_label: 'View' });
         seenIds.add(t.id);
       }
@@ -273,7 +273,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   };
 
   // ─── Loading State ───
-  if (isLoading && !data) {
+  // BLOCK rendering until we have actual data (prevents empty UI flash)
+  if (!data) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, backgroundColor: '#121212' }]}>
         <StatusBar barStyle="light-content" />
@@ -295,7 +296,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       <StatusBar barStyle="light-content" />
       <WeatherBackground condition={weather?.condition} />
 
-      <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
+      <Animated.View  style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
           <Ionicons name="menu" size={28} color="#FFFFFF" />
         </TouchableOpacity>
@@ -349,7 +350,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />}
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
-        <Animated.View entering={FadeInUp.delay(100).duration(600)} style={styles.overviewHeader}>
+        <Animated.View  style={styles.overviewHeader}>
           <Text style={styles.overviewTitle}>PROPERTY OVERVIEW</Text>
         </Animated.View>
 
@@ -384,7 +385,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           {/* Needs Attention */}
           {needsAttentionItems.length > 0 && (
             <>
-              <Animated.View entering={FadeInUp.delay(160).duration(500)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: SPACING.md }}>
+              <Animated.View  style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: SPACING.md }}>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>⚠️ NEEDS ATTENTION</Text>
                 <TouchableOpacity onPress={() => setShowNeedsAttention(true)}>
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>VIEW ALL</Text>

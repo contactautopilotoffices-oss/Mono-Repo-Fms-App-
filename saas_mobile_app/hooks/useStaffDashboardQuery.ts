@@ -5,7 +5,7 @@
  *
  * Dedicated hook for Staff dashboard with all staff-specific data.
  */
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { serverApi } from '@/lib/serverApi';
 import { ppmService } from '@/services/ppmService';
 import { queryKeys } from '@/utils/queryKeys';
@@ -138,12 +138,13 @@ export function useStaffDashboardQuery(
     refetchOnWindowFocus: false,
     retry: 2,
     networkMode: 'offlineFirst',
-    placeholderData: keepPreviousData, // Keep showing old data until new arrives
   });
 
   return {
     data: queryResult.data,
-    isLoading: initialLoadingOnMount ? queryResult.isLoading : (!queryResult.data ? queryResult.isLoading : false),
+    // Show loading ONLY on initial mount (first time, no cache)
+    // After initial mount, never show loading - use cached data or background refetch
+    isLoading: queryResult.isLoading && (initialLoadingOnMount || !queryResult.data),
     isFetching: queryResult.isFetching,
     isStale: queryResult.isStale,
     error: queryResult.error,

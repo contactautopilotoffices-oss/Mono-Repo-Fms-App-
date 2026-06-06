@@ -68,9 +68,7 @@ export default function TicketListItem({
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <SafeBlurView 
-        intensity={60} 
-        tint="dark" 
+      <View 
         style={[styles.card, priority?.toLowerCase() === 'critical' && !isClosed && styles.criticalCard]}
       >
         {/* Left accent bar for priority */}
@@ -159,7 +157,7 @@ export default function TicketListItem({
           )}
           <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
         </View>
-      </SafeBlurView>
+      </View>
     </TouchableOpacity>
   );
 }

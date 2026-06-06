@@ -8,77 +8,42 @@ import { useAuth } from './useAuth';
 import { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import { mmkvAsyncStorage } from '@/utils/storage';
 import { useDashboardStore } from '@/stores/dashboardStore';
-let firebaseModules:
-  | {
-      AuthorizationStatus: any;
-      getApp: () => any;
-      getMessaging: (app?: any) => any;
-      getToken: (messaging: any) => Promise<string>;
-      onTokenRefresh: (messaging: any, listener: (token: string) => void) => () => void;
-      requestPermission: (messaging: any) => Promise<number>;
-    }
-  | null = null;
 
-let firebaseInitAttempted = false;
+// Try to load @react-native-firebase/messaging (optional - for native builds)
+let firebaseApp: any = null;
+let firebaseMessaging: any = null;
+let firebaseInitialized = false;
 
-async function initializeFirebase(): Promise<boolean> {
-  if (firebaseInitAttempted) return firebaseModules !== null;
-  firebaseInitAttempted = true;
-
-  if (Platform.OS === 'web') return false;
+async function initializeFirebaseApp(): Promise<boolean> {
+  if (firebaseInitialized) return true;
 
   try {
-    // Import Firebase app - this initializes Firebase with google-services.json
-    const app = require('@react-native-firebase/app').default;
-    console.log('[Push] Firebase App imported');
-
-    // Check if actually initialized - getApp() throws if not
-    try {
-      app.getApp();
-      console.log('[Push] Firebase already initialized');
-      return true;
-    } catch (initErr: any) {
-      // Not initialized - google-services.json wasn't processed or we're in Expo Go
-      console.warn('[Push] Firebase not initialized:', initErr.message);
-      console.warn('[Push] This means:');
-      console.warn('[Push] 1. Running in Expo Go (FCM not supported)');
-      console.warn('[Push] 2. google-services.json missing or has wrong package name');
-      console.warn('[Push] 3. Native build outdated (run: npx expo prebuild --platform android)');
-      return false;
-    }
+    firebaseApp = require('@react-native-firebase/app').default;
+    // @react-native-firebase/app auto-initializes from google-services.json
+    // at build time via the com.google.gms.google-services gradle plugin.
+    // Just verify the default app exists.
+    const app = firebaseApp.getApp();
+    console.log('[Push] ✅ Firebase native app ready:', app.name);
+    firebaseInitialized = true;
+    return true;
   } catch (err: any) {
-    console.error('[Push] Firebase App import failed:', err.message);
-    return false;
+    console.warn('[Push] Firebase native app not available:', err.message || err);
   }
+
+  firebaseInitialized = true; // Mark as attempted
+  return false;
 }
 
-async function getFirebaseMessagingModules(): Promise<typeof firebaseModules> {
-  if (Platform.OS === 'web') return null;
-  if (firebaseModules) return firebaseModules;
-
-  // First initialize Firebase
-  const initialized = await initializeFirebase();
-  if (!initialized) return null;
+function tryLoadFirebaseNative(): boolean {
+  if (firebaseMessaging) return true;
 
   try {
-    const messaging = require('@react-native-firebase/messaging');
-    const app = require('@react-native-firebase/app').default;
-
-    console.log('[Push] Firebase messaging module loaded');
-    firebaseModules = {
-      AuthorizationStatus: messaging.AuthorizationStatus,
-      getApp: () => app,
-      getMessaging: messaging.getMessaging,
-      getToken: messaging.getToken,
-      onTokenRefresh: messaging.onTokenRefresh,
-      requestPermission: messaging.requestPermission,
-    };
-
-    console.log('[Push] ✅ Firebase modules ready');
-    return firebaseModules;
-  } catch (err: any) {
-    console.error('[Push] ❌ Firebase messaging not available:', err.message);
-    return null;
+    firebaseMessaging = require('@react-native-firebase/messaging');
+    console.log('[Push] ✅ @react-native-firebase/messaging loaded');
+    return true;
+  } catch (err) {
+    console.log('[Push] ℹ️ @react-native-firebase/messaging not available');
+    return false;
   }
 }
 
@@ -133,12 +98,6 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null;
   }
 
-  // SDK 53+ restriction for Expo Go on Android
-  if (Platform.OS === 'android' && Constants.appOwnership === 'expo') {
-    console.warn('[Push] ❌ Android remote notifications are not supported in Expo Go (SDK 53+). Use a development build instead.');
-    return null;
-  }
-
   console.log('[Push] Checking notification permissions...');
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   if (existingStatus !== 'granted') {
@@ -154,34 +113,53 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   let token: string | null = null;
-  try {
-    console.log('[Push] Getting Firebase messaging modules...');
-    const firebaseMessaging = await getFirebaseMessagingModules();
-    if (!firebaseMessaging) {
-      console.log('[Push] ❌ Firebase messaging modules not available');
-      return null;
+
+  // Initialize Firebase first (required for native builds)
+  await initializeFirebaseApp();
+
+  // Try native Firebase first (for development builds with google-services)
+  if (tryLoadFirebaseNative()) {
+    try {
+      console.log('[Push] Trying @react-native-firebase/messaging...');
+      const messaging = firebaseMessaging.default || firebaseMessaging;
+
+      // Get token directly
+      const fcmToken = await messaging().getToken();
+      if (fcmToken) {
+        token = fcmToken;
+        console.log('[Push] ✅ FCM Token (native):', token?.substring(0, 20) + '...');
+      }
+    } catch (err: any) {
+      console.warn('[Push] Native FCM error:', err.message);
     }
-    console.log('[Push] ✅ Firebase messaging modules loaded');
+  }
 
-    const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
-    console.log('[Push] Requesting FCM permission...');
-    const authStatus = await firebaseMessaging.requestPermission(messagingInstance);
-    console.log('[Push] Auth status:', authStatus);
+  // Fallback: Try expo-notifications (works with Expo EAS builds if FCM configured)
+  if (!token) {
+    try {
+      console.log('[Push] Trying expo-notifications push token...');
 
-    const enabled =
-      authStatus === firebaseMessaging.AuthorizationStatus.AUTHORIZED ||
-      authStatus === firebaseMessaging.AuthorizationStatus.PROVISIONAL;
-
-    if (enabled) {
-      console.log('[Push] Getting FCM token...');
-      token = await firebaseMessaging.getToken(messagingInstance);
-      console.log('[Push] ✅ FCM Token received:', token?.substring(0, 20) + '...');
-    } else {
-      console.log('[Push] ❌ Firebase messaging not authorized');
-      return null;
+      // Get project ID for EAS builds
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (projectId) {
+        const tokenResult = await Notifications.getExpoPushTokenAsync({
+          projectId,
+        });
+        if (tokenResult?.data) {
+          token = tokenResult.data;
+          console.log('[Push] ✅ Expo Push Token:', token?.substring(0, 40) + '...');
+        }
+      } else {
+        console.log('[Push] ℹ️ No EAS projectId configured - skipping expo push token');
+      }
+    } catch (err: any) {
+      console.warn('[Push] Expo push token error:', err.message);
     }
-  } catch (error) {
-    console.error('[Push] ❌ Failed to get native FCM token:', error);
+  }
+
+  if (!token) {
+    console.log('[Push] ❌ No push token could be obtained');
+    console.log('[Push] 💡 Tip: Run "npx expo prebuild --platform android" to enable native FCM');
     return null;
   }
 
@@ -212,6 +190,10 @@ async function storePushToken(
   organizationId?: string | null
 ): Promise<boolean> {
   try {
+    console.log('[Push] Storing token for user:', userId);
+    console.log('[Push] Token:', token?.substring(0, 30) + '...');
+
+    // Try Fastify server first
     const { error } = await serverApi.query({
       table: 'push_tokens',
       action: 'upsert',
@@ -229,13 +211,32 @@ async function storePushToken(
     });
 
     if (error) {
-      console.error('[Push] Token storage error:', error);
-      return false;
+      console.warn('[Push] Fastify server store failed, trying Next.js server:', error.message);
+      // Fallback: Use mobile server directly
+      const mobileServerUrl = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL || 'https://fms-dev-saas-one.vercel.app';
+      const response = await fetch(`${mobileServerUrl}/api/push-tokens/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          token,
+          propertyId,
+          organizationId,
+          deviceInfo: `${Platform.OS} ${Device.modelName || 'unknown'}`,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        console.error('[Push] ❌ Mobile server store failed:', errData.error || response.statusText);
+        return false;
+      }
     }
-    console.log('[Push] Token stored:', { userId, propertyId, organizationId });
+
+    console.log('[Push] ✅ Token stored successfully!');
     return true;
-  } catch (err) {
-    console.error('[Push] Token storage exception:', err);
+  } catch (err: any) {
+    console.error('[Push] ❌ Token storage exception:', err);
     return false;
   }
 }
@@ -374,10 +375,9 @@ export function usePushNotifications() {
     let unsubscribe = () => {};
     (async () => {
       try {
-        const firebaseMessaging = await getFirebaseMessagingModules();
-        if (firebaseMessaging) {
-          const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
-          unsubscribe = firebaseMessaging.onTokenRefresh(messagingInstance, (newToken: string) => {
+        if (tryLoadFirebaseNative()) {
+          const messaging = firebaseMessaging.default || firebaseMessaging;
+          unsubscribe = messaging().onTokenRefresh(async (newToken: string) => {
             console.log('[Push] Token refreshed via Firebase:', newToken);
             if (user?.id) {
               storePushToken(user.id, newToken, propertyId, organizationId);

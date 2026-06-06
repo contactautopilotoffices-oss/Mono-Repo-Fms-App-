@@ -8,6 +8,9 @@ Features:
 - Intelligent query planning (single table vs multi-table)
 - Aggregation support via Python computation
 - Clarification on empty results
+- ROBUST date parsing for LLM-generated SQL
+- Proper property scoping (respects explicit property_id in WHERE)
+- Increased fetch limits for aggregation queries
 
 Usage:
     from cassandra.tools.sql_engine_v2 import SQLEngineV2
@@ -27,6 +30,7 @@ import logging
 import os
 import re
 import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 import httpx
@@ -48,15 +52,37 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get(
     os.environ.get("FMS_SUPABASE_SERVICE_ROLE_KEY", ""),
 )
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+DEFAULT_ROW_LIMIT = 200
+AGGREGATION_ROW_LIMIT = 1000
+JOIN_ROW_LIMIT = 1000
+
+# Date columns we know about in the schema
+DATE_COLUMNS = {
+    "created_at", "updated_at", "reading_date", "entry_date", "revenue_date",
+    "done_date", "planned_date", "completion_date", "date", "event_at",
+    "check_in_at", "check_out_at", "accepted_at", "assigned_at", "resolved_at",
+    "closed_at", "validated_at", "approved_at", "rejected_at", "ordered_at",
+    "delivered_at", "cancelled_at", "escalated_at", "verified_at", "generated_at",
+    "contract_start_date", "contract_end_date", "effective_from", "effective_to",
+    "last_maintenance_date", "next_maintenance_date", "booking_date",
+    "cycle_start", "cycle_end", "period_start", "period_end",
+    "started_at", "started_at", "last_seen_at", "first_login",
+    "last_activity", "session_start", "session_end",
+}
+
 
 class SQLEngineV2:
     """
-    SQL Engine v2 with FK-aware JOIN support.
+    SQL Engine v2 with FK-aware JOIN support and robust LLM SQL parsing.
 
     Execution path:
-    1. Parse query for tables and JOINs
+    1. Parse query for tables, columns, WHERE, ORDER BY, LIMIT
     2. If multi-table: fetch each table separately, JOIN in Python
-    3. If single-table: execute via PostgREST
+    3. If single-table: execute via PostgREST with proper params
     4. Compute aggregations in Python (PostgREST GROUP BY is limited)
     """
 
@@ -76,35 +102,25 @@ class SQLEngineV2:
         """
         Execute a query with FK-aware validation.
         Thread-safe sync wrapper — works whether or not an event loop is running.
-
-        Args:
-            query: SQL-like query string
-            context: Execution context with org_id, property_id, etc.
-
-        Returns:
-            ToolResult with data or error
         """
         def _run():
             return asyncio.run(self.execute_async(query, context))
 
         try:
-            # If we're already inside a running event loop (e.g. FastAPI), run in a
-            # separate thread to avoid "cannot run nested event loop" error.
             asyncio.get_running_loop()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 return pool.submit(_run).result(timeout=60)
         except RuntimeError:
-            # No running loop — safe to call asyncio.run directly
             return asyncio.run(self.execute_async(query, context))
 
     async def execute_async(self, query: str, context: dict[str, Any]) -> ToolResult:
         """
-        Async execute with FK validation.
+        Async execute with FK validation and robust parsing.
         """
         org_id = context.get("org_id", "")
         property_id = context.get("property_id", "")
 
-        logger.info(f"[SQL_ENGINE_V2] Query: {query[:100]}...")
+        logger.info(f"[SQL_ENGINE_V2] Query: {query[:120]}...")
 
         # Step 1: Validate FK joins
         if self.fk_graph.needs_join(query):
@@ -127,6 +143,10 @@ class SQLEngineV2:
         else:
             return await self._execute_single_table(query, context)
 
+    # ========================================================================
+    # Query Parsing
+    # ========================================================================
+
     def _extract_tables(self, sql: str) -> list[str]:
         """Extract table names from SQL query."""
         from_pattern = r'FROM\s+(\w+)'
@@ -135,7 +155,572 @@ class SQLEngineV2:
         tables = re.findall(from_pattern, sql, re.IGNORECASE)
         tables.extend(re.findall(join_pattern, sql, re.IGNORECASE))
 
-        return list(set(tables)) if tables else []
+        return list(dict.fromkeys(tables))  # Preserve order, remove duplicates
+
+    def _parse_query(self, sql: str) -> dict[str, Any]:
+        """
+        Parse simplified SQL into components with comprehensive extraction.
+
+        Returns dict with:
+        - table: primary table name
+        - tables: all tables involved
+        - columns: list of selected columns (or ["*"])
+        - select_raw: raw SELECT clause
+        - where: WHERE clause string
+        - order_by: ORDER BY clause string
+        - order_col: column to order by
+        - order_dir: asc or desc
+        - limit: int limit value
+        - is_count: bool
+        - is_sum: bool
+        - is_distinct: bool
+        - group_by: GROUP BY column
+        - is_aggregate: bool
+        """
+        result: dict[str, Any] = {
+            "table": "",
+            "tables": [],
+            "columns": ["*"],
+            "select_raw": "",
+            "where": "",
+            "order_by": "",
+            "order_col": "",
+            "order_dir": "asc",
+            "limit": None,
+            "is_count": False,
+            "is_sum": False,
+            "is_distinct": False,
+            "group_by": "",
+            "is_aggregate": False,
+        }
+
+        sql_upper = sql.upper()
+
+        # Extract tables
+        result["tables"] = self._extract_tables(sql)
+        if result["tables"]:
+            result["table"] = result["tables"][0]
+
+        # Extract SELECT columns
+        select_match = re.search(
+            r'SELECT\s+(DISTINCT\s+)?(.+?)\s+FROM\s+',
+            sql, re.IGNORECASE | re.DOTALL
+        )
+        if select_match:
+            result["is_distinct"] = bool(select_match.group(1))
+            select_body = select_match.group(2).strip()
+            result["select_raw"] = select_body
+            result["columns"] = self._split_select_columns(select_body)
+
+        # Detect COUNT(*), SUM(col), AVG, etc.
+        if re.search(r'\bCOUNT\s*\(\s*\*?\s*\)', sql, re.IGNORECASE):
+            result["is_count"] = True
+            result["is_aggregate"] = True
+        if re.search(r'\bSUM\s*\(', sql, re.IGNORECASE):
+            result["is_sum"] = True
+            result["is_aggregate"] = True
+        if re.search(r'\bAVG\s*\(|MIN\s*\(|\bMAX\s*\(', sql, re.IGNORECASE):
+            result["is_aggregate"] = True
+
+        # Extract WHERE
+        where_match = re.search(
+            r'WHERE\s+(.+?)(?:ORDER\s+BY|LIMIT|GROUP\s+BY|$)',
+            sql, re.IGNORECASE | re.DOTALL
+        )
+        if where_match:
+            result["where"] = where_match.group(1).strip()
+
+        # Extract ORDER BY
+        order_match = re.search(
+            r'ORDER\s+BY\s+([\w.]+)(?:\s+(ASC|DESC))?',
+            sql, re.IGNORECASE
+        )
+        if order_match:
+            result["order_by"] = order_match.group(0)
+            result["order_col"] = order_match.group(1)
+            result["order_dir"] = (order_match.group(2) or "asc").lower()
+
+        # Extract LIMIT
+        limit_match = re.search(r'LIMIT\s+(\d+)', sql, re.IGNORECASE)
+        if limit_match:
+            result["limit"] = int(limit_match.group(1))
+
+        # Extract GROUP BY
+        group_match = re.search(r'GROUP\s+BY\s+([\w.]+)', sql, re.IGNORECASE)
+        if group_match:
+            result["group_by"] = group_match.group(1)
+            result["is_aggregate"] = True
+
+        return result
+
+    def _split_select_columns(self, select_body: str) -> list[str]:
+        """
+        Split a SELECT clause into individual column expressions.
+        Handles table.column, aliases, and simple aggregates.
+        """
+        columns = []
+        # Simple split by comma, but be careful with nested parens
+        # For now, basic comma split is sufficient for LLM-generated queries
+        parts = []
+        depth = 0
+        current = ""
+        for char in select_body:
+            if char == '(':
+                depth += 1
+                current += char
+            elif char == ')':
+                depth -= 1
+                current += char
+            elif char == ',' and depth == 0:
+                parts.append(current.strip())
+                current = ""
+            else:
+                current += char
+        if current.strip():
+            parts.append(current.strip())
+
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Extract alias if present: "expr AS alias" or "expr alias"
+            alias_match = re.search(r'(?:AS\s+)?(\w+)\s*$', part, re.IGNORECASE)
+            if alias_match and "(" in part:
+                # For aggregates, use the alias or the inner column
+                col = alias_match.group(1)
+            else:
+                col = part
+            columns.append(col)
+        return columns if columns else ["*"]
+
+    # ========================================================================
+    # WHERE Parsing — The heart of the fix
+    # ========================================================================
+
+    def _parse_where_to_params(
+        self, where: str, context: dict[str, Any]
+    ) -> dict[str, str]:
+        """
+        Convert simplified WHERE clauses to PostgREST query params.
+
+        Handles:
+        - property_id, organization_id (with explicit value detection)
+        - status filters (single and IN)
+        - Date / time range filters (comprehensive)
+        - Comparison operators: =, !=, <>, >, >=, <, <=
+        - LIKE / ILIKE patterns
+        - IS NULL / IS NOT NULL
+        - AND / OR compound conditions
+        - CURRENT_DATE arithmetic
+        - BETWEEN
+        - DATE_TRUNC
+        """
+        params: dict[str, str] = {}
+        if not where or not where.strip():
+            return params
+
+        where_clean = where.strip()
+
+        # ── Detect explicit property_id in WHERE ─────────────────────────────
+        # If the LLM explicitly set property_id = 'specific-uuid', we should
+        # NOT override it with the session property_id later.
+        explicit_property_id = self._extract_explicit_value(where_clean, "property_id")
+        explicit_org_id = self._extract_explicit_value(where_clean, "organization_id")
+
+        # Store these in params as metadata (will be stripped before HTTP call)
+        if explicit_property_id:
+            params["__explicit_property_id"] = explicit_property_id
+        if explicit_org_id:
+            params["__explicit_org_id"] = explicit_org_id
+
+        # ── Parse date conditions FIRST (they may be compound) ───────────────
+        date_params = self._parse_date_conditions(where_clean, context)
+        params.update(date_params)
+
+        # ── Parse compound AND conditions ────────────────────────────────────
+        and_params = self._parse_and_conditions(where_clean, context)
+        params.update(and_params)
+
+        # ── Parse remaining simple conditions ────────────────────────────────
+        simple_params = self._parse_simple_conditions(where_clean, context)
+        # Merge without overwriting date_params
+        for k, v in simple_params.items():
+            if k not in params:
+                params[k] = v
+
+        return params
+
+    def _extract_explicit_value(self, where: str, column: str) -> Optional[str]:
+        """Extract an explicit UUID/string value assigned to a column in WHERE."""
+        # Match: column = 'uuid' or column = "uuid" (but not parameterized $1)
+        pattern = rf"\b{re.escape(column)}\s*=\s*['\"]([^'\"]+)['\"]"
+        match = re.search(pattern, where, re.IGNORECASE)
+        if match:
+            val = match.group(1).strip()
+            if val and not val.startswith("$"):
+                return val
+        return None
+
+    def _parse_date_conditions(self, where: str, context: dict[str, Any]) -> dict[str, str]:
+        """
+        Parse all date-related conditions in the WHERE clause.
+        Returns PostgREST params for date filtering.
+        """
+        params: dict[str, str] = {}
+        where_lower = where.lower()
+
+        # Detect which date column is referenced
+        date_col = self._detect_date_column(where)
+        if not date_col:
+            return params
+
+        today = date.today()
+        now = datetime.now(timezone.utc)
+
+        # ── Pattern 1: CURRENT_DATE - INTERVAL 'N unit' ──────────────────────
+        # Examples: created_at >= CURRENT_DATE - INTERVAL '7 days'
+        #           created_at >= NOW() - INTERVAL '1 month'
+        interval_pattern = re.compile(
+            rf"\b{re.escape(date_col)}\s*(>=|>|<=|<|=)\s*"
+            rf"(?:CURRENT_DATE|NOW\(\)|CURRENT_TIMESTAMP)\s*"
+            rf"(?:\s*[-+]\s*INTERVAL\s+['\"](\d+)\s*(day|days|week|weeks|month|months|year|years)['\"])",
+            re.IGNORECASE,
+        )
+        for match in interval_pattern.finditer(where):
+            op = match.group(1)
+            num = int(match.group(2))
+            unit = match.group(3).lower().rstrip("s")
+            delta = self._compute_interval_delta(num, unit)
+            if delta is not None:
+                cutoff = today - delta if "CURRENT_DATE" in match.group(0).upper() else (now - delta).date()
+                cutoff_str = cutoff.isoformat()
+                if op == ">=":
+                    params[date_col] = f"gte.{cutoff_str}T00:00:00"
+                elif op == ">":
+                    params[date_col] = f"gt.{cutoff_str}T00:00:00"
+                elif op == "<=":
+                    params[date_col] = f"lte.{cutoff_str}T23:59:59"
+                elif op == "<":
+                    params[date_col] = f"lt.{cutoff_str}T00:00:00"
+            return params  # Only handle one date condition per column for now
+
+        # ── Pattern 2: CURRENT_DATE - INTERVAL without CURRENT_DATE prefix ───
+        # Example: created_at >= '2026-01-01'::date  (skip, handled below)
+
+        # ── Pattern 3: Date range with >= AND < ──────────────────────────────
+        # Example: created_at >= '2026-01-01' AND created_at < '2026-02-01'
+        range_match = re.search(
+            rf"\b{re.escape(date_col)}\s*>=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"].*?"
+            rf"\b{re.escape(date_col)}\s*<\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE | re.DOTALL,
+        )
+        if range_match:
+            start = range_match.group(1)
+            end = range_match.group(2)
+            params["and"] = f"({date_col}.gte.{start}T00:00:00,{date_col}.lt.{end}T00:00:00)"
+            return params
+
+        # ── Pattern 4: Date range with >= AND <= ─────────────────────────────
+        range_match2 = re.search(
+            rf"\b{re.escape(date_col)}\s*>=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"].*?"
+            rf"\b{re.escape(date_col)}\s*<=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE | re.DOTALL,
+        )
+        if range_match2:
+            start = range_match2.group(1)
+            end = range_match2.group(2)
+            params["and"] = f"({date_col}.gte.{start}T00:00:00,{date_col}.lte.{end}T23:59:59)"
+            return params
+
+        # ── Pattern 5: BETWEEN ───────────────────────────────────────────────
+        # Example: created_at BETWEEN '2026-01-01' AND '2026-01-31'
+        between_match = re.search(
+            rf"\b{re.escape(date_col)}\s+BETWEEN\s+['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]\s+AND\s+['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE,
+        )
+        if between_match:
+            start = between_match.group(1)
+            end = between_match.group(2)
+            params["and"] = f"({date_col}.gte.{start}T00:00:00,{date_col}.lte.{end}T23:59:59)"
+            return params
+
+        # ── Pattern 6: DATE_TRUNC ────────────────────────────────────────────
+        # Example: DATE_TRUNC('month', created_at) = '2026-01-01'
+        trunc_match = re.search(
+            rf"DATE_TRUNC\s*\(\s*['\"](\w+)['\"]\s*,\s*{re.escape(date_col)}\s*\)\s*=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE,
+        )
+        if trunc_match:
+            trunc_unit = trunc_match.group(1).lower()
+            trunc_date = trunc_match.group(2)
+            start_dt = datetime.strptime(trunc_date, "%Y-%m-%d").date()
+            end_dt = self._date_trunc_end(start_dt, trunc_unit)
+            if end_dt:
+                params["and"] = (
+                    f"({date_col}.gte.{start_dt.isoformat()}T00:00:00,"
+                    f"{date_col}.lt.{end_dt.isoformat()}T00:00:00)"
+                )
+            else:
+                params[date_col] = f"gte.{start_dt.isoformat()}T00:00:00"
+            return params
+
+        # ── Pattern 7: EXTRACT(MONTH FROM created_at) = N ────────────────────
+        extract_match = re.search(
+            rf"EXTRACT\s*\(\s*(?:MONTH|YEAR|DAY)\s+FROM\s+{re.escape(date_col)}\s*\)\s*=\s*(\d+)",
+            where, re.IGNORECASE,
+        )
+        if extract_match:
+            val = int(extract_match.group(1))
+            if "month" in where_lower:
+                year = today.year
+                # Try to infer year from context or query
+                year_match = re.search(r"(\d{4})", where)
+                if year_match:
+                    year = int(year_match.group(1))
+                start = date(year, val, 1)
+                if val == 12:
+                    end = date(year + 1, 1, 1)
+                else:
+                    end = date(year, val + 1, 1)
+                params["and"] = (
+                    f"({date_col}.gte.{start.isoformat()}T00:00:00,"
+                    f"{date_col}.lt.{end.isoformat()}T00:00:00)"
+                )
+                return params
+            elif "year" in where_lower:
+                start = date(val, 1, 1)
+                end = date(val + 1, 1, 1)
+                params["and"] = (
+                    f"({date_col}.gte.{start.isoformat()}T00:00:00,"
+                    f"{date_col}.lt.{end.isoformat()}T00:00:00)"
+                )
+                return params
+
+        # ── Pattern 8: Cast ::date ───────────────────────────────────────────
+        # Example: created_at::date = '2026-01-01'
+        cast_match = re.search(
+            rf"\b{re.escape(date_col)}\s*::\s*date\s*=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE,
+        )
+        if cast_match:
+            d = cast_match.group(1)
+            params["and"] = (
+                f"({date_col}.gte.{d}T00:00:00,"
+                f"{date_col}.lt.{d}T23:59:59)"
+            )
+            return params
+
+        # ── Pattern 9: Keywords (already handled in v1, kept for compatibility) ─
+        if re.search(r"\byesterday\b", where, re.IGNORECASE):
+            yesterday = (today - timedelta(days=1)).isoformat()
+            params[date_col] = f"gte.{yesterday}T00:00:00"
+            return params
+
+        if re.search(r"\btoday\b|\bCURRENT_DATE\b(?!\s*[-+])", where, re.IGNORECASE):
+            params[date_col] = f"gte.{today.isoformat()}T00:00:00"
+            return params
+
+        if m := re.search(r"INTERVAL\s+['\"](\d+)\s+day", where, re.IGNORECASE):
+            cutoff = (today - timedelta(days=int(m.group(1)))).isoformat()
+            params[date_col] = f"gte.{cutoff}T00:00:00"
+            return params
+
+        if re.search(r"this\s+week", where, re.IGNORECASE):
+            start_of_week = (today - timedelta(days=today.weekday())).isoformat()
+            params[date_col] = f"gte.{start_of_week}T00:00:00"
+            return params
+
+        if re.search(r"this\s+month", where, re.IGNORECASE):
+            start_of_month = today.replace(day=1).isoformat()
+            params[date_col] = f"gte.{start_of_month}T00:00:00"
+            return params
+
+        if re.search(r"last\s+month", where, re.IGNORECASE):
+            if today.month == 1:
+                start_last = date(today.year - 1, 12, 1)
+                end_last = date(today.year, 1, 1)
+            else:
+                start_last = date(today.year, today.month - 1, 1)
+                end_last = date(today.year, today.month, 1)
+            params["and"] = (
+                f"({date_col}.gte.{start_last.isoformat()}T00:00:00,"
+                f"{date_col}.lt.{end_last.isoformat()}T00:00:00)"
+            )
+            return params
+
+        if re.search(r"last\s+week", where, re.IGNORECASE):
+            start_last_week = today - timedelta(days=today.weekday() + 7)
+            end_last_week = start_last_week + timedelta(days=7)
+            params["and"] = (
+                f"({date_col}.gte.{start_last_week.isoformat()}T00:00:00,"
+                f"{date_col}.lt.{end_last_week.isoformat()}T00:00:00)"
+            )
+            return params
+
+        # ── Pattern 10: Single explicit ISO date with operator ───────────────
+        single_date_match = re.search(
+            rf"\b{re.escape(date_col)}\s*(>=|>|<=|<|=)\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
+            where, re.IGNORECASE,
+        )
+        if single_date_match:
+            op = single_date_match.group(1)
+            d = single_date_match.group(2)
+            if op == ">=":
+                params[date_col] = f"gte.{d}T00:00:00"
+            elif op == ">":
+                params[date_col] = f"gt.{d}T00:00:00"
+            elif op == "<=":
+                params[date_col] = f"lte.{d}T23:59:59"
+            elif op == "<":
+                params[date_col] = f"lt.{d}T00:00:00"
+            elif op == "=":
+                params["and"] = (
+                    f"({date_col}.gte.{d}T00:00:00,"
+                    f"{date_col}.lte.{d}T23:59:59)"
+                )
+            return params
+
+        return params
+
+    def _detect_date_column(self, where: str) -> Optional[str]:
+        """Detect which date column is referenced in the WHERE clause."""
+        where_lower = where.lower()
+        # Check known date columns first
+        for col in DATE_COLUMNS:
+            if col.lower() in where_lower:
+                return col
+        # Generic fallback
+        if "date" in where_lower:
+            generic_match = re.search(r'\b(\w*date\w*)\b', where_lower)
+            if generic_match:
+                return generic_match.group(1)
+        return None
+
+    def _compute_interval_delta(self, num: int, unit: str) -> Optional[timedelta]:
+        """Compute a timedelta from interval components."""
+        unit = unit.lower().rstrip("s")
+        if unit == "day":
+            return timedelta(days=num)
+        if unit == "week":
+            return timedelta(weeks=num)
+        if unit == "month":
+            # Approximate with 30 days
+            return timedelta(days=num * 30)
+        if unit == "year":
+            return timedelta(days=num * 365)
+        return None
+
+    def _date_trunc_end(self, start: date, unit: str) -> Optional[date]:
+        """Compute the end boundary for a DATE_TRUNC equality."""
+        unit = unit.lower()
+        if unit == "day":
+            return start + timedelta(days=1)
+        if unit == "week":
+            return start + timedelta(weeks=1)
+        if unit == "month":
+            if start.month == 12:
+                return date(start.year + 1, 1, 1)
+            return date(start.year, start.month + 1, 1)
+        if unit == "year":
+            return date(start.year + 1, 1, 1)
+        if unit == "hour":
+            return None  # Can't represent with date
+        return None
+
+    def _parse_and_conditions(self, where: str, context: dict[str, Any]) -> dict[str, str]:
+        """
+        Parse top-level AND conditions into PostgREST 'and' operator.
+        Handles: status IN, priority filters, non-date comparisons.
+        """
+        params: dict[str, str] = {}
+        where_lower = where.lower()
+
+        # We only build an 'and' param if we find multiple simple conditions
+        # that aren't already handled by date parsing.
+        conditions: list[str] = []
+
+        # Status IN
+        in_match = re.search(r"status\s+IN\s*\(([^)]+)\)", where, re.IGNORECASE)
+        if in_match:
+            statuses = re.findall(r"'([^']+)'", in_match.group(1))
+            if statuses:
+                conditions.append(f"status.in.({','.join(statuses)})")
+
+        # Single status
+        status_match = re.search(r"status\s*=\s*'([^']+)'", where, re.IGNORECASE)
+        if status_match:
+            conditions.append(f"status.eq.{status_match.group(1)}")
+
+        # Single priority
+        priority_match = re.search(r"priority\s*=\s*'([^']+)'", where, re.IGNORECASE)
+        if priority_match:
+            conditions.append(f"priority.eq.{priority_match.group(1)}")
+
+        # Non-date comparisons for other columns
+        # Match patterns like: column op 'value' or column op number
+        # But skip date columns and already-handled columns
+        comp_pattern = re.compile(
+            r"\b(\w+)\s*(=|!=|<>|>=|<=|>|<)\s*('[^']*'|\d+(?:\.\d+)?|true|false)\b",
+            re.IGNORECASE,
+        )
+        handled_cols = {"status", "priority", "organization_id", "property_id"}
+        date_col = self._detect_date_column(where)
+        if date_col:
+            handled_cols.add(date_col.lower())
+
+        for match in comp_pattern.finditer(where):
+            col = match.group(1).lower()
+            if col in handled_cols:
+                continue
+            op = match.group(2)
+            val = match.group(3).strip("'\"")
+            # Map SQL operators to PostgREST
+            p_op = {"=": "eq", "!=": "neq", "<>": "neq", ">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}.get(op, "eq")
+            conditions.append(f"{col}.{p_op}.{val}")
+
+        # IS NULL / IS NOT NULL
+        null_pattern = re.compile(r"\b(\w+)\s+IS\s+(NOT\s+)?NULL\b", re.IGNORECASE)
+        for match in null_pattern.finditer(where):
+            col = match.group(1).lower()
+            is_not = bool(match.group(2))
+            if is_not:
+                conditions.append(f"{col}.not.is.null")
+            else:
+                conditions.append(f"{col}.is.null")
+
+        # LIKE / ILIKE
+        like_pattern = re.compile(r"\b(\w+)\s+(NOT\s+)?(LIKE|ILIKE)\s+'([^']+)'", re.IGNORECASE)
+        for match in like_pattern.finditer(where):
+            col = match.group(1).lower()
+            is_not = bool(match.group(2))
+            op = match.group(3).lower()
+            val = match.group(4)
+            # Convert SQL % wildcard to PostgREST *
+            val = val.replace("%", "*")
+            if is_not:
+                conditions.append(f"{col}.not.{op}.{val}")
+            else:
+                conditions.append(f"{col}.{op}.{val}")
+
+        if conditions:
+            # If we already have an 'and' from date parsing, merge them
+            if "and" in params:
+                existing = params["and"][1:-1]  # Remove outer parens
+                params["and"] = f"({existing},{','.join(conditions)})"
+            else:
+                params["and"] = f"({','.join(conditions)})"
+
+        return params
+
+    def _parse_simple_conditions(self, where: str, context: dict[str, Any]) -> dict[str, str]:
+        """Parse simple conditions not caught by other parsers."""
+        params: dict[str, str] = {}
+        return params
+
+
+    # ========================================================================
+    # Single-Table Execution
+    # ========================================================================
 
     async def _execute_single_table(
         self, query: str, context: dict[str, Any]
@@ -143,9 +728,9 @@ class SQLEngineV2:
         """
         Execute single-table query via PostgREST.
 
-        COUNT/DISTINCT queries use PostgREST count=exact (Content-Range header) so
-        the result is the ACTUAL database count, never the fetch-limit row count.
-        All other queries fetch up to 200 rows for aggregation in Python.
+        COUNT/DISTINCT queries use PostgREST count=exact (Content-Range header).
+        Aggregation queries (GROUP BY, SUM) fetch up to 1000 rows.
+        Regular queries fetch up to 200 rows.
         """
         if not self._http_client:
             self._http_client = httpx.AsyncClient(timeout=30.0)
@@ -170,50 +755,95 @@ class SQLEngineV2:
         # ── Build filter params ───────────────────────────────────────────────
         params: dict = {}
 
-        # Always scope to the session's organisation (never cross-org)
+        # Organization scope (non-negotiable)
         org_id = context.get("org_id", "")
         if org_id:
             params["organization_id"] = f"eq.{org_id}"
 
-        # Scope to session property when the query references property context
-        # (and table has a property_id column — checked via schema)
+        # Property scope (respect explicit property_id in WHERE)
         property_id = context.get("property_id", "")
         table_schema = TABLES.get(table, {})
         table_cols = table_schema.get("columns", [])
-        if property_id and "property_id" in table_cols:
-            # Only inject if the query doesn't explicitly say "all properties" or "org-wide"
+
+        # Parse WHERE first to detect explicit values
+        where_params: dict = {}
+        if parsed.get("where"):
+            where_params = self._parse_where_to_params(parsed["where"], context)
+
+        # Check if explicit property_id was in WHERE
+        explicit_property_id = where_params.pop("__explicit_property_id", None)
+        explicit_org_id = where_params.pop("__explicit_org_id", None)
+
+        # Property filter injection
+        if "property_id" in table_cols:
             q_lower = query.lower()
-            if not any(kw in q_lower for kw in ("all properties", "org-wide", "orgwide",
-                                                  "across properties")):
+            is_org_wide = any(kw in q_lower for kw in (
+                "all properties", "org-wide", "orgwide", "across properties",
+                "every property", "all_props", "org wide"
+            ))
+
+            if is_org_wide:
+                # Skip property filter for org-wide queries
+                pass
+            elif explicit_property_id:
+                # LLM explicitly set a property_id — RESPECT IT
+                params["property_id"] = f"eq.{explicit_property_id}"
+            elif property_id:
+                # Fall back to session property_id
                 params["property_id"] = f"eq.{property_id}"
 
-        # Parse WHERE clause (date filters, status, explicit filters)
-        where = parsed.get("where", "")
-        if where:
-            where_params = self._parse_where_to_params(where, context)
-            # Don't let WHERE parsing clobber our safety org/property scope
-            where_params.pop("organization_id", None)
-            params.update(where_params)
+        # Merge WHERE params (but don't clobber org/property scope)
+        where_params.pop("organization_id", None)
+        # Don't let WHERE property_id override our explicit one
+        if "property_id" in params and "property_id" in where_params:
+            where_params.pop("property_id", None)
+        params.update(where_params)
 
-        # ── COUNT / DISTINCT: use count=exact — ZERO rows fetched, real count returned ──
-        is_count = bool(re.search(r'\bCOUNT\b', query, re.IGNORECASE))
-        is_distinct = bool(re.search(r'\bDISTINCT\b', query, re.IGNORECASE))
+        # ── SELECT columns ────────────────────────────────────────────────────
+        if parsed.get("columns") and parsed["columns"] != ["*"]:
+            # Build PostgREST select string
+            # Filter out table prefixes for single-table queries
+            clean_cols = []
+            for col in parsed["columns"]:
+                if "." in col:
+                    clean_cols.append(col.split(".")[-1])
+                elif "(" not in col:  # Skip aggregates — we'll compute them in Python
+                    clean_cols.append(col)
+            if clean_cols:
+                params["select"] = ",".join(clean_cols)
+            else:
+                params["select"] = "*"
+        else:
+            params["select"] = "*"
 
-        if is_count and not re.search(r'GROUP\s+BY', query, re.IGNORECASE):
-            # Pure count — PostgREST Content-Range gives exact total
+        # ── ORDER BY ──────────────────────────────────────────────────────────
+        if parsed.get("order_col"):
+            order_col = parsed["order_col"]
+            if "." in order_col:
+                order_col = order_col.split(".")[-1]
+            params["order"] = f"{order_col}.{parsed.get('order_dir', 'asc')}"
+
+        # ── Determine row limit ───────────────────────────────────────────────
+        is_count = parsed.get("is_count", False)
+        is_aggregate = parsed.get("is_aggregate", False)
+        is_distinct = parsed.get("is_distinct", False)
+
+        if is_count and not parsed.get("group_by"):
+            # Pure count — use count=exact, ZERO rows fetched
             count_headers = {
                 **base_headers,
                 "Prefer": "count=exact",
                 "Range-Unit": "items",
                 "Range": "0-0",
             }
-            count_params = {**params, "select": "id"}
+            count_params = {k: v for k, v in params.items() if k != "select"}
+            count_params["select"] = "id"
             try:
                 resp = await self._http_client.get(url, headers=count_headers, params=count_params)
                 resp.raise_for_status()
                 cr = resp.headers.get("content-range", "*/0")
                 total = int(cr.split("/")[-1])
-                logger.info(f"[SQL_ENGINE_V2] count=exact: {table} → {total} (params={list(count_params.keys())})")
+                logger.info(f"[SQL_ENGINE_V2] count=exact: {table} → {total}")
                 return ToolResult(
                     call_id=f"v2_count_{time.time():.0f}",
                     tool_name="sql_query",
@@ -229,29 +859,34 @@ class SQLEngineV2:
                     error=f"COUNT query failed: {e}",
                 )
 
-        # ── Regular fetch (SELECT / SUM / DISTINCT / GROUP BY) ────────────────
-        params["select"] = "*"
-        limit_match = re.search(r'LIMIT\s+(\d+)', query, re.IGNORECASE)
-        params["limit"] = str(min(int(limit_match.group(1)), 200)) if limit_match else "200"
+        # Regular fetch — use appropriate limit
+        if is_aggregate or is_distinct:
+            row_limit = AGGREGATION_ROW_LIMIT
+        else:
+            row_limit = DEFAULT_ROW_LIMIT
+
+        if parsed.get("limit"):
+            row_limit = min(parsed["limit"], row_limit)
+
+        params["limit"] = str(row_limit)
 
         try:
             resp = await self._http_client.get(url, headers=base_headers, params=params)
             resp.raise_for_status()
             data = resp.json()
 
-            # Aggregations in Python
-            if re.search(r'\bSUM\b', query, re.IGNORECASE):
+            # Post-processing: aggregations
+            if parsed.get("is_sum"):
                 data = self._compute_sum(data, query)
             elif is_distinct:
-                distinct_match = re.search(r'DISTINCT\s+(\w+)', query, re.IGNORECASE)
-                if distinct_match:
-                    col = distinct_match.group(1)
-                    unique_vals = list({row.get(col) for row in data if row.get(col)})
-                    data = [{"distinct_count": len(unique_vals), "column": col, "values": unique_vals[:50]}]
-            elif re.search(r'GROUP\s+BY', query, re.IGNORECASE):
+                data = self._compute_distinct(data, query)
+            elif parsed.get("group_by"):
                 data = self._compute_count(data, query)
 
-            logger.info(f"[SQL_ENGINE_V2] fetch: {table} → {len(data)} rows (params={list(params.keys())})")
+            logger.info(
+                f"[SQL_ENGINE_V2] fetch: {table} → {len(data)} rows "
+                f"(limit={row_limit}, aggregate={is_aggregate})"
+            )
             return ToolResult(
                 call_id=f"v2_single_{time.time():.0f}",
                 tool_name="sql_query",
@@ -276,6 +911,10 @@ class SQLEngineV2:
                 error=str(e),
             )
 
+    # ========================================================================
+    # Multi-Table JOIN Execution
+    # ========================================================================
+
     async def _execute_with_join(
         self,
         query: str,
@@ -283,11 +922,11 @@ class SQLEngineV2:
         tables: list[str],
     ) -> ToolResult:
         """
-        Execute multi-table query via Python-side JOIN.
+        Execute multi-table query via Python-side JOIN with improved filtering.
 
-        1. Extract the JOIN relationship from FK graph
-        2. Fetch each table separately
-        3. Join in Python using pandas-like merge
+        1. Find JOIN relationship from FK graph
+        2. Fetch each table with org_id + property_id filters when possible
+        3. Join in Python using dict lookup
         """
         if not self._http_client:
             self._http_client = httpx.AsyncClient(timeout=60.0)
@@ -298,7 +937,7 @@ class SQLEngineV2:
         # Find the JOIN column from FK graph
         join_hint = None
         for i, t1 in enumerate(tables):
-            for t2 in tables[i+1:]:
+            for t2 in tables[i + 1 :]:
                 hint = self.fk_graph.get_join_hint(t1, t2)
                 if hint:
                     join_hint = hint
@@ -314,9 +953,8 @@ class SQLEngineV2:
                 error=f"No FK relationship found between tables: {tables}. Cannot JOIN.",
             )
 
-        # Parse join hint to get column names
-        # Format: "Use table1.col1 = table2.col2"
-        match = re.search(r'Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)', join_hint)
+        # Parse join hint: "Use table1.col1 = table2.col2"
+        match = re.search(r"Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)", join_hint)
         if not match:
             return ToolResult(
                 call_id=f"v2_parse_err_{time.time():.0f}",
@@ -327,9 +965,15 @@ class SQLEngineV2:
 
         left_table, left_col, right_table, right_col = match.groups()
 
-        logger.info(f"[SQL_ENGINE_V2] JOIN: {left_table}.{left_col} = {right_table}.{right_col}")
+        logger.info(
+            f"[SQL_ENGINE_V2] JOIN: {left_table}.{left_col} = {right_table}.{right_col}"
+        )
 
-        # Fetch both tables
+        # Parse query for filters that apply to each table
+        parsed = self._parse_query(query)
+        where = parsed.get("where", "")
+        where_lower = where.lower()
+
         headers = {
             "apikey": SUPABASE_SERVICE_ROLE_KEY,
             "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
@@ -337,27 +981,56 @@ class SQLEngineV2:
         }
 
         try:
-            # Fetch left table
+            # Fetch left table with filters
             left_url = f"{SUPABASE_URL}/rest/v1/{left_table}"
-            left_params = {"select": "*", "limit": "1000"}
+            left_params: dict[str, str] = {"select": "*", "limit": str(JOIN_ROW_LIMIT)}
 
-            # Add org filter if applicable
             left_cols = TABLES.get(left_table, {}).get("columns", [])
-            if "organization_id" in left_cols:
-                left_params["organization_id"] = f"eq.{org_id}" if org_id else ""
+            if "organization_id" in left_cols and org_id:
+                left_params["organization_id"] = f"eq.{org_id}"
+
+            # Apply property filter to left table if it has property_id
+            explicit_property_id = self._extract_explicit_value(where, "property_id")
+            if "property_id" in left_cols:
+                is_org_wide = any(kw in where_lower for kw in (
+                    "all properties", "org-wide", "orgwide", "across properties"
+                ))
+                if not is_org_wide:
+                    if explicit_property_id:
+                        left_params["property_id"] = f"eq.{explicit_property_id}"
+                    elif property_id:
+                        left_params["property_id"] = f"eq.{property_id}"
+
+            # Apply other WHERE filters that reference left table columns
+            left_where_params = self._parse_where_to_params(where, context)
+            left_where_params.pop("__explicit_property_id", None)
+            left_where_params.pop("__explicit_org_id", None)
+            left_where_params.pop("organization_id", None)
+            if "property_id" in left_params:
+                left_where_params.pop("property_id", None)
+            left_params.update(left_where_params)
 
             left_resp = await self._http_client.get(left_url, headers=headers, params=left_params)
             left_resp.raise_for_status()
             left_data = left_resp.json()
 
-            # Fetch right table
+            # Fetch right table with filters
             right_url = f"{SUPABASE_URL}/rest/v1/{right_table}"
-            right_params = {"select": "*", "limit": "1000"}
+            right_params: dict[str, str] = {"select": "*", "limit": str(JOIN_ROW_LIMIT)}
 
-            # Add org filter if applicable
             right_cols = TABLES.get(right_table, {}).get("columns", [])
-            if "organization_id" in right_cols:
-                right_params["organization_id"] = f"eq.{org_id}" if org_id else ""
+            if "organization_id" in right_cols and org_id:
+                right_params["organization_id"] = f"eq.{org_id}"
+
+            if "property_id" in right_cols:
+                is_org_wide = any(kw in where_lower for kw in (
+                    "all properties", "org-wide", "orgwide", "across properties"
+                ))
+                if not is_org_wide:
+                    if explicit_property_id:
+                        right_params["property_id"] = f"eq.{explicit_property_id}"
+                    elif property_id:
+                        right_params["property_id"] = f"eq.{property_id}"
 
             right_resp = await self._http_client.get(right_url, headers=headers, params=right_params)
             right_resp.raise_for_status()
@@ -365,6 +1038,21 @@ class SQLEngineV2:
 
             # Python-side JOIN
             joined = self._python_join(left_data, right_data, left_col, right_col)
+
+            # Apply ORDER BY if present
+            if parsed.get("order_col"):
+                order_col = parsed["order_col"]
+                if "." in order_col:
+                    order_col = order_col.split(".")[-1]
+                reverse = parsed.get("order_dir", "asc").lower() == "desc"
+                try:
+                    joined.sort(key=lambda r: r.get(order_col, "") or "", reverse=reverse)
+                except Exception:
+                    pass  # Sort failed, keep original order
+
+            # Apply LIMIT after join
+            if parsed.get("limit"):
+                joined = joined[:parsed["limit"]]
 
             logger.info(f"[SQL_ENGINE_V2] JOIN result: {len(joined)} rows")
 
@@ -400,7 +1088,7 @@ class SQLEngineV2:
         right_key: str,
     ) -> list[dict]:
         """
-        Perform a simple JOIN in Python.
+        Perform a simple LEFT JOIN in Python.
 
         Args:
             left: List of dicts from left table
@@ -409,159 +1097,66 @@ class SQLEngineV2:
             right_key: Column to join on from right table
 
         Returns:
-            List of merged dicts
+            List of merged dicts (left join behavior)
         """
         # Build lookup index for right table
         right_index: dict[str, dict] = {}
         for row in right:
             key_val = row.get(right_key)
-            if key_val:
+            if key_val is not None:
                 right_index[str(key_val)] = row
 
         # Merge
         results = []
         for left_row in left:
             key_val = left_row.get(left_key)
-            if key_val and str(key_val) in right_index:
-                merged = {**left_row}
-                # Add right table columns with prefix
+            merged = {**left_row}
+            if key_val is not None and str(key_val) in right_index:
                 right_row = right_index[str(key_val)]
                 for col, val in right_row.items():
-                    if col not in merged:
-                        merged[col] = val
-                results.append(merged)
-            else:
-                # Include left row even if no match (left join behavior)
-                results.append({**left_row})
+                    # Prefix right table columns to avoid collision
+                    prefixed_col = f"{col}_right" if col in merged else col
+                    merged[prefixed_col] = val
+            results.append(merged)
 
         return results
 
-    def _parse_query(self, sql: str) -> dict[str, Any]:
-        """Parse simplified SQL into components."""
-        result: dict[str, Any] = {}
-
-        # Extract table
-        table_match = re.search(r'FROM\s+(\w+)', sql, re.IGNORECASE)
-        if table_match:
-            result["table"] = table_match.group(1)
-
-        # Extract WHERE
-        where_match = re.search(r'WHERE\s+(.+?)(?:ORDER|LIMIT|$)', sql, re.IGNORECASE | re.DOTALL)
-        if where_match:
-            result["where"] = where_match.group(1).strip()
-
-        return result
-
-    def _parse_where_to_params(
-        self, where: str, context: dict[str, Any]
-    ) -> dict[str, str]:
-        """Convert simplified WHERE clauses to PostgREST query params.
-
-        Handles: property_id, organization_id, status, date columns, vendor_id, user_id.
-        Supports compound conditions: multiple statuses (IN), date ranges (>=, <).
-        """
-        from datetime import date, timedelta
-        params: dict[str, str] = {}
-
-        # property_id filter
-        if "property_id" in where.lower():
-            prop_id = context.get("property_id", "")
-            if prop_id:
-                params["property_id"] = f"eq.{prop_id}"
-
-        # organization_id filter
-        if "organization_id" in where.lower() or "org_id" in where.lower():
-            org_id = context.get("org_id", "")
-            if org_id:
-                params["organization_id"] = f"eq.{org_id}"
-
-        # status filter — support IN clause for multiple statuses
-        in_match = re.search(r"status\s+IN\s*\(([^)]+)\)", where, re.IGNORECASE)
-        if in_match:
-            # Extract all quoted status values: IN ('open', 'assigned', 'in_progress')
-            statuses = re.findall(r"'([^']+)'", in_match.group(1))
-            if statuses:
-                params["status"] = f"in.({','.join(statuses)})"
-        else:
-            # Single status
-            status_match = re.search(r"status\s*=\s*'([^']+)'", where, re.IGNORECASE)
-            if status_match:
-                params["status"] = f"eq.{status_match.group(1)}"
-
-        # ── Date / time range filters ─────────────────────────────────────────
-        # Detect which date column is referenced (revenue_date, entry_date, created_at, etc.)
-        date_col_match = re.search(
-            r'\b(revenue_date|entry_date|created_at|updated_at|planned_date|done_date|reading_date|completion_date|date)\b',
-            where, re.IGNORECASE
-        )
-        date_col = date_col_match.group(1) if date_col_match else "created_at"
-
-        today = date.today()
-
-        # ── COMPOUND DATE RANGES: >= AND < (e.g., "January data") ──
-        # Match: created_at >= '2026-01-01' AND created_at < '2026-02-01'
-        range_match = re.search(
-            rf"{date_col}\s*>=\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"].*?{date_col}\s*<\s*['\"](\d{{4}}-\d{{2}}-\d{{2}})['\"]",
-            where, re.IGNORECASE | re.DOTALL
-        )
-        if range_match:
-            # PostgREST compound filter: and=(col.gte.val,col.lt.val)
-            params["and"] = f"({date_col}.gte.{range_match.group(1)}T00:00:00,{date_col}.lt.{range_match.group(2)}T00:00:00)"
-        else:
-            # Single-bound date filters
-            # "CURRENT_DATE - INTERVAL '1 day'" / "yesterday" patterns
-            if re.search(r"INTERVAL\s+['\"]1\s+day['\"]|yesterday", where, re.IGNORECASE):
-                yesterday = (today - timedelta(days=1)).isoformat()
-                params[date_col] = f"gte.{yesterday}T00:00:00"
-
-            # "today" / bare CURRENT_DATE (no subtraction offset)
-            elif re.search(r"\btoday\b|\bCURRENT_DATE\b", where, re.IGNORECASE):
-                params[date_col] = f"gte.{today.isoformat()}T00:00:00"
-
-            # "last N days" / "INTERVAL 'N days'"
-            elif m := re.search(r"INTERVAL\s+['\"](\d+)\s+day", where, re.IGNORECASE):
-                cutoff = (today - timedelta(days=int(m.group(1)))).isoformat()
-                params[date_col] = f"gte.{cutoff}T00:00:00"
-
-            # "this week"
-            elif re.search(r"this\s+week", where, re.IGNORECASE):
-                start_of_week = (today - timedelta(days=today.weekday())).isoformat()
-                params[date_col] = f"gte.{start_of_week}T00:00:00"
-
-            # "this month"
-            elif re.search(r"this\s+month", where, re.IGNORECASE):
-                start_of_month = today.replace(day=1).isoformat()
-                params[date_col] = f"gte.{start_of_month}T00:00:00"
-
-            # explicit ISO date  ">= '2026-05-01'"
-            elif m := re.search(r">=\s*['\"](\d{4}-\d{2}-\d{2})['\"]", where):
-                params[date_col] = f"gte.{m.group(1)}T00:00:00"
-
-        return params
+    # ========================================================================
+    # Aggregation Helpers
+    # ========================================================================
 
     def _compute_count(self, data: list[dict], query: str) -> list[dict]:
         """Compute COUNT from raw data (Python-side — PostgREST returns raw rows)."""
-        group_match = re.search(r'GROUP\s+BY\s+(\w+)', query, re.IGNORECASE)
+        group_match = re.search(r"GROUP\s+BY\s+([\w.]+)", query, re.IGNORECASE)
         if group_match:
             group_col = group_match.group(1)
+            if "." in group_col:
+                group_col = group_col.split(".")[-1]
             counts: dict[str, int] = {}
             for row in data:
                 key = str(row.get(group_col, "unknown"))
                 counts[key] = counts.get(key, 0) + 1
-            return [{"group": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])]
+            return [
+                {"group": k, "count": v}
+                for k, v in sorted(counts.items(), key=lambda x: -x[1])
+            ]
         else:
             return [{"total_count": len(data)}]
 
     def _compute_sum(self, data: list[dict], query: str) -> list[dict]:
         """Compute SUM(column) from raw data."""
-        # Extract column being summed: SUM(revenue_amount) or SUM(total)
-        m = re.search(r'SUM\s*\(\s*(\w+)\s*\)', query, re.IGNORECASE)
+        m = re.search(r"SUM\s*\(\s*([\w.]+)\s*\)", query, re.IGNORECASE)
         if not m:
             return [{"sum": None, "note": "could not parse SUM column"}]
         col = m.group(1)
-        group_match = re.search(r'GROUP\s+BY\s+(\w+)', query, re.IGNORECASE)
+        if "." in col:
+            col = col.split(".")[-1]
+
+        group_match = re.search(r"GROUP\s+BY\s+([\w.]+)", query, re.IGNORECASE)
         if group_match:
             group_col = group_match.group(1)
+            if "." in group_col:
+                group_col = group_col.split(".")[-1]
             sums: dict[str, float] = {}
             for row in data:
                 key = str(row.get(group_col, "unknown"))
@@ -569,10 +1164,46 @@ class SQLEngineV2:
                     sums[key] = sums.get(key, 0.0) + float(row.get(col, 0) or 0)
                 except (TypeError, ValueError):
                     pass
-            return [{"group": k, "sum": round(v, 2)} for k, v in sorted(sums.items(), key=lambda x: -x[1])]
+            return [
+                {"group": k, "sum": round(v, 2)}
+                for k, v in sorted(sums.items(), key=lambda x: -x[1])
+            ]
         else:
-            total = sum(float(row.get(col, 0) or 0) for row in data if row.get(col) is not None)
-            return [{"total_sum": round(total, 2), "column": col, "row_count": len(data)}]
+            total = sum(
+                float(row.get(col, 0) or 0)
+                for row in data
+                if row.get(col) is not None
+            )
+            return [
+                {
+                    "total_sum": round(total, 2),
+                    "column": col,
+                    "row_count": len(data),
+                }
+            ]
+
+    def _compute_distinct(self, data: list[dict], query: str) -> list[dict]:
+        """Compute DISTINCT values from raw data."""
+        distinct_match = re.search(r"DISTINCT\s+([\w.]+)", query, re.IGNORECASE)
+        if distinct_match:
+            col = distinct_match.group(1)
+            if "." in col:
+                col = col.split(".")[-1]
+            unique_vals = sorted(
+                {row.get(col) for row in data if row.get(col) is not None}
+            )
+            return [
+                {
+                    "distinct_count": len(unique_vals),
+                    "column": col,
+                    "values": unique_vals[:100],
+                }
+            ]
+        return [{"distinct_count": 0, "note": "could not parse DISTINCT column"}]
+
+    # ========================================================================
+    # JOIN Query Generator
+    # ========================================================================
 
     def generate_join_query(
         self,
@@ -593,13 +1224,12 @@ class SQLEngineV2:
         property_id = context.get("property_id", "")
 
         # Parse hint
-        match = re.search(r'Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)', hint)
+        match = re.search(r"Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)", hint)
         if not match:
             return None
 
         left_t, left_c, right_t, right_c = match.groups()
 
-        # Build query
         query = f"""
 SELECT *
 FROM {left_t}
@@ -608,10 +1238,16 @@ WHERE {left_t}.organization_id = '{org_id}'
 LIMIT 100
 """.strip()
 
+        if property_id:
+            query = query.replace("LIMIT 100", f"AND {left_t}.property_id = '{property_id}'\nLIMIT 100")
+
         return query
 
 
+# ---------------------------------------------------------------------------
 # Convenience function
+# ---------------------------------------------------------------------------
+
 def execute_sql(query: str, context: dict[str, Any]) -> ToolResult:
     """Execute a SQL query using SQL Engine v2."""
     engine = SQLEngineV2()
@@ -633,10 +1269,17 @@ class SQLEngineV2Tool(Tool):
     - FK graph validation (fails fast on invalid JOINs)
     - Python-side JOIN for multi-table queries (PostgREST is single-table only)
     - Async execution with thread-safe sync wrapper
+    - ROBUST date parsing (handles CURRENT_DATE, INTERVAL, BETWEEN, DATE_TRUNC)
+    - Respects explicit property_id in WHERE clauses
+    - Increased row limits for aggregation queries
     """
 
     name = "sql_query"
-    description = "Execute a SQL SELECT query against the FMS database with FK-aware JOIN support."
+    description = (
+        "Execute a SQL SELECT query against the FMS database with FK-aware JOIN support. "
+        "Supports: single-table queries, multi-table JOINs (Python-side merge), "
+        "COUNT, SUM, GROUP BY, DISTINCT, date ranges, and status/priority filters."
+    )
 
     def __init__(self):
         self._engine = SQLEngineV2()

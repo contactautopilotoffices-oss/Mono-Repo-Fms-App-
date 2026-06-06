@@ -126,7 +126,7 @@ export const PPMActivityTile: React.FC<PPMActivityTileProps> = ({
 
   if (loading) {
     return (
-      <Animated.View entering={FadeInUp.delay(delay)} style={styles.container}>
+      <Animated.View  style={styles.container}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.inner}>
           <Text style={styles.loadingText}>Loading PPM activities…</Text>
@@ -139,7 +139,7 @@ export const PPMActivityTile: React.FC<PPMActivityTileProps> = ({
   if (totalActivities === 0) return null;
 
   return (
-    <Animated.View entering={FadeInUp.delay(delay)}>
+    <Animated.View >
       <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={styles.container}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.inner}>

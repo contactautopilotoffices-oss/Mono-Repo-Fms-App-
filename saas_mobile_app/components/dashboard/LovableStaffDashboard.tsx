@@ -438,7 +438,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
 
   // ─── NEW: Unified React Query Data (Source of Truth) ───
-  const { data: staffData, isLoading, isFetching, forceRefresh } = useStaffDashboardQuery(propertyId, {
+  const { data: staffData, isFetching, forceRefresh } = useStaffDashboardQuery(propertyId, {
     userId: user?.id ?? '',
     initialLoadingOnMount: false, // Instant render from cache
   });
@@ -616,7 +616,6 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     } catch (err) {
       console.warn('[LovableStaffDashboard] fetch error:', err);
     } finally {
-      setIsLoading(false);
       setIsRefreshing(false);
     }
   }, [propertyId, user?.id]);
@@ -763,7 +762,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const renderMyDashboard = () => (
     <>
       {/* Gamification strip */}
-      <Animated.View entering={FadeInUp.delay(100).duration(600)} style={styles.gamifyCard}>
+      <Animated.View  style={styles.gamifyCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.gamifyInner}>
           <LevelBadge level={mstUser.level} size="md" />
@@ -803,7 +802,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
           </View>
         </GlassTile>
       ) : (
-        <Animated.View entering={FadeInUp.delay(200).duration(600)} style={styles.statsCard}>
+        <Animated.View  style={styles.statsCard}>
           <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
           <View style={styles.statsCardInner}>
             <View style={styles.statsCardHeader}>
@@ -864,11 +863,11 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const renderDailyBoard = () => (
     <>
-      <Animated.View entering={FadeInUp.duration(500)}>
+      <Animated.View >
         <Text style={styles.heroTitle}>Daily Board</Text>
       </Animated.View>
 
-      <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.countdownCard}>
+      <Animated.View  style={styles.countdownCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.countdownInner}>
           <View style={styles.countdownLabelRow}>
@@ -896,11 +895,11 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const renderOperations = () => (
     <>
-      <Animated.View entering={FadeInUp.duration(500)}>
+      <Animated.View >
         <Text style={styles.heroTitle}>Operations</Text>
       </Animated.View>
 
-      <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.championCard}>
+      <Animated.View  style={styles.championCard}>
         <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
         <View style={styles.championInner}>
           <View style={styles.championInfo}>
@@ -1010,7 +1009,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     return (
       <>
         {/* Identity card */}
-        <Animated.View entering={FadeInUp.duration(500)} style={styles.identityCard}>
+        <Animated.View  style={styles.identityCard}>
           <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
           <View style={styles.identityInner}>
             <View style={styles.identityTop}>
@@ -1070,8 +1069,8 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  // Show skeleton only on initial mount with no cache
-  if (isLoading && !staffData) {
+  // BLOCK rendering until we have actual data (prevents empty UI flash)
+  if (!staffData) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
@@ -1086,7 +1085,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       <StatusBar barStyle="light-content" />
       <WeatherBackground condition={undefined} />
 
-      <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
+      <Animated.View  style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
             <Ionicons name="menu" size={28} color="#FFFFFF" />
           </TouchableOpacity>

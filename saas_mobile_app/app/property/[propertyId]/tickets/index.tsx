@@ -617,6 +617,9 @@ const onRefresh = () => {
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
+            initialNumToRender={6}
+            maxToRenderPerBatch={4}
+            windowSize={5}
             refreshControl={
               <RefreshControl
                 refreshing={isFetching}
