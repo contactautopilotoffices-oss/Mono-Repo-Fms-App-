@@ -32,22 +32,22 @@ async function initializeFirebase(): Promise<boolean> {
     const app = require('@react-native-firebase/app').default;
     console.log('[Push] Firebase App imported');
 
-    // Check if already initialized
+    // Check if actually initialized - getApp() throws if not
     try {
       app.getApp();
       console.log('[Push] Firebase already initialized');
-    } catch {
-      // Not initialized, need to initialize
-      console.log('[Push] Firebase not initialized - google-services.json will auto-initialize on native build');
+      return true;
+    } catch (initErr: any) {
+      // Not initialized - google-services.json wasn't processed or we're in Expo Go
+      console.warn('[Push] Firebase not initialized:', initErr.message);
+      console.warn('[Push] This means:');
+      console.warn('[Push] 1. Running in Expo Go (FCM not supported)');
+      console.warn('[Push] 2. google-services.json missing or has wrong package name');
+      console.warn('[Push] 3. Native build outdated (run: npx expo prebuild --platform android)');
+      return false;
     }
-
-    return true;
   } catch (err: any) {
     console.error('[Push] Firebase App import failed:', err.message);
-    console.error('[Push] This usually means:');
-    console.error('[Push] 1. Running in Expo Go (not supported)');
-    console.error('[Push] 2. google-services.json missing or invalid');
-    console.error('[Push] 3. Native build not done (run: npx expo prebuild --platform android)');
     return false;
   }
 }
