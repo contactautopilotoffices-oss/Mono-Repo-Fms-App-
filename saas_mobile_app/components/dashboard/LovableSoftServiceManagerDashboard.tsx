@@ -32,7 +32,8 @@ import { ppmService } from '@/services/ppmService';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import { useWeather } from '@/hooks/useWeather';
 import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { queryClient } from '@/utils/queryClient';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -204,24 +205,72 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
   // ── State ──
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [propertyName, setPropertyName] = useState('');
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [isTogglingShift, setIsTogglingShift] = useState(false);
 
-  // Data
-  const [tickets, setTickets]     = useState<Ticket[]>([]);
-  const [stockItems, setStockItems] = useState<StockItem[]>([]);
-  const [sopTotal, setSopTotal]   = useState(0);
-  const [sopDone, setSopDone]     = useState(0);
+  // ─── NEW: Unified React Query Data (Source of Truth) ───
+  const { data: dashboardData, isLoading, refetch, forceRefresh } = useServerQuery<{
+    propertyName: string;
+    tickets: Ticket[];
+    stockItems: StockItem[];
+    sopTotal: number;
+    sopDone: number;
+    isCheckedIn: boolean;
+    ppm: { total: number; done: number; pending: number; overdue: number; postponed: number };
+  }>(
+    queryKeys.property.softService(propertyId),
+    async () => {
+      const [propRes, ticketRes, stockRes, sopRes, sopDoneRes, shiftRes, ppmRes] = await Promise.allSettled([
+        serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], limit: 1, maybeSingle: true }),
+        serverApi.query({ table: 'tickets', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }], orders: [{ column: 'created_at', ascending: false }] }),
+        serverApi.query({ table: 'stock_items', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }] }),
+        serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'is_active', value: true }] }),
+        serverApi.query({ table: 'sop_completions', action: 'select', select: 'id', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'completion_date', value: new Date().toISOString().split('T')[0] }] }),
+        serverApi.query({ table: 'resolver_stats', action: 'select', select: 'is_checked_in', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'user_id', value: user?.id }], maybeSingle: true }),
+        ppmService.fetchStats(propertyId).catch(() => ({ success: false, data: null })),
+      ]);
 
-  // PPM stats
-  const [ppmTotal, setPpmTotal]   = useState(0);
-  const [ppmDone, setPpmDone]     = useState(0);
-  const [ppmPending, setPpmPending] = useState(0);
-  const [ppmOverdue, setPpmOverdue] = useState(0);
-  const [ppmPostponed, setPpmPostponed] = useState(0);
+      const propData = (propRes as any)?.value?.data ?? (propRes as any)?.data;
+      const ticketData = ((ticketRes as any)?.value?.data || []) as Ticket[];
+      const stockData = ((stockRes as any)?.value?.data || []) as StockItem[];
+      const sopTotal = ((sopRes as any)?.value?.data || []).length;
+      const sopDone = ((sopDoneRes as any)?.value?.data || []).filter((s: any) => s.status === 'completed').length;
+      const shiftData = (shiftRes as any)?.value?.data ?? (shiftRes as any)?.data;
+      const ppmResult = ppmRes as PromiseSettledResult<any>;
+      const ppmValue = ppmResult.status === 'fulfilled' ? ppmResult.value : null;
+      const ppmData = ppmValue?.success ? ppmValue.data : null;
+
+      return {
+        propertyName: propData?.name ?? '',
+        tickets: ticketData,
+        stockItems: stockData,
+        sopTotal,
+        sopDone,
+        isCheckedIn: !!(shiftData as any)?.is_checked_in,
+        ppm: {
+          total: ppmData?.total ?? 0,
+          done: ppmData?.done ?? 0,
+          pending: ppmData?.pending ?? 0,
+          overdue: ppmData?.overdue ?? 0,
+          postponed: ppmData?.postponed ?? 0,
+        },
+      };
+    },
+    { staleTime: 1000 * 60 * 5 }
+  );
+
+  // Extract data from React Query cache
+  const propertyName = dashboardData?.propertyName ?? '';
+  const tickets = dashboardData?.tickets ?? [];
+  const stockItems = dashboardData?.stockItems ?? [];
+  const sopTotal = dashboardData?.sopTotal ?? 0;
+  const sopDone = dashboardData?.sopDone ?? 0;
+  const isCheckedIn = dashboardData?.isCheckedIn ?? false;
+  const ppmTotal = dashboardData?.ppm.total ?? 0;
+  const ppmDone = dashboardData?.ppm.done ?? 0;
+  const ppmPending = dashboardData?.ppm.pending ?? 0;
+  const ppmOverdue = dashboardData?.ppm.overdue ?? 0;
+  const ppmPostponed = dashboardData?.ppm.postponed ?? 0;
 
   // Modals
   const [showSignOut, setShowSignOut]           = useState(false);
@@ -254,87 +303,6 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     return { total: filteredTickets.length, open, mine };
   }, [filteredTickets, user?.id]);
 
-  // ── Fetch ──
-  const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      // Property name
-      const { data: prop } = await serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], maybeSingle: true });
-      if (prop) setPropertyName((prop as any).name ?? '');
-
-      // Tickets (view + approve + assign)
-      const { data: tData } = await serverApi.query({
-        table: 'tickets',
-        action: 'select',
-        select: 'id, ticket_number, title, status, priority, created_at, assigned_to, assignee:users!assigned_to(full_name)',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        orders: [{ column: 'created_at', ascending: false }],
-        limit: 50,
-      });
-      if (tData) setTickets(tData as Ticket[]);
-
-      // Stock items
-      const { data: sData } = await serverApi.query({
-        table: 'stock_items',
-        action: 'select',
-        select: 'id, name, quantity, min_threshold, category, unit',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        orders: [{ column: 'quantity', ascending: true }],
-      });
-      if (sData) setStockItems(sData as StockItem[]);
-
-      // SOP completions
-      const { data: sopTemplates } = await serverApi.query({
-        table: 'sop_templates',
-        action: 'select',
-        select: 'id',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'is_active', value: true }],
-      });
-      if (sopTemplates) setSopTotal((sopTemplates as any[]).length);
-
-      const todayStr = new Date().toISOString().split('T')[0];
-      const { data: sopCompletions } = await serverApi.query({
-        table: 'sop_completions',
-        action: 'select',
-        select: 'status',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'completion_date', value: todayStr }],
-      });
-      if (sopCompletions) {
-        setSopDone((sopCompletions as any[]).filter((s: any) => s.status === 'completed').length);
-      }
-
-      // PPM stats
-      try {
-        const ppmRes = await ppmService.fetchStats(propertyId);
-        if (ppmRes.success && ppmRes.data) {
-          setPpmTotal(ppmRes.data.total ?? 0);
-          setPpmDone(ppmRes.data.done ?? 0);
-          setPpmPending(ppmRes.data.pending ?? 0);
-          setPpmOverdue(ppmRes.data.overdue ?? 0);
-          setPpmPostponed(ppmRes.data.postponed ?? 0);
-        }
-      } catch (_e) { /* ignore */ }
-
-      // Shift status
-      const { data: shiftData } = await serverApi.query({
-        table: 'resolver_stats',
-        action: 'select',
-        select: 'is_checked_in',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'user_id', value: user?.id }],
-        maybeSingle: true,
-      });
-      if (shiftData) setIsCheckedIn(!!(shiftData as any).is_checked_in);
-    } catch (err) {
-      console.warn('[SSMDashboard] fetchData error:', err);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [propertyId, user?.id]);
-
-  const { refetch } = useDashboardFetch(queryKeys.property.softService(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5,
-  });
 
   useEffect(() => {
     hasRequestedPermissions().then(requested => {
@@ -342,7 +310,11 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     });
   }, []);
 
-  const onRefresh = async () => { setIsRefreshing(true); await refetch(); };
+  const onRefresh = async () => { 
+    setIsRefreshing(true); 
+    await forceRefresh(); 
+    setIsRefreshing(false); 
+  };
 
   const toggleShift = async () => {
     if (!user?.id || isTogglingShift) return;
@@ -355,7 +327,10 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
         values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
         mutationOptions: { onConflict: 'user_id,property_id' },
       });
-      setIsCheckedIn(newStatus);
+      queryClient.setQueryData(
+        queryKeys.property.softService(propertyId),
+        (old: any) => old ? { ...old, isCheckedIn: newStatus } : old
+      );
     } catch (err: any) {
       Alert.alert('Error', err.message ?? 'Failed to update shift');
     } finally {
@@ -661,8 +636,8 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     </ScrollView>
   );
 
-  // ── Loading ──
-  if (isLoading) {
+  // ── Loading (only if no cached data) ──
+  if (isLoading && !dashboardData) {
     return (
       <View style={[sMain.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <LinearGradient colors={[...BG]} style={StyleSheet.absoluteFillObject} />

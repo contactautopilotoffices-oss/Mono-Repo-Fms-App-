@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
           .order('created_at', { ascending: false })
           .limit(2),
         admin.from('diesel_readings')
-          .select('current_fuel_level, computed_consumed_litres')
+          .select('closing_diesel_level, computed_consumed_litres')
           .eq('property_id', pid)
           .order('created_at', { ascending: false })
           .limit(1)

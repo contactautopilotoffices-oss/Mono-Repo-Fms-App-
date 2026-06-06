@@ -58,9 +58,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         organization_memberships: orgMemberships ?? []
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[users/[id]] GET error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }
 
@@ -152,7 +152,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       .from("users")
       .update(updatePayload)
       .eq("id", id)
-      .select("id, full_name, email, phone, is_active")
+      .select("id, full_name, email, phone, user_photo_url, is_active, created_at")
       .single();
 
     if (error) {
@@ -189,9 +189,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     }
 
     return NextResponse.json({ success: true, user });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[saas-mobile-server] users/[id] PATCH error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }
 
@@ -283,8 +283,8 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     }
 
     return NextResponse.json({ success: true, deleted: true });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[saas-mobile-server] users/[id] DELETE error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }
 }

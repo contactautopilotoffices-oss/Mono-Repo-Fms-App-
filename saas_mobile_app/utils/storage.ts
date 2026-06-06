@@ -2,8 +2,8 @@ import { StateStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Attempt to load MMKV, but handle failure gracefully (e.g., in Expo Go)
-let mmkvStorage: any;
-let isMMKVAvailable = false;
+export let mmkvStorage: any;
+export let isMMKVAvailable = false;
 
 try {
   const { MMKV } = require('react-native-mmkv');

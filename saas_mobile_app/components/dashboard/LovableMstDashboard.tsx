@@ -24,7 +24,7 @@ import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryClient } from '@/utils/queryClient';
 import SkeletonLoader from './lovable/SkeletonLoader';
-import DashboardBackground from '@/components/dashboard/DashboardBackground';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -871,11 +871,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (!hasValidDashboardData && isLoading) {
+  if (isLoading && !data) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
-        <DashboardBackground />
+        <WeatherBackground condition={undefined} />
         <SkeletonLoader />
       </View>
     );
@@ -884,8 +884,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <DashboardBackground />
-      {/* WeatherBackground removed — DashboardBackground handles theming */}
+      <WeatherBackground condition={undefined} />
 
       <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <FloatingMenu

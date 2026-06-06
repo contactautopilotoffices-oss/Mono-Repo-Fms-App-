@@ -102,7 +102,6 @@ export async function POST(request: NextRequest) {
       reading_date: body.reading_date,
       opening_reading: body.opening_reading,
       closing_reading: body.closing_reading,
-      computed_units: rawUnits,
       final_units: finalUnits,
       computed_cost: computedCost,
       multiplier_id: multiplierId,

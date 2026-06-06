@@ -132,23 +132,12 @@ export const dieselService = {
   async fetchAllOriginal(propertyId: string): Promise<ApiResponse<{ generators: Generator[]; readings: DieselReading[] }>> {
     try {
       const [genRes, readRes] = await Promise.all([
-        serverApi.query<Generator[]>({
-          table: 'generators',
-          action: 'select',
-          select: '*',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        }),
-        serverApi.query<DieselReading[]>({
-          table: 'diesel_readings',
-          action: 'select',
-          select: '*',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'reading_date', ascending: false }],
-        }),
+        serverApi.get<any>(`/api/diesel/generators?propertyId=${propertyId}`),
+        serverApi.get<any>(`/api/diesel/readings?propertyId=${propertyId}`),
       ]);
       if (genRes.error) throw new Error(genRes.error.message);
       if (readRes.error) throw new Error(readRes.error.message);
-      return { success: true, data: { generators: genRes.data ?? [], readings: readRes.data ?? [] }, status: 200 };
+      return { success: true, data: { generators: genRes.data?.generators ?? [], readings: readRes.data?.readings ?? [] }, status: 200 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
@@ -157,14 +146,9 @@ export const dieselService = {
   // ── Fetch Generators ──────────────────────────────────────────────────────
   async fetchGenerators(propertyId: string): Promise<ApiResponse<Generator[]>> {
     try {
-      const res = await serverApi.query<Generator[]>({
-        table: 'generators',
-        action: 'select',
-        select: '*',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-      });
+      const res = await serverApi.get<any>(`/api/diesel/generators?propertyId=${propertyId}`);
       if (res.error) throw new Error(res.error.message || 'Unknown error');
-      return { success: true, data: res.data || [], status: 200 };
+      return { success: true, data: res.data?.generators || [], status: 200 };
     } catch (err: any) {
       return { success: false, data: [], error: err.message, status: 500 };
     }
@@ -173,15 +157,9 @@ export const dieselService = {
   // ── Create Generator ──────────────────────────────────────────────────────
   async createGenerator(payload: Partial<Generator>): Promise<ApiResponse<Generator>> {
     try {
-      const res = await serverApi.query<Generator>({
-        table: 'generators',
-        action: 'insert',
-        values: payload,
-        select: '*',
-        single: true,
-      });
+      const res = await serverApi.post<any>(`/api/diesel/generators`, payload);
       if (res.error) throw new Error(res.error.message || 'Unknown error');
-      return { success: true, data: res.data as any, status: 201 };
+      return { success: true, data: res.data?.generator, status: 201 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
@@ -190,16 +168,9 @@ export const dieselService = {
   // ── Update Generator ──────────────────────────────────────────────────────
   async updateGenerator(generatorId: string, payload: Partial<Generator>): Promise<ApiResponse<Generator>> {
     try {
-      const res = await serverApi.query<Generator>({
-        table: 'generators',
-        action: 'update',
-        values: payload,
-        filters: [{ op: 'eq', column: 'id', value: generatorId }],
-        select: '*',
-        single: true,
-      });
+      const res = await serverApi.patch<any>(`/api/diesel/generators/${generatorId}`, payload);
       if (res.error) throw new Error(res.error.message || 'Unknown error');
-      return { success: true, data: res.data as any, status: 200 };
+      return { success: true, data: res.data?.generator, status: 200 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
@@ -208,11 +179,7 @@ export const dieselService = {
   // ── Delete Generator ──────────────────────────────────────────────────────
   async deleteGenerator(generatorId: string): Promise<ApiResponse<boolean>> {
     try {
-      const res = await serverApi.query({
-        table: 'generators',
-        action: 'delete',
-        filters: [{ op: 'eq', column: 'id', value: generatorId }],
-      });
+      const res = await serverApi.delete<any>(`/api/diesel/generators/${generatorId}`);
       if (res.error) throw new Error(res.error.message || 'Unknown error');
       return { success: true, data: true, status: 200 };
     } catch (err: any) {
@@ -223,20 +190,14 @@ export const dieselService = {
   // ── Fetch Readings ────────────────────────────────────────────────────────
   async fetchReadings(propertyId: string, filters?: { generatorId?: string; fromDate?: string; toDate?: string }): Promise<ApiResponse<DieselReading[]>> {
     try {
-      const queryFilters: any[] = [{ op: 'eq', column: 'property_id', value: propertyId }];
-      if (filters?.generatorId) queryFilters.push({ op: 'eq', column: 'generator_id', value: filters.generatorId });
-      if (filters?.fromDate) queryFilters.push({ op: 'gte', column: 'reading_date', value: filters.fromDate });
-      if (filters?.toDate) queryFilters.push({ op: 'lte', column: 'reading_date', value: filters.toDate });
+      let url = `/api/diesel/readings?propertyId=${propertyId}`;
+      if (filters?.generatorId) url += `&generatorId=${filters.generatorId}`;
+      if (filters?.fromDate) url += `&fromDate=${filters.fromDate}`;
+      if (filters?.toDate) url += `&toDate=${filters.toDate}`;
 
-      const { data, error } = await serverApi.query<DieselReading[]>({
-        table: 'diesel_readings',
-        action: 'select',
-        select: '*',
-        filters: queryFilters,
-        orders: [{ column: 'reading_date', ascending: false }],
-      });
+      const { data, error } = await serverApi.get<any>(url);
       if (error) throw new Error(error.message || 'Unknown error');
-      return { success: true, data: data || [], status: 200 };
+      return { success: true, data: data?.readings || [], status: 200 };
     } catch (err: any) {
       return { success: false, data: [], error: err.message, status: 500 };
     }
@@ -245,32 +206,26 @@ export const dieselService = {
   // ── Submit Reading ────────────────────────────────────────────────────────
   async submitReading(payload: ReadingPayload): Promise<ApiResponse<DieselReading>> {
     try {
-      const computed_run_hours = payload.closing_hours - payload.opening_hours;
+      // computed_run_hours is generated by the database
       const computed_consumed_litres = payload.opening_diesel_level + payload.diesel_added_litres - payload.closing_diesel_level;
 
-      const res = await serverApi.query<DieselReading>({
-        table: 'diesel_readings',
-        action: 'insert',
-        values: {
-          property_id: payload.property_id,
-          generator_id: payload.generator_id,
-          reading_date: payload.reading_date,
-          opening_hours: payload.opening_hours,
-          closing_hours: payload.closing_hours,
-          opening_kwh: payload.opening_kwh ?? null,
-          closing_kwh: payload.closing_kwh ?? null,
-          opening_diesel_level: payload.opening_diesel_level,
-          closing_diesel_level: payload.closing_diesel_level,
-          diesel_added_litres: payload.diesel_added_litres,
-          computed_run_hours,
-          computed_consumed_litres,
-          notes: payload.notes ?? null,
-        },
-        select: '*',
-        single: true,
+      const res = await serverApi.post<any>(`/api/diesel/readings`, {
+        property_id: payload.property_id,
+        generator_id: payload.generator_id,
+        reading_date: payload.reading_date,
+        opening_hours: payload.opening_hours,
+        closing_hours: payload.closing_hours,
+        opening_kwh: payload.opening_kwh ?? null,
+        closing_kwh: payload.closing_kwh ?? null,
+        opening_diesel_level: payload.opening_diesel_level,
+        closing_diesel_level: payload.closing_diesel_level,
+        diesel_added_litres: payload.diesel_added_litres,
+        computed_consumed_litres,
+        notes: payload.notes ?? null,
       });
+
       if (res.error) throw new Error(res.error.message ?? 'Unknown error');
-      return { success: true, data: res.data as any, status: 201 };
+      return { success: true, data: res.data?.reading, status: 201 };
     } catch (err: any) {
       console.error('dieselService.submitReading:', err);
       return { success: false, data: null as any, error: err.message, status: 500 };
@@ -280,14 +235,7 @@ export const dieselService = {
   // ── Delete Reading ────────────────────────────────────────────────────────
   async deleteReading(readingId: string, propertyId: string): Promise<ApiResponse<boolean>> {
     try {
-      const res = await serverApi.query({
-        table: 'diesel_readings',
-        action: 'delete',
-        filters: [
-          { op: 'eq', column: 'id', value: readingId },
-          { op: 'eq', column: 'property_id', value: propertyId },
-        ],
-      });
+      const res = await serverApi.delete<any>(`/api/diesel/readings/${readingId}?propertyId=${propertyId}`);
       if (res.error) throw new Error(res.error.message ?? 'Unknown error');
       return { success: true, data: true, status: 200 };
     } catch (err: any) {
@@ -298,14 +246,9 @@ export const dieselService = {
   // ── Fetch Tariffs ─────────────────────────────────────────────────────────
   async fetchTariffs(generatorId: string): Promise<ApiResponse<DGTariff[]>> {
     try {
-      const res = await serverApi.query<DGTariff[]>({
-        table: 'dg_tariffs',
-        action: 'select',
-        filters: [{ op: 'eq', column: 'generator_id', value: generatorId }],
-        orders: [{ column: 'effective_from', ascending: false }],
-      });
+      const res = await serverApi.get<any>(`/api/diesel/tariffs?generatorId=${generatorId}`);
       if (res.error) throw new Error(res.error.message);
-      return { success: true, data: res.data || [], status: 200 };
+      return { success: true, data: res.data?.tariffs || [], status: 200 };
     } catch (err: any) {
       return { success: false, data: [], error: err.message, status: 500 };
     }
@@ -314,28 +257,9 @@ export const dieselService = {
   // ── Create Tariff (closes previous active) ────────────────────────────────
   async createTariff(payload: Partial<DGTariff>): Promise<ApiResponse<DGTariff>> {
     try {
-      if (payload.generator_id && payload.effective_from) {
-        const prevDate = new Date(payload.effective_from);
-        prevDate.setDate(prevDate.getDate() - 1);
-        await serverApi.query({
-          table: 'dg_tariffs',
-          action: 'update',
-          values: { effective_to: prevDate.toISOString().split('T')[0] },
-          filters: [
-            { op: 'eq', column: 'generator_id', value: payload.generator_id },
-            { op: 'is', column: 'effective_to', value: null },
-          ],
-        });
-      }
-
-      const res = await serverApi.query<DGTariff>({
-        table: 'dg_tariffs',
-        action: 'insert',
-        values: payload,
-        single: true,
-      });
+      const res = await serverApi.post<any>(`/api/diesel/tariffs`, payload);
       if (res.error) throw new Error(res.error.message);
-      return { success: true, data: res.data as any, status: 201 };
+      return { success: true, data: res.data?.tariff, status: 201 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
@@ -344,30 +268,8 @@ export const dieselService = {
   // ── Delete Tariff ─────────────────────────────────────────────────────────
   async deleteTariff(tariffId: string, generatorId: string): Promise<ApiResponse<boolean>> {
     try {
-      const res = await serverApi.query({
-        table: 'dg_tariffs',
-        action: 'delete',
-        filters: [{ op: 'eq', column: 'id', value: tariffId }],
-      });
+      const res = await serverApi.delete<any>(`/api/diesel/tariffs/${tariffId}`);
       if (res.error) throw new Error(res.error.message);
-
-      // Reopen previous tariff
-      const prev = await serverApi.query<DGTariff>({
-        table: 'dg_tariffs',
-        action: 'select',
-        filters: [{ op: 'eq', column: 'generator_id', value: generatorId }],
-        orders: [{ column: 'effective_from', ascending: false }],
-        limit: 1,
-        single: true,
-      });
-      if (prev.data?.id) {
-        await serverApi.query({
-          table: 'dg_tariffs',
-          action: 'update',
-          values: { effective_to: null },
-          filters: [{ op: 'eq', column: 'id', value: prev.data.id }],
-        });
-      }
 
       return { success: true, data: true, status: 200 };
     } catch (err: any) {

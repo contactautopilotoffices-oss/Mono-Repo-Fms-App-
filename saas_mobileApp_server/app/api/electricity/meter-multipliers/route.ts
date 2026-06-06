@@ -9,12 +9,17 @@ export async function GET(request: NextRequest) {
     if (auth.response || !auth.user) {
       return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const propertyId = request.nextUrl.searchParams.get("propertyId");
-    if (!propertyId) return NextResponse.json({ error: "Missing propertyId" }, { status: 400 });
-    if (!(await canManageProperty(auth.user.id, propertyId))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const meterId = request.nextUrl.searchParams.get("meterId");
+    if (!meterId) return NextResponse.json({ error: "Missing meterId" }, { status: 400 });
 
     const admin = createAdminClient();
-    const { data, error } = await admin.from("meter_multipliers").select("*").eq("property_id", propertyId).order("effective_from", { ascending: false });
+    
+    // Check access via meter's property
+    const { data: meter } = await admin.from("electricity_meters").select("property_id").eq("id", meterId).single();
+    if (!meter) return NextResponse.json({ error: "Meter not found" }, { status: 404 });
+    if (!(await canManageProperty(auth.user.id, meter.property_id))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const { data, error } = await admin.from("meter_multipliers").select("*").eq("meter_id", meterId).order("effective_from", { ascending: false });
     if (error) return NextResponse.json({ error: "Failed to fetch meter multipliers" }, { status: 500 });
     return NextResponse.json({ data: data ?? [] });
   } catch (error) {
@@ -30,11 +35,16 @@ export async function POST(request: NextRequest) {
       return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const body = await request.json();
-    const propertyId = body.propertyId || body.property_id;
-    if (!propertyId || !body.multiplier || !body.effective_from) return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    if (!(await canManageProperty(auth.user.id, propertyId))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const meterId = body.meterId || body.meter_id;
+    if (!meterId || !body.effective_from) return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
 
     const admin = createAdminClient();
+
+    // Check access
+    const { data: meter } = await admin.from("electricity_meters").select("property_id").eq("id", meterId).single();
+    if (!meter) return NextResponse.json({ error: "Meter not found" }, { status: 404 });
+    if (!(await canManageProperty(auth.user.id, meter.property_id))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
     const effectiveFrom = String(body.effective_from);
     const dayBefore = new Date(effectiveFrom);
     dayBefore.setDate(dayBefore.getDate() - 1);
@@ -43,20 +53,26 @@ export async function POST(request: NextRequest) {
     await admin
       .from("meter_multipliers")
       .update({ effective_to: dayBeforeStr })
-      .eq("property_id", propertyId)
+      .eq("meter_id", meterId)
       .is("effective_to", null)
       .lt("effective_from", effectiveFrom);
 
     const { data, error } = await admin
       .from("meter_multipliers")
       .insert({
-        property_id: propertyId,
-        multiplier: body.multiplier,
+        meter_id: meterId,
+        ct_ratio_primary: body.ct_ratio_primary ?? null,
+        ct_ratio_secondary: body.ct_ratio_secondary ?? null,
+        pt_ratio_primary: body.pt_ratio_primary ?? null,
+        pt_ratio_secondary: body.pt_ratio_secondary ?? null,
+        meter_constant: body.meter_constant ?? 1,
         effective_from: effectiveFrom,
+        reason: body.reason ?? null,
         created_by: auth.user.id,
       })
       .select("*")
       .single();
+      
     if (error) return NextResponse.json({ error: "Failed to create multiplier" }, { status: 500 });
     return NextResponse.json({ success: true, data }, { status: 201 });
   } catch (error) {

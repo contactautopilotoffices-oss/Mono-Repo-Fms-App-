@@ -1873,9 +1873,18 @@ export default function ElectricityScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const { user: authUser } = useAuth();
+  const { user: authUser, membership } = useAuth();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
+
+  const currentProperty = membership?.properties?.find((p) => p.id === propertyId);
+  const role = currentProperty?.role || membership?.org_role || "view_only";
+
+  const MANAGE_ROLES = ["property_admin", "staff", "mst", "org_super_admin", "org_admin", "master_admin", "owner"];
+  const canManage = MANAGE_ROLES.includes(role);
+
+  const ADMIN_ROLES = ["property_admin", "org_super_admin", "org_admin", "master_admin", "owner"];
+  const canViewAnalytics = ADMIN_ROLES.includes(role);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
@@ -2111,13 +2120,15 @@ const totalUnits = filteredReadings.reduce(
           <Text style={styles.headerTitleLine2}>Logger</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() => setShowMeterModal(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add-outline" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+          {canManage && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() => setShowMeterModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.headerCircularBtn}
             onPress={() => {
@@ -2128,24 +2139,28 @@ const totalUnits = filteredReadings.reduce(
           >
             <Ionicons name="time-outline" size={18} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() =>
-              router.push(
-                `/property/${propertyId}/electricity/analytics` as any,
-              )
-            }
-            activeOpacity={0.7}
-          >
-            <Ionicons name="analytics-outline" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() => setShowTariffModal(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          {canViewAnalytics && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() =>
+                router.push(
+                  `/property/${propertyId}/electricity/analytics` as any,
+                )
+              }
+              activeOpacity={0.7}
+            >
+              <Ionicons name="analytics-outline" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          {canManage && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() => setShowTariffModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
         </View>
       </SafeBlurView>
 
@@ -2310,10 +2325,10 @@ const totalUnits = filteredReadings.reduce(
                 cost={periodMeterStats[m.id]?.cost ?? 0}
                 tariffRate={tariffRate}
                 colors={colors}
-                onPress={() => {
+                onPress={canManage ? () => {
                   setSelectedMeterForLogging(m.id);
                   setShowSheet(true);
-                }}
+                } : undefined}
               />
             </View>
           )}
@@ -2403,17 +2418,19 @@ const totalUnits = filteredReadings.reduce(
                                   {r.notes ? ` · ${r.notes}` : ''}
                                 </Text>
                               </View>
-                              <TouchableOpacity
-                                style={{ padding: 6, marginTop: -4 }}
-                                onPress={() => handleDeleteReading(r.id)}
-                                disabled={deletingId === r.id}
-                              >
-                                {deletingId === r.id ? (
-                                  <ActivityIndicator size={14} color="#EF4444" />
-                                ) : (
-                                  <Trash2 size={16} color="#EF444480" />
-                                )}
-                              </TouchableOpacity>
+                              {canManage && (
+                                <TouchableOpacity
+                                  style={{ padding: 6, marginTop: -4 }}
+                                  onPress={() => handleDeleteReading(r.id)}
+                                  disabled={deletingId === r.id}
+                                >
+                                  {deletingId === r.id ? (
+                                    <ActivityIndicator size={14} color="#EF4444" />
+                                  ) : (
+                                    <Trash2 size={16} color="#EF444480" />
+                                  )}
+                                </TouchableOpacity>
+                              )}
                             </View>
                             <View style={{ flexDirection: 'row', marginTop: 12, gap: 16 }}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

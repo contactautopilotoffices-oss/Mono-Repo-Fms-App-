@@ -19,28 +19,67 @@ let firebaseModules:
     }
   | null = null;
 
-function getFirebaseMessagingModules() {
-  if (Platform.OS === 'web') return null;
-  if (!firebaseModules) {
+let firebaseInitAttempted = false;
+
+async function initializeFirebase(): Promise<boolean> {
+  if (firebaseInitAttempted) return firebaseModules !== null;
+  firebaseInitAttempted = true;
+
+  if (Platform.OS === 'web') return false;
+
+  try {
+    // Import Firebase app - this initializes Firebase with google-services.json
+    const app = require('@react-native-firebase/app').default;
+    console.log('[Push] Firebase App imported');
+
+    // Check if already initialized
     try {
-      const messaging = require('@react-native-firebase/messaging');
-      const app = require('@react-native-firebase/app');
-      // Verify Firebase is initialized — getApp() throws if not initialized
       app.getApp();
-      firebaseModules = {
-        AuthorizationStatus: messaging.AuthorizationStatus,
-        getApp: app.getApp,
-        getMessaging: messaging.getMessaging,
-        getToken: messaging.getToken,
-        onTokenRefresh: messaging.onTokenRefresh,
-        requestPermission: messaging.requestPermission,
-      };
+      console.log('[Push] Firebase already initialized');
     } catch {
-      // Firebase native module not linked or not initialized — skip FCM
-      return null;
+      // Not initialized, need to initialize
+      console.log('[Push] Firebase not initialized - google-services.json will auto-initialize on native build');
     }
+
+    return true;
+  } catch (err: any) {
+    console.error('[Push] Firebase App import failed:', err.message);
+    console.error('[Push] This usually means:');
+    console.error('[Push] 1. Running in Expo Go (not supported)');
+    console.error('[Push] 2. google-services.json missing or invalid');
+    console.error('[Push] 3. Native build not done (run: npx expo prebuild --platform android)');
+    return false;
   }
-  return firebaseModules;
+}
+
+async function getFirebaseMessagingModules(): Promise<typeof firebaseModules> {
+  if (Platform.OS === 'web') return null;
+  if (firebaseModules) return firebaseModules;
+
+  // First initialize Firebase
+  const initialized = await initializeFirebase();
+  if (!initialized) return null;
+
+  try {
+    const messaging = require('@react-native-firebase/messaging');
+    const app = require('@react-native-firebase/app').default;
+
+    console.log('[Push] Firebase messaging module loaded');
+    firebaseModules = {
+      AuthorizationStatus: messaging.AuthorizationStatus,
+      getApp: () => app,
+      getMessaging: messaging.getMessaging,
+      getToken: messaging.getToken,
+      onTokenRefresh: messaging.onTokenRefresh,
+      requestPermission: messaging.requestPermission,
+    };
+
+    console.log('[Push] ✅ Firebase modules ready');
+    return firebaseModules;
+  } catch (err: any) {
+    console.error('[Push] ❌ Firebase messaging not available:', err.message);
+    return null;
+  }
 }
 
 // ------------------------------------------------------------------
@@ -87,44 +126,62 @@ Notifications.setNotificationHandler({
 // Token registration
 // ------------------------------------------------------------------
 async function registerForPushNotificationsAsync(): Promise<string | null> {
+  console.log('[Push] Starting token registration...');
+
   if (!Device.isDevice) {
-    console.log('[Push] Must use physical device for push notifications');
+    console.log('[Push] ❌ Must use physical device for push notifications');
     return null;
   }
 
   // SDK 53+ restriction for Expo Go on Android
   if (Platform.OS === 'android' && Constants.appOwnership === 'expo') {
-    console.warn('[Push] Android remote notifications are not supported in Expo Go (SDK 53+). Use a development build instead.');
+    console.warn('[Push] ❌ Android remote notifications are not supported in Expo Go (SDK 53+). Use a development build instead.');
     return null;
   }
 
+  console.log('[Push] Checking notification permissions...');
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   if (existingStatus !== 'granted') {
+    console.log('[Push] Permission not granted, requesting...');
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
-      console.log('[Push] Notification permission not granted, skipping automatic registration');
+      console.log('[Push] ❌ Notification permission denied');
       return null;
     }
+    console.log('[Push] ✅ Permission granted');
+  } else {
+    console.log('[Push] ✅ Permission already granted');
   }
 
   let token: string | null = null;
   try {
-    const firebaseMessaging = getFirebaseMessagingModules();
-    if (!firebaseMessaging) return null;
+    console.log('[Push] Getting Firebase messaging modules...');
+    const firebaseMessaging = await getFirebaseMessagingModules();
+    if (!firebaseMessaging) {
+      console.log('[Push] ❌ Firebase messaging modules not available');
+      return null;
+    }
+    console.log('[Push] ✅ Firebase messaging modules loaded');
+
     const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
+    console.log('[Push] Requesting FCM permission...');
     const authStatus = await firebaseMessaging.requestPermission(messagingInstance);
+    console.log('[Push] Auth status:', authStatus);
+
     const enabled =
       authStatus === firebaseMessaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === firebaseMessaging.AuthorizationStatus.PROVISIONAL;
 
     if (enabled) {
+      console.log('[Push] Getting FCM token...');
       token = await firebaseMessaging.getToken(messagingInstance);
+      console.log('[Push] ✅ FCM Token received:', token?.substring(0, 20) + '...');
     } else {
-      console.log('[Push] Firebase messaging not authorized');
+      console.log('[Push] ❌ Firebase messaging not authorized');
       return null;
     }
   } catch (error) {
-    console.error('[Push] Failed to get native FCM token:', error);
+    console.error('[Push] ❌ Failed to get native FCM token:', error);
     return null;
   }
 
@@ -315,21 +372,23 @@ export function usePushNotifications() {
 
     // Listen to token refreshes from Firebase
     let unsubscribe = () => {};
-    try {
-      const firebaseMessaging = getFirebaseMessagingModules();
-      if (firebaseMessaging) {
-        const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
-        unsubscribe = firebaseMessaging.onTokenRefresh(messagingInstance, (newToken: string) => {
-          console.log('[Push] Token refreshed via Firebase:', newToken);
-          if (user?.id) {
-            storePushToken(user.id, newToken, propertyId, organizationId);
-            tokenRef.current = newToken;
-          }
-        });
+    (async () => {
+      try {
+        const firebaseMessaging = await getFirebaseMessagingModules();
+        if (firebaseMessaging) {
+          const messagingInstance = firebaseMessaging.getMessaging(firebaseMessaging.getApp());
+          unsubscribe = firebaseMessaging.onTokenRefresh(messagingInstance, (newToken: string) => {
+            console.log('[Push] Token refreshed via Firebase:', newToken);
+            if (user?.id) {
+              storePushToken(user.id, newToken, propertyId, organizationId);
+              tokenRef.current = newToken;
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[Push] Failed to subscribe to token refresh:', err);
       }
-    } catch (err) {
-      console.warn('[Push] Failed to subscribe to token refresh:', err);
-    }
+    })();
 
     return () => unsubscribe();
   }, [register, user?.id]);

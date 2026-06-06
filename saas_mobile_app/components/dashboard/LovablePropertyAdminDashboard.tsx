@@ -1,4 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+/**
+ * LovablePropertyAdminDashboard
+ *
+ * UNIFIED CACHE ARCHITECTURE
+ *
+ * - Source of Truth: React Query (via useDashboardQuery)
+ * - UI State: Zustand (ephemeral only)
+ * - NO server data in Zustand
+ *
+ * Data flows from React Query cache → component renders instantly
+ * Background refresh updates UI when stale
+ */
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,27 +19,19 @@ import {
   StatusBar,
   RefreshControl,
   ScrollView,
-  Platform,
-  Modal,
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import BottomNav from './lovable/BottomNav';
 import SkeletonLoader from './lovable/SkeletonLoader';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInUp } from 'react-native-reanimated';
-import { useRouter, usePathname } from 'expo-router';
+import { useRouter } from 'expo-router';
 
-import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useWeather } from '@/hooks/useWeather';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
-import DashboardBackground from '@/components/dashboard/DashboardBackground';
-import SafeBlurView from '@/components/ui/SafeBlurView';
 import SignOutModal from '@/components/ui/SignOutModal';
 import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
-import SidekickFace from '@/components/dashboard/SidekickFace';
 import DetailModal, { type TileDetail } from '@/components/dashboard/DetailModal';
 import NeedsAttentionModal from '@/components/dashboard/NeedsAttentionModal';
 import NotificationModal from '@/components/notifications/NotificationModal';
@@ -35,34 +39,12 @@ import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
 import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
-import { ppmService } from '@/services/ppmService';
-import { useCassandraStore } from '@/stores/cassandraStore';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
-import {
-  SPACING,
-  TYPOGRAPHY,
-  STATUS_COLORS,
-  CARD_SURFACES,
-} from '@/constants/designSystem';
-import {
-  PulseDot,
-  GlassTile,
-  MiniBarChart,
-  ProgressBar,
-  AttentionCard,
-} from './DashboardComponents';
-
-const fontSans = Platform.select({ web: 'system-ui, -apple-system, sans-serif', ios: 'System', android: 'sans-serif', default: 'System' });
-const fontDisplay = Platform.select({ web: '"SF Pro Display", system-ui, -apple-system, sans-serif', ios: 'System', android: 'sans-serif', default: 'System' });
-const BG = '#121212';
-
-type TabKey = 'overview' | 'tickets';
-
-import { useDashboardStore } from '@/stores/dashboardStore';
-import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { SPACING, STATUS_COLORS } from '@/constants/designSystem';
+import { GlassTile, MiniBarChart, AttentionCard } from './DashboardComponents';
+import { useDashboardQuery, invalidateDashboard } from '@/hooks/useDashboardQuery';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 
 interface Props {
@@ -71,28 +53,40 @@ interface Props {
 
 export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const router = useRouter();
-  const pathname = usePathname();
   const { user, signOut, membership } = useAuth();
-  
-  // TEMPORARY LOGGING
-  useEffect(() => {
-    console.log(`[Phase 1 Debug] LovablePropertyAdminDashboard Rendered | Prop PropertyId: ${propertyId} | Route URL: ${pathname}`);
-  }, [propertyId, pathname]);
-
   const insets = useSafeAreaInsets();
   const { weather } = useWeather();
 
-  // Zustand state for dashboard to prevent reloading on every mount
-  const {
-    tickets, ticketCounts, sopCount, sopTotal, energyKwh, energyTrend, propertyName: storedPropertyName,
-    vmsStats, vendorStats, dieselStats, healthScore, attentionItems, ticketFunnel, tenantUserIds,
-    lastUpdatedAt, setDashboardData, clearCache, switchProperty
-  } = useDashboardStore();
+  // ─── NEW: Unified React Query Data (Source of Truth) ───
+  // Renders immediately from cache, refetches in background
+  const { data, isLoading, isFetching, forceRefresh } = useDashboardQuery(propertyId, {
+    initialLoadingOnMount: false, // Instant render from cache
+  });
 
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  // Only show loading if we don't have initial data for the current property
-  const loadedPropertyId = useDashboardStore(state => state.loadedPropertyId);
-  const hasLoadedInitialData = useDashboardStore(state => state.hasLoadedInitialData);
+  // Extract data from React Query cache
+  const tickets = data?.tickets ?? [];
+  const ticketCounts = data?.ticketCounts ?? {
+    all: { total: 0, open: 0, closed: 0 },
+    month: { total: 0, open: 0, closed: 0 },
+    today: { total: 0, open: 0, closed: 0 }
+  };
+  const sopCount = data?.sopCount ?? 0;
+  const sopTotal = data?.sopTotal ?? 0;
+  const energyKwh = data?.energyKwh ?? 0;
+  const energyTrend = data?.energyTrend ?? 12;
+  const propertyName = propertyId === 'all' 
+    ? 'All Properties Overview' 
+    : (data?.propertyName ?? membership?.properties?.find(p => p.id === propertyId)?.name ?? 'Property');
+  const vmsStats = data?.vmsStats ?? { total: 0, in: 0, out: 0 };
+  const vendorStats = data?.vendorStats ?? { revenue: 0, commission: 0 };
+  const dieselStats = data?.dieselStats ?? { level: 0, consumption: 0 };
+  const healthScore = data?.healthScore ?? 100;
+  const attentionItems = data?.attentionItems ?? [];
+  const tenantUserIds = data?.tenantUserIds ?? [];
+  const ppm = data?.ppm ?? { total: 0, done: 0, pending: 0, overdue: 0, postponed: 0 };
+  const propertyPhoto = data?.propertyLogoUrl ?? null;
+
+  // ─── UI State (ephemeral) ───
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
@@ -102,37 +96,34 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
-  const [propertyPhoto, setPropertyPhoto] = useState<string | null>(null);
-
-  // Drawer state for hamburger menu
   const [showDrawer, setShowDrawer] = useState(false);
-
   const [ticketTimeFilter, setTicketTimeFilter] = useState<'today' | 'month' | 'all'>('all');
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(
-    lastUpdatedAt ? new Date(lastUpdatedAt) : null
-  );
 
+  // Permission Onboarding
+  useEffect(() => {
+    hasRequestedPermissions().then(requested => {
+      if (!requested) setShowPermissionOnboarding(true);
+    });
+  }, []);
 
+  // ─── Computed Values ───
+  const totalTickets = ticketCounts[ticketTimeFilter]?.total || 0;
+  const openTickets = ticketCounts[ticketTimeFilter]?.open || 0;
+  const resolvedTickets = ticketCounts[ticketTimeFilter]?.closed || 0;
 
-  // PPM stats (local)
-  const [ppmTotal, setPpmTotal]   = useState(0);
-  const [ppmDone, setPpmDone]     = useState(0);
-  const [ppmPending, setPpmPending] = useState(0);
-  const [ppmOverdue, setPpmOverdue] = useState(0);
-  const [ppmPostponed, setPpmPostponed] = useState(0);
+  const healthStatus: 'optimal' | 'watch' | 'critical' = openTickets > 15 ? 'critical' : openTickets > 5 ? 'watch' : 'optimal';
+  const healthColor = STATUS_COLORS[healthStatus].bg;
+  const checklistPct = sopTotal > 0 ? Math.round((sopCount / sopTotal) * 100) : 100;
 
-  // ─── Needs Attention: merge RPC items with property-scoped ticket logic ───────
-  // Matches saas_one web dashboard rules:
-  //   1. Tenant tickets      (is_internal === false, not resolved/closed)   → severity: high
-  //   2. Critical tickets    (priority === 'critical', active)                      → severity: critical
-  //   3. Urgent/High tickets (priority in ['urgent','high'], active)               → severity: high
-  //   4. Stale tickets       (>3 days open with active status)                     → severity: medium
-  const needsAttentionTickets = useMemo(() => {
-    // Drop RPC attention items for tickets that are now resolved/closed
+  const ticketHistory = useMemo(() => [12, 18, 15, 22, 19, 25, openTickets || 14], [openTickets]);
+  const energyHistory = useMemo(() => [35, 55, 70, 92, 78, 60, 45], []);
+
+  // ─── Needs Attention Logic ───
+  const needsAttentionItems = useMemo(() => {
     const RESOLVED_STATUSES = ['resolved', 'closed'];
-    const ACTIVE_STATUSES = ['open', 'assigned', 'in_progress', 'in_progress', 'waitlist', 'blocked', 'client_raised', 'work_started'];
+    const ACTIVE_STATUSES = ['open', 'assigned', 'in_progress', 'waitlist', 'blocked', 'client_raised', 'work_started'];
 
-    const activeAttentionItems = (attentionItems || []).filter((item) => {
+    const activeRpcItems = (attentionItems || []).filter((item) => {
       if (item.entity_type === 'ticket') {
         const t = tickets.find((tk) => tk.id === item.entity_id);
         if (t && RESOLVED_STATUSES.includes(t.status)) return false;
@@ -140,120 +131,54 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       return true;
     });
 
-    const items: any[] = [...activeAttentionItems];
+    const items: any[] = [...activeRpcItems];
     const seenIds = new Set(items.map((i) => i.entity_id));
 
     tickets.forEach((t) => {
-      // Skip already-closed tickets
       if (RESOLVED_STATUSES.includes(t.status)) return;
 
-      // 1. Tenant (client) tickets — only if raised_by is present (creator is a known tenant user)
-      // is_internal=false means external; raised_by confirms it's a tenant, not property admin/staff
       if (t.internal === false && t.raised_by && tenantUserIds.includes(t.raised_by) && !seenIds.has(t.id)) {
-        items.push({
-          id: `tenant-${t.id}`,
-          entity_id: t.id,
-          entity_type: 'ticket',
-          severity: 'high',
-          type: 'tenant_ticket',
-          title: 'Client Ticket',
-          description: t.title || 'Client raised ticket',
-          action_label: 'View',
-        });
+        items.push({ id: `tenant-${t.id}`, entity_id: t.id, entity_type: 'ticket', severity: 'high', type: 'tenant_ticket', title: 'Client Ticket', description: t.title || 'Client raised ticket', action_label: 'View' });
         seenIds.add(t.id);
       }
 
-      // 2. Critical priority tickets
       if (t.priority === 'critical' && !seenIds.has(t.id)) {
-        items.push({
-          id: `critical-${t.id}`,
-          entity_id: t.id,
-          entity_type: 'ticket',
-          severity: 'critical',
-          type: 'critical_ticket',
-          title: 'Critical Ticket',
-          description: t.title || 'Critical priority ticket',
-          action_label: 'Urgent',
-        });
+        items.push({ id: `critical-${t.id}`, entity_id: t.id, entity_type: 'ticket', severity: 'critical', type: 'critical_ticket', title: 'Critical Ticket', description: t.title || 'Critical priority ticket', action_label: 'Urgent' });
         seenIds.add(t.id);
       }
 
-      // 3. High / Urgent priority tickets (not already captured above)
       if (['urgent', 'high'].includes(t.priority) && !seenIds.has(t.id)) {
-        items.push({
-          id: `urgent-${t.id}`,
-          entity_id: t.id,
-          entity_type: 'ticket',
-          severity: 'high',
-          type: 'critical_ticket',
-          title: t.priority === 'urgent' ? 'Urgent Ticket' : 'High Priority Ticket',
-          description: t.title || `${t.priority} priority ticket`,
-          action_label: 'Review',
-        });
+        items.push({ id: `urgent-${t.id}`, entity_id: t.id, entity_type: 'ticket', severity: 'high', type: 'critical_ticket', title: t.priority === 'urgent' ? 'Urgent Ticket' : 'High Priority Ticket', description: t.title || `${t.priority} priority ticket`, action_label: 'Review' });
         seenIds.add(t.id);
       }
 
-      // 4. Stale tickets — open for more than 3 days with an active status
       if (!seenIds.has(t.id) && ACTIVE_STATUSES.includes(t.status)) {
         const daysOpen = (Date.now() - new Date(t.created_at).getTime()) / (1000 * 60 * 60 * 24);
         if (daysOpen > 3) {
-          items.push({
-            id: `stale-${t.id}`,
-            entity_id: t.id,
-            entity_type: 'ticket',
-            severity: 'medium',
-            type: 'stale_ticket',
-            title: 'Stale Ticket',
-            description: `${t.title || 'Ticket'} · Open ${Math.floor(daysOpen)}d`,
-            action_label: 'Follow Up',
-          });
+          items.push({ id: `stale-${t.id}`, entity_id: t.id, entity_type: 'ticket', severity: 'medium', type: 'stale_ticket', title: 'Stale Ticket', description: `${t.title || 'Ticket'} · Open ${Math.floor(daysOpen)}d`, action_label: 'Follow Up' });
           seenIds.add(t.id);
         }
       }
     });
 
-    return items;
-  }, [attentionItems, tickets]);
-
-  const prioritizedAttentionItems = useMemo(() => {
-    if (!needsAttentionTickets.length) return [];
-    return [...needsAttentionTickets].map((item) => {
+    return items.map((item) => {
       const matchingTicket = tickets.find((t) => t.id === item.entity_id);
-      // Only flag as client/tenant if raised_by is present (creator is known tenant user)
       const isClientTicket = matchingTicket ? (matchingTicket.internal === false && !!matchingTicket.raised_by && tenantUserIds.includes(matchingTicket.raised_by)) : false;
       const isCritical = item.severity === 'critical';
       const isHighUrgent = ['urgent', 'high'].includes(matchingTicket?.priority ?? '');
       const isStale = item.type === 'stale_ticket';
 
-      // Priority scoring matches saas_one web logic
       let priorityScore = 0;
       if (isCritical) priorityScore += 15;
       if (isClientTicket) priorityScore += 10;
       if (isHighUrgent) priorityScore += 8;
       if (isStale) priorityScore += 3;
 
-      const cleanDescription = item.description
-        ? item.description.replace(/^Ticket\s+#\S+\s+/i, '')
-        : '';
-
-      return {
-        ...item,
-        description: cleanDescription,
-        photoBeforeUrl: matchingTicket?.photo_before_url || null,
-        priorityScore,
-      };
+      return { ...item, photoBeforeUrl: matchingTicket?.photo_before_url || null, priorityScore };
     }).sort((a, b) => b.priorityScore - a.priorityScore);
-  }, [needsAttentionTickets, tickets]);
+  }, [attentionItems, tickets, tenantUserIds]);
 
-  // Cassandra voice state
-  const voiceState = useCassandraStore((s) => s.voiceState);
-  const faceState: any = (() => {
-    if (voiceState === 'recording' || voiceState === 'processing' || voiceState === 'connecting') return 'listening';
-    if (voiceState === 'speaking') return 'speaking';
-    if (voiceState === 'error') return 'alert';
-    return 'idle';
-  })();
-
+  // ─── Role Checks ───
   const orgId = membership?.org_id ?? '';
   const orgRole = (membership?.org_role ?? '').toLowerCase();
   const isOrgAdmin = ['org_super_admin', 'org_admin', 'owner'].includes(orgRole);
@@ -262,345 +187,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const hasMultipleProperties = (membership?.properties?.length ?? 0) > 1;
   const canSwitchProperty = isOrgAdmin || (isPropertyAdmin && hasMultipleProperties);
 
-  const propertyName = useMemo(() => {
-    if (propertyId === 'all') return 'All Properties Overview';
-    const prop = membership?.properties?.find(p => p.id === propertyId);
-    return prop?.name || storedPropertyName || 'Property';
-  }, [propertyId, membership, storedPropertyName]);
-
-  const propertyIdRef = useRef(propertyId);
-  useEffect(() => { propertyIdRef.current = propertyId; }, [propertyId]);
-
-  const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    const requestedPropertyId = propertyId;
-    try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const isAll = propertyId === 'all';
-      let propIds = isAll 
-        ? (membership?.properties?.map(p => p.id) ?? [])
-        : [propertyId];
-
-      // If "all" properties is selected but membership doesn't explicitly list them
-      // (e.g. Org Super Admin), dynamically fetch them from the properties table
-      if (isAll && propIds.length === 0 && membership?.org_id) {
-        try {
-          const { data: orgProps } = await serverApi.query({
-            table: 'properties',
-            action: 'select',
-            select: 'id',
-            filters: [{ op: 'eq' as const, column: 'organization_id', value: membership.org_id }]
-          });
-          if (orgProps && Array.isArray(orgProps)) {
-            propIds = orgProps.map((p: any) => p.id);
-          }
-        } catch (err) {
-          if (__DEV__) console.warn('[Dashboard] Failed to fetch org properties:', err);
-        }
-      }
-
-      if (propIds.length === 0) return; // Nothing to fetch
-
-      if (!isAll) {
-        // Fetch property photo if available
-        try {
-          const { data: propData } = await serverApi.query({
-            table: 'properties',
-            action: 'select',
-            select: 'logo_url',
-            filters: [{ op: 'eq' as const, column: 'id', value: propertyId }]
-          });
-          if (propData && propData[0]?.logo_url) {
-            setPropertyPhoto(propData[0].logo_url);
-          } else {
-            setPropertyPhoto(null);
-          }
-        } catch (err) {
-          setPropertyPhoto(null);
-        }
-      } else {
-        setPropertyPhoto(null);
-      }
-
-
-      const propFilter = isAll
-        ? { op: 'in' as const, column: 'property_id', values: propIds }
-        : { op: 'eq' as const, column: 'property_id', value: propertyId };
-
-      const safeFetch = (promise: Promise<any>, fallbackData: any, countFallback: number | null = null) => 
-        promise.catch(err => {
-          if (__DEV__) console.warn('[Dashboard query fallback]', err?.message);
-          return { data: fallbackData, count: countFallback };
-        });
-
-      const monthStr = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-
-      const bulkQueries = Promise.all([
-        isAll
-          ? Promise.resolve({ data: { name: 'All Properties Overview' } })
-          : safeFetch(serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq' as const, column: 'id', value: propertyId }], single: true }), null),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id, title, status, priority, created_at, internal, raised_by, photo_before_url', selectOptions: { limit: 150 }, filters: [propFilter], orders: [{ column: 'created_at', ascending: false }] }), []),
-        safeFetch(serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [propFilter, { op: 'eq' as const, column: 'is_active', value: true }] }), []),
-        safeFetch(serverApi.query({ table: 'sop_completions', action: 'select', select: 'status', filters: [propFilter, { op: 'eq' as const, column: 'completion_date', value: todayStr }] }), []),
-        safeFetch(serverApi.query({ table: 'visitor_logs', action: 'select', select: 'status', filters: [propFilter] }), []),
-        safeFetch(serverApi.query({ table: 'vendor_daily_revenue', action: 'select', select: 'revenue_amount, vendor_id', filters: [propFilter] }), []),
-        // All Time Counts
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
-        // Month Counts
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: monthStr }, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
-        // Today Counts
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }, { op: 'in' as const, column: 'status', values: ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist'] }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'tickets', action: 'select', select: 'id', selectOptions: { count: 'exact', head: true }, filters: [propFilter, { op: 'gte' as const, column: 'created_at', value: todayStr }, { op: 'in' as const, column: 'status', values: ['resolved', 'closed'] }] }), null, 0),
-        safeFetch(serverApi.query({ table: 'property_memberships', action: 'select', select: 'user_id', filters: [propFilter, { op: 'in' as const, column: 'role', values: ['tenant', 'super_tenant'] }] }), []),
-      ]);
-
-      const perPropQueries = Promise.all(propIds.map(async (pid) => {
-        const [elec, diesel, health, attention, funnel, ppm] = await Promise.all([
-          safeFetch(serverApi.query({ table: 'electricity_readings', action: 'select', select: 'final_units', filters: [{ op: 'eq' as const, column: 'property_id', value: pid }], orders: [{ column: 'created_at', ascending: false }], limit: 1, maybeSingle: true }), null),
-          safeFetch(serverApi.query({ table: 'diesel_readings', action: 'select', select: 'current_fuel_level', filters: [{ op: 'eq' as const, column: 'property_id', value: pid }], orders: [{ column: 'created_at', ascending: false }], limit: 1, maybeSingle: true }), null),
-          safeFetch(serverApi.rpc('get_property_health_score', { p_property_id: pid }), null),
-          safeFetch(serverApi.rpc('get_attention_items', { p_property_id: pid, p_limit: 10 }), []),
-          safeFetch(serverApi.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }), []),
-          ppmService.fetchStats(pid).catch(() => ({ success: false, data: null }))
-        ]);
-        return { elec, diesel, health, attention, funnel, ppm };
-      }));
-
-      const [[
-        propRes, ticketRes, sopTemplatesRes, sopCompletionsRes, vmsRes, revRes, 
-        countTotalAll, countOpenAll, countClosedAll,
-        countTotalMonth, countOpenMonth, countClosedMonth,
-        countTotalToday, countOpenToday, countClosedToday,
-        tenantUsersRes
-      ], perPropResults] = await Promise.all([
-        bulkQueries,
-        perPropQueries
-      ]);
-
-      // Aggregate bulk results
-      let newPropName = isAll ? 'All Properties Overview' : 'Property';
-      let newTickets: any[] = [];
-      let newSopTotal = 0;
-      let newSopCount = 0;
-      let newVmsStats = { total: 0, in: 0, out: 0 };
-      if (propRes?.data) {
-        newPropName = (propRes.data as any).name;
-      }
-      if (ticketRes?.data) {
-        newTickets = ticketRes.data as any[];
-      }
-      if (sopTemplatesRes?.data) {
-        newSopTotal = (sopTemplatesRes.data as any[]).length;
-      }
-      if (sopCompletionsRes?.data) {
-        newSopCount = (sopCompletionsRes.data as any[])
-          .filter((s: any) => s.status === 'completed').length;
-      }
-      if (vmsRes?.data) {
-        const total = (vmsRes.data as any[]).length;
-        const checkedIn = (vmsRes.data as any[]).filter((v: any) => v.status === 'checked_in').length;
-        const checkedOut = (vmsRes.data as any[]).filter((v: any) => v.status === 'checked_out').length;
-        newVmsStats = { total, in: checkedIn, out: checkedOut };
-      }
-
-      let newVendorStats = { revenue: 0, commission: 0 };
-      if (revRes?.data) {
-        const totalRev = (revRes.data as any[]).reduce((acc: number, row: any) => acc + (row.revenue_amount || 0), 0);
-        newVendorStats = { revenue: totalRev, commission: totalRev * 0.1 };
-      }
-
-      // Aggregate per-property results
-      let totalElec = 0;
-      let totalDiesel = 0;
-      let healthSum = 0;
-      let attentionArr: any[] = [];
-      let funnelCounts: Record<string, number> = {};
-      
-      let pTotal = 0, pDone = 0, pPending = 0, pOverdue = 0, pPostponed = 0;
-
-      perPropResults.forEach(res => {
-        if (res.elec.data) totalElec += (res.elec.data as any).final_units || 0;
-        if (res.diesel.data) totalDiesel += (res.diesel.data as any).current_fuel_level || 0;
-        if (res.health.data) healthSum += (res.health.data as number);
-        if (res.attention.data) attentionArr.push(...(res.attention.data as any[]));
-        
-        if (res.funnel.data) {
-          (res.funnel.data as any[]).forEach(fItem => {
-            funnelCounts[fItem.status_label] = (funnelCounts[fItem.status_label] || 0) + fItem.ticket_count;
-          });
-        }
-        
-        if (res.ppm.success && res.ppm.data) {
-          pTotal += res.ppm.data.total ?? 0;
-          pDone += res.ppm.data.done ?? 0;
-          pPending += res.ppm.data.pending ?? 0;
-          pOverdue += res.ppm.data.overdue ?? 0;
-          pPostponed += res.ppm.data.postponed ?? 0;
-        }
-      });
-
-      let newEnergyKwh = Math.round(totalElec);
-      let newDieselStats = { level: totalDiesel, consumption: 0 };
-      let newHealthScore = propIds.length > 0 ? Math.round(healthSum / propIds.length) : 100;
-      
-      const sortedAttention = attentionArr.sort((a, b) => {
-        const score = (sev: string) => sev === 'critical' ? 3 : sev === 'high' ? 2 : 1;
-        return score(b.severity) - score(a.severity);
-      }).slice(0, 10);
-      let newAttentionItems = sortedAttention;
-      
-      let newTicketFunnel = Object.entries(funnelCounts).map(([status_label, ticket_count]) => ({ status_label, ticket_count }));
-
-      setPpmTotal(pTotal);
-      setPpmDone(pDone);
-      setPpmPending(pPending);
-      setPpmOverdue(pOverdue);
-      setPpmPostponed(pPostponed);
-
-      // Guard against stale response from a previous property fetch
-      if (propertyIdRef.current !== requestedPropertyId) return;
-
-      let newTenantUserIds: string[] = [];
-      if (tenantUsersRes?.data) {
-        newTenantUserIds = (tenantUsersRes.data as any[]).map(r => r.user_id).filter(Boolean);
-      }
-
-      setDashboardData({
-        propertyName: newPropName,
-        tickets: newTickets,
-        ticketCounts: {
-          all: {
-            total: countTotalAll?.count ?? 0,
-            open: countOpenAll?.count ?? 0,
-            closed: countClosedAll?.count ?? 0,
-          },
-          month: {
-            total: countTotalMonth?.count ?? 0,
-            open: countOpenMonth?.count ?? 0,
-            closed: countClosedMonth?.count ?? 0,
-          },
-          today: {
-            total: countTotalToday?.count ?? 0,
-            open: countOpenToday?.count ?? 0,
-            closed: countClosedToday?.count ?? 0,
-          }
-        },
-        sopTotal: newSopTotal,
-        sopCount: newSopCount,
-        energyKwh: newEnergyKwh,
-        healthScore: newHealthScore,
-        attentionItems: newAttentionItems,
-        ticketFunnel: newTicketFunnel,
-        tenantUserIds: newTenantUserIds,
-        vmsStats: newVmsStats,
-        vendorStats: newVendorStats,
-        dieselStats: newDieselStats,
-        hasLoadedInitialData: true,
-        loadedPropertyId: requestedPropertyId,
-        lastUpdatedAt: Date.now(),
-      });
-
-    } catch (err: any) {
-      if (__DEV__) {
-        console.error('[Dashboard] fetchData error:', err?.message ?? err);
-      }
-    } finally {
-      // Only hide skeleton if we're still on the property we fetched for
-      if (propertyIdRef.current === requestedPropertyId) {
-        setIsRefreshing(false);
-        setLastUpdated(new Date());
-      }
-    }
-  }, [propertyId, membership]);
-
-  // React Query wrapper: prevents re-fetching on every mount if data is fresh
-  const { refetch } = useDashboardFetch(queryKeys.property.dashboard(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
-
-  useEffect(() => {
-    // Only sync when the route parameter changes, to prevent reverting the store
-    // if the store updates before the route transition completes.
-    if (useDashboardStore.getState().loadedPropertyId !== propertyId) {
-      switchProperty(propertyId);
-    }
-    // fetchData is called by useDashboardFetch on mount (if stale)
-    // Show permission onboarding on first visit
-    hasRequestedPermissions().then(requested => {
-      if (!requested) setShowPermissionOnboarding(true);
-    });
-  }, [propertyId]);
-
-  const onRefresh = async () => {
-    setIsRefreshing(true);
-    await refetch();
-    setIsRefreshing(false);
-  };
-
-  // Stats from backend aggregate counts
-  const totalTickets = ticketCounts[ticketTimeFilter]?.total || 0;
-  const openTickets = ticketCounts[ticketTimeFilter]?.open || 0;
-  const resolvedTickets = ticketCounts[ticketTimeFilter]?.closed || 0;
-
-  // The filtered tickets are only used for the sparkline history and dynamic funnel, 
-  // which is acceptable to be based on the recent 150 ticket sample to show current trends.
-  const filteredTickets = useMemo(() => {
-    const now = new Date();
-    if (ticketTimeFilter === 'today') {
-      const todayStr = now.toISOString().split('T')[0];
-      return tickets.filter((t) => t.created_at?.startsWith(todayStr));
-    }
-    if (ticketTimeFilter === 'month') {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      return tickets.filter((t) => t.created_at >= monthStart);
-    }
-    return tickets;
-  }, [tickets, ticketTimeFilter]);
-
-  // Dynamically compute funnel from filtered tickets
-  const dynamicFunnel = useMemo(() => {
-    const counts: Record<string, number> = {
-      'assigned': 0,
-      'in_progress': 0,
-      'resolved': 0,
-      'closed': 0,
-    };
-    filteredTickets.forEach(t => {
-      if (counts.hasOwnProperty(t.status)) counts[t.status]++;
-    });
-    return Object.entries(counts).map(([status, count]) => ({
-      status_label: status,
-      ticket_count: count
-    }));
-  }, [filteredTickets]);
-  const healthStatus: 'optimal' | 'watch' | 'critical' = openTickets > 15 ? 'critical' : openTickets > 5 ? 'watch' : 'optimal';
-  const healthColor = STATUS_COLORS[healthStatus].bg;
-  const checklistPct = sopTotal > 0 ? Math.round((sopCount / sopTotal) * 100) : 100;
-  
-  // Stats for VMS and Vendor
-  const pendingValidationCount = useMemo(() => tickets.filter(t => t.status === 'resolved').length, [tickets]);
-
-  // Mock 7-day history for sparklines
-  const ticketHistory = useMemo(() => {
-    return [12, 18, 15, 22, 19, 25, openTickets || 14];
-  }, [openTickets]);
-
-  const energyHistory = useMemo(() => {
-    return [35, 55, 70, 92, 78, 60, 45];
-  }, []);
-
-  // Tile detail data
+  // ─── Tile Details ───
   const tileDetails: Record<string, TileDetail> = {
     tickets: {
-      id: 'tickets',
-      iconName: 'ticket',
-      label: 'Tickets',
-      title: `${propertyName} · Tickets`,
+      id: 'tickets', iconName: 'ticket', label: 'Tickets', title: `${propertyName} · Tickets`,
       metrics: [
         { label: 'Open', value: openTickets.toString() },
         { label: 'Resolved', value: resolvedTickets.toString() },
@@ -617,25 +207,17 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         { label: 'Resolved', value: resolvedTickets, color: STATUS_COLORS.optimal.bg },
         { label: 'Total', value: totalTickets, color: '#3B82F6' },
       ],
-      aiAnalysis: openTickets > 15
-        ? 'Critical ticket backlog detected. Immediate staff reallocation recommended to meet SLA targets.'
-        : 'Ticket volume is within normal operating parameters. Focus on maintaining resolution speed.',
+      aiAnalysis: openTickets > 15 ? 'Critical ticket backlog detected.' : 'Ticket volume is within normal parameters.',
     },
     checklist: {
-      id: 'checklist',
-      iconName: 'checkbox-outline',
-      label: 'Checklist',
-      title: `${propertyName} · Daily Checklist`,
+      id: 'checklist', iconName: 'checkbox-outline', label: 'Checklist', title: `${propertyName} · Daily Checklist`,
       metrics: [
         { label: 'Completed', value: sopCount.toString() },
         { label: 'Total', value: sopTotal.toString() },
         { label: 'Success %', value: `${checklistPct}%` },
       ],
       chartTitle: 'Completion Trend',
-      chartData: [
-        { label: 'Goal', value: 100 },
-        { label: 'Current', value: checklistPct },
-      ],
+      chartData: [{ label: 'Goal', value: 100 }, { label: 'Current', value: checklistPct }],
       chartColor: STATUS_COLORS.optimal.bg,
       trendDirection: 'up',
       trendLabel: `${checklistPct}% compliance`,
@@ -644,15 +226,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         { label: 'Completed', value: sopCount, color: STATUS_COLORS.optimal.bg },
         { label: 'Pending', value: Math.max(0, sopTotal - sopCount), color: STATUS_COLORS.watch.bg },
       ],
-      aiAnalysis: checklistPct > 90
-        ? 'Operational compliance is excellent. Teams are following standard procedures consistently.'
-        : 'Checklist completion is below target. Review pending tasks and assign additional resources.',
+      aiAnalysis: checklistPct > 90 ? 'Operational compliance is excellent.' : 'Checklist completion is below target.',
     },
     health: {
-      id: 'health',
-      iconName: 'heart',
-      label: 'Health',
-      title: `${propertyName} · Facility Health`,
+      id: 'health', iconName: 'heart', label: 'Health', title: `${propertyName} · Facility Health`,
       metrics: [
         { label: 'Open Issues', value: openTickets.toString() },
         { label: 'Status', value: healthStatus.toUpperCase() },
@@ -671,15 +248,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         { label: 'Tickets', value: openTickets, color: healthColor },
         { label: 'Checklist Compliance', value: `${checklistPct}%`, color: STATUS_COLORS.optimal.bg },
       ],
-      aiAnalysis: healthStatus === 'critical'
-        ? 'Facility health has declined significantly. High open ticket count is the primary driver. Schedule emergency review.'
-        : 'Facility health is stable. Continue monitoring ticket resolution rates and checklist compliance.',
+      aiAnalysis: healthStatus === 'critical' ? 'Facility health has declined significantly.' : 'Facility health is stable.',
     },
     energy: {
-      id: 'energy',
-      iconName: 'flash',
-      label: 'Energy',
-      title: `${propertyName} · Energy Consumption`,
+      id: 'energy', iconName: 'flash', label: 'Energy', title: `${propertyName} · Energy Consumption`,
       metrics: [
         { label: 'Today (kWh)', value: energyKwh.toString() },
         { label: 'Trend', value: `${energyTrend > 0 ? '+' : ''}${energyTrend}%` },
@@ -696,15 +268,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         { label: 'DG', value: '24%', color: '#C4A000' },
         { label: 'Solar', value: '8%', color: '#1FC26E' },
       ],
-      aiAnalysis: energyTrend > 10
-        ? 'Energy consumption is trending higher than average. Inspect heavy loads or check for utility leakage.'
-        : 'Energy consumption is stable and matches historical patterns.',
+      aiAnalysis: energyTrend > 10 ? 'Energy consumption is trending higher than average.' : 'Energy consumption is stable.',
     },
   };
 
-  const shouldShowLoading = (!hasLoadedInitialData || loadedPropertyId !== propertyId);
-
-  if (shouldShowLoading) {
+  // ─── Loading State ───
+  if (isLoading && !data) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, backgroundColor: '#121212' }]}>
         <StatusBar barStyle="light-content" />
@@ -713,194 +282,202 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     );
   }
 
-  const renderTabContent = () => (
-    <>
-      <GlassTile label="Tickets" icon="ticket" delay={80} status={healthStatus} onPress={() => setShowTileDetail(tileDetails.tickets)}>
-        <View style={styles.timeToggleRow}>
-          {(['today', 'month', 'all'] as const).map((f) => (
-            <TouchableOpacity
-              key={f}
-              style={[styles.timeToggleBtn, ticketTimeFilter === f && styles.timeToggleBtnActive]}
-              onPress={() => setTicketTimeFilter(f)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.timeToggleText, ticketTimeFilter === f && styles.timeToggleTextActive]}>
-                {f === 'today' ? 'Today' : f === 'month' ? 'This Month' : 'All Time'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <View style={{ alignItems: 'flex-start' }}>
-            <AnimatedNumber style={styles.tileMetricMid} value={totalTickets} />
-            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
-          </View>
-          <View style={{ alignItems: 'center' }}>
-            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={openTickets} />
-            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={resolvedTickets} />
-            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
-          </View>
-        </View>
-      </GlassTile>
+  // ─── Refresh Handler ───
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await forceRefresh();
+    setIsRefreshing(false);
+  };
 
-      {prioritizedAttentionItems.length > 0 && (
-        <>
-          <Animated.View entering={FadeInUp.delay(160).duration(500)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: SPACING.md }}>
-            <Text style={{  fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>⚠️ NEEDS ATTENTION</Text>
-            <TouchableOpacity onPress={() => setShowNeedsAttention(true)}>
-              <Text style={{  fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>VIEW ALL</Text>
-            </TouchableOpacity>
-          </Animated.View>
-          {prioritizedAttentionItems.slice(0, 3).map((item, index) => (
-            <AttentionCard key={item.id} item={item} index={index} onAction={() => item.entity_type === 'ticket' && router.push(`/property/${propertyId}/tickets/${item.entity_id}`)} />
-          ))}
-        </>
-      )}
-
-      <ChecklistProgressCard completed={sopCount} total={sopTotal} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
-
-      <PPMProgressCard
-        propertyId={propertyId}
-        organizationId={orgId}
-        done={ppmDone}
-        total={ppmTotal}
-        pending={ppmPending}
-        overdue={ppmOverdue}
-        postponed={ppmPostponed}
-        delay={240}
-        onPress={() => router.push(`/property/${propertyId}/ppm`)}
-      />
-
-      <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
-
-      <GlassTile label="Energy Usage" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
-        <View style={styles.tileTopRow}><View><Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>kWh</Text></Text><Text style={styles.tileSubtext}>Grid + DG consumption today</Text></View><View style={styles.trendChip}><Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" /><Text style={styles.trendChipText}>+{energyTrend}%</Text></View></View>
-        <MiniBarChart data={energyHistory} highlightColor="rgba(214,158,46,0.85)" />
-      </GlassTile>
-
-      {/* NEW: Visitor Stats Tile */}
-      <GlassTile label="Visitors" icon="people-outline" delay={320} onPress={() => router.push(`/property/${propertyId}/visitors`)}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View>
-            <Text style={styles.tileMetricMid}>{vmsStats.total}</Text>
-            <Text style={styles.tileSubtext}>Total Visitors</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#10B981', fontWeight: '700' }}>{vmsStats.in}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>IN</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ color: 'rgba(255,255,255,0.6)', fontWeight: '700' }}>{vmsStats.out}</Text>
-              <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>OUT</Text>
-            </View>
-          </View>
-        </View>
-      </GlassTile>
-
-      {/* NEW: Vendor Revenue Tile */}
-      <GlassTile label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/vendor`)}>
-        <View style={styles.tileTopRow}>
-          <View>
-            <Text style={styles.tileMetricMid}>₹{vendorStats.revenue.toLocaleString()}</Text>
-            <Text style={styles.tileSubtext}>Total Revenue</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#F59E0B', fontSize: 16, fontWeight: '800' }}>₹{Math.round(vendorStats.commission).toLocaleString()}</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>COMMISSION</Text>
-          </View>
-        </View>
-      </GlassTile>
-
-      {/* NEW: Diesel Level Tile */}
-      <GlassTile label="Diesel Status" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
-        <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
-          <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 2, borderColor: 'rgba(245,158,11,0.3)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '800' }}>{dieselStats.level}%</Text>
-          </View>
-          <View>
-            <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>Current Level</Text>
-            <Text style={styles.tileSubtext}>Tank A + Tank B summary</Text>
-          </View>
-        </View>
-      </GlassTile>
-    </>
-  );
-
+  // ─── Render ───
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <DashboardBackground />
       <WeatherBackground condition={weather?.condition} />
+
       <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}><Ionicons name="menu" size={28} color="#FFFFFF" /></TouchableOpacity>
-          <View style={styles.headerCenter}>
-            <TouchableOpacity 
-              style={styles.profileRow} 
-              activeOpacity={0.7}
-              onPress={() => router.push(`/property/${propertyId}/profile`)}
-            >
-              <View style={styles.avatar}>
-                {user?.avatar ? (
-                  <Image source={{ uri: user.avatar }} style={styles.avatarImage} resizeMode="cover" />
-                ) : (
-                  <Text style={styles.avatarText}>{user?.user_metadata?.full_name ? user.user_metadata.full_name.split(' ').map((n: any) => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}</Text>
-                )}
-              </View>
-              <View style={[styles.nameContainer, { flex: 1 }]}>
-                <Text style={styles.greetingText} numberOfLines={1}>Hey, {user?.user_metadata?.full_name?.split(' ')[0] || 'Admin'}</Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>{propertyName}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.headerRight}>
-            {canSwitchProperty && (
-              <TouchableOpacity 
-                style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }]} 
-                onPress={() => setShowPropertySwitcher(true)} 
-                activeOpacity={0.7}
-              >
-                {propertyPhoto ? (
-                  <Image source={{ uri: propertyPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
-                ) : (
-                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-                    <Ionicons name="business" size={18} color="#FFFFFF" />
-                  </View>
-                )}
-                <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#0B0B0F', borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="swap-vertical" size={10} color="#FFFFFF" />
+        <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
+          <Ionicons name="menu" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => router.push(`/property/${propertyId}/profile`)}>
+            <View style={styles.avatar}>
+              {user?.avatar ? (
+                <Image source={{ uri: user.avatar }} style={styles.avatarImage} resizeMode="cover" />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {user?.user_metadata?.full_name ? user.user_metadata.full_name.split(' ').map((n: any) => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
+                </Text>
+              )}
+            </View>
+            <View style={styles.nameContainer}>
+              <Text style={styles.greetingText}>Hey, {user?.user_metadata?.full_name?.split(' ')[0] || 'Admin'}</Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>{propertyName}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.headerRight}>
+          {canSwitchProperty && (
+            <TouchableOpacity style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }]} onPress={() => setShowPropertySwitcher(true)} activeOpacity={0.7}>
+              {propertyPhoto ? (
+                <Image source={{ uri: propertyPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
+              ) : (
+                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="business" size={18} color="#FFFFFF" />
                 </View>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowCreateModal(true)} activeOpacity={0.7}>
-              <Ionicons name="add-circle-outline" size={28} color="#FFFFFF" />
+              )}
+              <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#0B0B0F', borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="swap-vertical" size={10} color="#FFFFFF" />
+              </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowNotifications(true)}>
-              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
-              <View style={styles.notificationBadge} />
-            </TouchableOpacity>
-          </View>
+          )}
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowCreateModal(true)} activeOpacity={0.7}>
+            <Ionicons name="add-circle-outline" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowNotifications(true)}>
+            <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+            <View style={styles.notificationBadge} />
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
+      >
+        <Animated.View entering={FadeInUp.delay(100).duration(600)} style={styles.overviewHeader}>
+          <Text style={styles.overviewTitle}>PROPERTY OVERVIEW</Text>
         </Animated.View>
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />} contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}>
-        <Animated.View entering={FadeInUp.delay(100).duration(600)} style={styles.overviewHeader}><Text style={styles.overviewTitle}>PROPERTY OVERVIEW</Text></Animated.View>
-        
-        <View style={{ marginTop: SPACING.lg }}>{renderTabContent()}</View>
+
+        <View style={{ marginTop: SPACING.lg }}>
+          {/* Tickets Tile */}
+          <GlassTile label="Tickets" icon="ticket" delay={80} status={healthStatus} onPress={() => setShowTileDetail(tileDetails.tickets)}>
+            <View style={styles.timeToggleRow}>
+              {(['today', 'month', 'all'] as const).map((f) => (
+                <TouchableOpacity key={f} style={[styles.timeToggleBtn, ticketTimeFilter === f && styles.timeToggleBtnActive]} onPress={() => setTicketTimeFilter(f)} activeOpacity={0.7}>
+                  <Text style={[styles.timeToggleText, ticketTimeFilter === f && styles.timeToggleTextActive]}>
+                    {f === 'today' ? 'Today' : f === 'month' ? 'This Month' : 'All Time'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ alignItems: 'flex-start' }}>
+                <AnimatedNumber style={styles.tileMetricMid} value={totalTickets} />
+                <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={openTickets} />
+                <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={resolvedTickets} />
+                <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+              </View>
+            </View>
+          </GlassTile>
+
+          {/* Needs Attention */}
+          {needsAttentionItems.length > 0 && (
+            <>
+              <Animated.View entering={FadeInUp.delay(160).duration(500)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: SPACING.md }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>⚠️ NEEDS ATTENTION</Text>
+                <TouchableOpacity onPress={() => setShowNeedsAttention(true)}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>VIEW ALL</Text>
+                </TouchableOpacity>
+              </Animated.View>
+              {needsAttentionItems.slice(0, 3).map((item, index) => (
+                <AttentionCard key={item.id} item={item} index={index} onAction={() => item.entity_type === 'ticket' && router.push(`/property/${propertyId}/tickets/${item.entity_id}`)} />
+              ))}
+            </>
+          )}
+
+          {/* Checklist */}
+          <ChecklistProgressCard completed={sopCount} total={sopTotal} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
+
+          {/* PPM */}
+          <PPMProgressCard propertyId={propertyId} organizationId={orgId} done={ppm.done} total={ppm.total} pending={ppm.pending} overdue={ppm.overdue} postponed={ppm.postponed} delay={240} onPress={() => router.push(`/property/${propertyId}/ppm`)} />
+
+          <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
+
+          {/* Energy */}
+          <GlassTile label="Energy Usage" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
+            <View style={styles.tileTopRow}>
+              <View>
+                <Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>kWh</Text></Text>
+                <Text style={styles.tileSubtext}>Grid + DG consumption today</Text>
+              </View>
+              <View style={styles.trendChip}>
+                <Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" />
+                <Text style={styles.trendChipText}>+{energyTrend}%</Text>
+              </View>
+            </View>
+            <MiniBarChart data={energyHistory} highlightColor="rgba(214,158,46,0.85)" />
+          </GlassTile>
+
+          {/* Visitors */}
+          <GlassTile label="Visitors" icon="people-outline" delay={320} onPress={() => router.push(`/property/${propertyId}/visitors`)}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={styles.tileMetricMid}>{vmsStats.total}</Text>
+                <Text style={styles.tileSubtext}>Total Visitors</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: '#10B981', fontWeight: '700' }}>{vmsStats.in}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>IN</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontWeight: '700' }}>{vmsStats.out}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>OUT</Text>
+                </View>
+              </View>
+            </View>
+          </GlassTile>
+
+          {/* Vendor Revenue */}
+          <GlassTile label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/vendor`)}>
+            <View style={styles.tileTopRow}>
+              <View>
+                <Text style={styles.tileMetricMid}>₹{vendorStats.revenue.toLocaleString()}</Text>
+                <Text style={styles.tileSubtext}>Total Revenue</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ color: '#F59E0B', fontSize: 16, fontWeight: '800' }}>₹{Math.round(vendorStats.commission).toLocaleString()}</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>COMMISSION</Text>
+              </View>
+            </View>
+          </GlassTile>
+
+          {/* Diesel */}
+          <GlassTile label="Diesel Status" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
+            <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
+              <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 2, borderColor: 'rgba(245,158,11,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '800' }}>{dieselStats.level}%</Text>
+              </View>
+              <View>
+                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>Current Level</Text>
+                <Text style={styles.tileSubtext}>Tank A + Tank B summary</Text>
+              </View>
+            </View>
+          </GlassTile>
+        </View>
       </ScrollView>
 
+      {/* Modals */}
       {showTileDetail && <DetailModal onClose={() => setShowTileDetail(null)} detail={showTileDetail} />}
       <NeedsAttentionModal
         visible={showNeedsAttention}
         onClose={() => setShowNeedsAttention(false)}
-        items={prioritizedAttentionItems}
+        items={needsAttentionItems}
         propertyName={propertyName}
         onItemPress={(item) => {
           setShowNeedsAttention(false);
-          if (item.entity_type === 'ticket') {
-            router.push(`/property/${propertyId}/tickets/${item.entity_id}` as any);
-          }
+          if (item.entity_type === 'ticket') router.push(`/property/${propertyId}/tickets/${item.entity_id}` as any);
         }}
       />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
@@ -911,17 +488,11 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         propertyId={propertyId}
         organizationId={orgId}
         role="admin"
-        onSuccess={fetchData}
+        onSuccess={forceRefresh}
       />
-      <NotificationModal
-        visible={showNotifications}
-        onClose={() => setShowNotifications(false)}
-        propertyId={propertyId}
-      />
-      <PermissionOnboarding
-        visible={showPermissionOnboarding}
-        onComplete={() => setShowPermissionOnboarding(false)}
-      />
+      <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
+      <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
+
       {canSwitchProperty && (
         <PropertySwitcherModal
           visible={showPropertySwitcher}
@@ -930,17 +501,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           orgId={orgId}
           onSelect={(newPropertyId) => {
             setShowPropertySwitcher(false);
-            switchProperty(newPropertyId);
             router.replace(`/property/${newPropertyId}/dashboard` as never);
           }}
         />
       )}
 
-      <GlobalNavigationDrawer
-        visible={showDrawer}
-        onClose={() => setShowDrawer(false)}
-        propertyId={propertyId}
-      />
+      <GlobalNavigationDrawer visible={showDrawer} onClose={() => setShowDrawer(false)} propertyId={propertyId} />
     </View>
   );
 }
@@ -955,21 +521,18 @@ const styles = StyleSheet.create({
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   avatarImage: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  nameContainer: { justifyContent: 'center' },
   greetingText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.4)', fontSize: 11 },
+  headerSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
   headerRight: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   headerIconBtn: { position: 'relative' },
   notificationBadge: { position: 'absolute', top: 2, right: 2, width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444' },
   overviewHeader: { paddingHorizontal: SPACING.xl, marginTop: 20 },
-  overviewTitle: {  fontSize: 24, fontWeight: '800', color: '#FFFFFF', lineHeight: 26, letterSpacing: -0.5 },
-  tileWrapper: { marginHorizontal: SPACING.xl, marginBottom: 12, borderRadius: 20, overflow: 'hidden' },
-  tileBlur: { minHeight: 140 },
-  tileContent: { padding: 16 },
+  overviewTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', lineHeight: 26, letterSpacing: -0.5 },
   tileTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  tileMetricBig: {  fontSize: 42, fontWeight: '800', color: '#FFFFFF' },
-  tileMetricMid: {  fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
   tileSuffix: { fontSize: 16, color: 'rgba(255,255,255,0.3)', fontWeight: '600' },
-  tileSubtext: {  fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
+  tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
   timeToggleRow: { flexDirection: 'row', gap: 6, marginBottom: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: 4, width: '100%' },
   timeToggleBtn: { flex: 1, paddingVertical: 6, borderRadius: 8, alignItems: 'center' },
   timeToggleBtnActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
@@ -977,20 +540,5 @@ const styles = StyleSheet.create({
   timeToggleTextActive: { color: '#FFF', fontWeight: '700' },
   trendChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(31,194,110,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   trendChipText: { color: '#1FC26E', fontSize: 12, fontWeight: '700' },
-  drawerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  drawerPanel: { width: 280, height: '100%', backgroundColor: '#111', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 20 },
-  drawerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 25, marginTop: 10 },
-  drawerLogoContainer: { flex: 1 },
-  drawerLogo: { width: 140, height: 35, marginLeft: -5 },
-  drawerSubtitle: { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '900', letterSpacing: 2, marginTop: 4, marginLeft: 2 },
-  drawerTitle: {  fontSize: 24, fontWeight: '700', color: '#FFF' },
-  drawerCloseBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
-  drawerItem: { flexDirection: 'row', alignItems: 'center', gap: 15, paddingVertical: 15 },
-  drawerItemLabel: {  fontSize: 16, color: '#FFF' },
-  drawerSectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingHorizontal: 4, gap: 6 },
-  drawerSectionLabel: {  fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.3)', letterSpacing: 1.5 },
-  drawerSignOut: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', marginBottom: 40 },
-  drawerSignOutText: { color: '#EF4444', fontWeight: '700' },
   nameContainer: { flexDirection: 'column' as const },
-  healthDot: { width: 10, height: 10, borderRadius: 5 },
 });

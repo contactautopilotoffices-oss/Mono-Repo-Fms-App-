@@ -255,7 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Always initialize dashboardStore with the first property from fresh membership data.
         // This overrides any stale persisted propertyId from a previous session.
         if (builtProperties.length > 0) {
-          useDashboardStore.getState().setDashboardData({ loadedPropertyId: builtProperties[0].id });
+          useDashboardStore.getState().setSelectedPropertyId(builtProperties[0].id);
         }
 
         await persistMembershipCache(userId, membershipData);
@@ -383,11 +383,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(data.session);
       setUser(enrichedUser);
 
-      // fetchMembership sets loadedPropertyId in dashboardStore
+      // fetchMembership sets selectedPropertyId in dashboardStore
       await fetchMembership(data.session.user.id);
 
       // Trigger prefetch once we have property context
-      const propId = useDashboardStore.getState().loadedPropertyId;
+      const propId = useDashboardStore.getState().selectedPropertyId;
       if (propId) {
         triggerPrefetch(propId);
       }
@@ -438,7 +438,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await clearMembershipCache(user.id);
     }
     setMembership(null);
-    useDashboardStore.getState().clearCache();
+    useDashboardStore.getState().clearUIState();
     queryClient.removeQueries(); // Completely purge cache rather than just clear()
     queryClient.clear();
     await supabase.auth.signOut();

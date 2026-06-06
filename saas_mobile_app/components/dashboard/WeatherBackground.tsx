@@ -3,6 +3,7 @@ import { View, StyleSheet, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
+import { mmkvStorage, isMMKVAvailable } from '@/utils/storage';
 
 export type WeatherCondition = 'clear-night' | 'sunny' | 'cloudy' | 'rainy' | 'clear-day' | 'cloudy-day' | 'cloudy-night' | 'cosmic' | 'custom' | string;
 
@@ -35,10 +36,22 @@ const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = 
 };
 
 export default function WeatherBackground({ condition }: WeatherBackgroundProps) {
-  const [overrideCondition, setOverrideCondition] = useState<string | null | undefined>(undefined);
+  const [overrideCondition, setOverrideCondition] = useState<string | null | undefined>(() => {
+    // Synchronously read from MMKV if available to prevent flash
+    if (isMMKVAvailable) {
+      try {
+        const val = mmkvStorage.getString('fms_dashboard_background');
+        return val ?? null;
+      } catch (e) {
+        return undefined;
+      }
+    }
+    return undefined;
+  });
 
   useEffect(() => {
-    // Read the user preference to override dynamic weather
+    if (overrideCondition !== undefined) return; // Already loaded synchronously
+
     const loadPref = async () => {
       try {
         const pref = await AsyncStorage.getItem('fms_dashboard_background');
@@ -48,7 +61,7 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
       }
     };
     loadPref();
-  }, [condition]); // Re-check if component re-renders with new condition
+  }, [condition, overrideCondition]);
 
   if (overrideCondition === undefined) {
     // Prevent flash of default night image while async storage resolves
@@ -86,12 +99,14 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
           end={{ x: 1, y: 1 }}
         />
         
-        {/* Climate High-Fidelity Asset Image */}
         <Image
           source={backgroundImage}
           style={StyleSheet.absoluteFillObject}
           resizeMode="cover"
         />
+        
+        {/* Dark backdrop overlay to ensure text readability */}
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(10, 10, 15, 0.70)' }]} />
       </Animated.View>
     </View>
   );

@@ -1,10 +1,14 @@
-import { useQuery, UseQueryOptions, UseQueryResult } from '@tanstack/react-query';
+import { useQuery, UseQueryOptions, UseQueryResult, keepPreviousData } from '@tanstack/react-query';
 
 /**
  * Proper React Query wrapper that returns actual data.
  *
  * Replaces useDashboardFetch which stored only timestamps.
  * This hook stores and returns the full server response.
+ *
+ * Features:
+ * - keepPreviousData: Prevents UI flicker during background refetch
+ * - Shows cached data instantly, doesn't re-render until new data arrives
  *
  * Usage:
  *   const { data, isLoading, isFetching, error, refetch } = useServerQuery(
@@ -26,6 +30,7 @@ export function useServerQuery<T>(
     retry: 2,
     refetchOnWindowFocus: false,
     networkMode: 'offlineFirst',
+    placeholderData: keepPreviousData, // ← KEY FIX: Keep showing old data until new arrives
     enabled: !!queryKey[queryKey.length - 1],
     ...options,
   });

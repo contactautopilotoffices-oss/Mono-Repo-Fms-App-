@@ -88,200 +88,75 @@ export interface ReadingPayload {
 export const electricityService = {
   // ── Fetch Meters ──────────────────────────────────────────────────────────
   async fetchMeters(propertyId: string) {
-    const res = await serverApi.query<ElectricityMeter[]>({
-      table: 'electricity_meters',
-      action: 'select',
-      select: '*',
-      filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-    });
-    return { success: !res.error, data: res.data || [], error: res.error };
+    const res = await serverApi.get<{ meters: ElectricityMeter[] }>('/api/electricity/meters', { propertyId });
+    return { success: !res.error, data: res.data?.meters || [], error: res.error };
   },
 
   // ── Create Meter ──────────────────────────────────────────────────────────
   async createMeter(payload: Partial<ElectricityMeter> & { initial_multiplier?: Partial<MeterMultiplier> }) {
-    const { initial_multiplier, ...meterPayload } = payload;
-    const res = await serverApi.query<ElectricityMeter>({
-      table: 'electricity_meters',
-      action: 'insert',
-      values: meterPayload,
-      select: '*',
-      single: true,
-    });
-    if (!res.error && res.data && initial_multiplier) {
-      await serverApi.query({
-        table: 'meter_multipliers',
-        action: 'insert',
-        values: { ...initial_multiplier, meter_id: res.data.id },
-      });
-    }
-    return { success: !res.error, data: res.data ?? null, error: res.error };
+    const res = await serverApi.post<{ meter: ElectricityMeter }>('/api/electricity/meters', payload);
+    return { success: !res.error, data: res.data?.meter ?? null, error: res.error };
   },
 
   // ── Delete Meter ──────────────────────────────────────────────────────────
   async deleteMeter(meterId: string) {
-    const res = await serverApi.query({
-      table: 'electricity_meters',
-      action: 'delete',
-      filters: [{ op: 'eq', column: 'id', value: meterId }],
-    });
+    const res = await serverApi.delete(`/api/electricity/meters/${meterId}`);
     return { success: !res.error, data: null, error: res.error };
   },
 
   // ── Fetch Readings ────────────────────────────────────────────────────────
   async fetchReadings(propertyId: string, filters?: { meterId?: string; fromDate?: string; toDate?: string }) {
-    const queryFilters: any[] = [{ op: 'eq', column: 'property_id', value: propertyId }];
-    if (filters?.meterId) queryFilters.push({ op: 'eq', column: 'meter_id', value: filters.meterId });
-    if (filters?.fromDate) queryFilters.push({ op: 'gte', column: 'reading_date', value: filters.fromDate });
-    if (filters?.toDate) queryFilters.push({ op: 'lte', column: 'reading_date', value: filters.toDate });
+    const query: Record<string, string> = { propertyId };
+    if (filters?.meterId) query.meterId = filters.meterId;
+    if (filters?.fromDate) query.fromDate = filters.fromDate;
+    if (filters?.toDate) query.toDate = filters.toDate;
 
-    const res = await serverApi.query<ElectricityReading[]>({
-      table: 'electricity_readings',
-      action: 'select',
-      select: '*, meter:electricity_meters(id, name, meter_type)',
-      filters: queryFilters,
-      orders: [{ column: 'reading_date', ascending: false }],
-    });
-    return { success: !res.error, data: res.data || [], error: res.error };
+    const res = await serverApi.get<{ readings: ElectricityReading[] }>('/api/electricity/readings', query);
+    return { success: !res.error, data: res.data?.readings || [], error: res.error };
   },
 
   // ── Submit Reading ────────────────────────────────────────────────────────
   async submitReading(propertyId: string, payload: ReadingPayload) {
-    const computed_units = payload.closing_reading - payload.opening_reading;
-    const res = await serverApi.query<ElectricityReading>({
-      table: 'electricity_readings',
-      action: 'insert',
-      values: {
-        property_id: propertyId,
-        meter_id: payload.meter_id,
-        reading_date: payload.reading_date,
-        opening_reading: payload.opening_reading,
-        closing_reading: payload.closing_reading,
-        computed_units,
-        final_units: computed_units,
-        notes: payload.notes ?? null,
-        photo_url: payload.photo_url ?? null,
-        created_by: payload.created_by ?? null,
-      },
-      select: '*',
-      single: true,
+    const res = await serverApi.post<{ reading: ElectricityReading }>('/api/electricity/readings', {
+      ...payload,
+      property_id: propertyId
     });
-    return { success: !res.error, data: res.data ?? null, error: res.error };
+    return { success: !res.error, data: res.data?.reading ?? null, error: res.error };
   },
 
   // ── Delete Reading ────────────────────────────────────────────────────────
   async deleteReading(readingId: string, _meterId: string, propertyId: string) {
-    const res = await serverApi.query({
-      table: 'electricity_readings',
-      action: 'delete',
-      filters: [
-        { op: 'eq', column: 'id', value: readingId },
-        { op: 'eq', column: 'property_id', value: propertyId },
-      ],
-    });
+    const res = await serverApi.delete(`/api/electricity/readings/${readingId}?propertyId=${propertyId}`);
     return { success: !res.error, data: null, error: res.error };
   },
 
   // ── Fetch Grid Tariffs ────────────────────────────────────────────────────
   async fetchTariffs(propertyId: string) {
-    const res = await serverApi.query<GridTariff[]>({
-      table: 'grid_tariffs',
-      action: 'select',
-      select: '*',
-      filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-      orders: [{ column: 'effective_from', ascending: false }],
-    });
-    return { success: !res.error, data: res.data ?? [], error: res.error };
+    const res = await serverApi.get<{ tariffs: GridTariff[] }>('/api/electricity/tariffs', { propertyId });
+    return { success: !res.error, data: res.data?.tariffs ?? [], error: res.error };
   },
 
   // ── Create Tariff (closes previous active) ────────────────────────────────
   async createTariff(payload: Partial<GridTariff>) {
-    if (payload.property_id && payload.effective_from) {
-      const prevDate = new Date(payload.effective_from);
-      prevDate.setDate(prevDate.getDate() - 1);
-      await serverApi.query({
-        table: 'grid_tariffs',
-        action: 'update',
-        values: { effective_to: prevDate.toISOString().split('T')[0] },
-        filters: [
-          { op: 'eq', column: 'property_id', value: payload.property_id },
-          { op: 'is', column: 'effective_to', value: null },
-        ],
-      });
-    }
-    const res = await serverApi.query<GridTariff>({
-      table: 'grid_tariffs',
-      action: 'insert',
-      values: payload,
-      select: '*',
-      single: true,
-    });
-    return { success: !res.error, data: res.data ?? null, error: res.error };
+    const res = await serverApi.post<{ tariff: GridTariff }>('/api/electricity/tariffs', payload);
+    return { success: !res.error, data: res.data?.tariff ?? null, error: res.error };
   },
 
   // ── Delete Tariff ─────────────────────────────────────────────────────────
   async deleteTariff(tariffId: string, propertyId: string) {
-    const { error: delError } = await serverApi.query({
-      table: 'grid_tariffs',
-      action: 'delete',
-      filters: [{ op: 'eq', column: 'id', value: tariffId }],
-    });
-    if (delError) return { success: false, data: null, error: delError };
-
-    // Re‑open the most recent previous tariff
-    const { data: prev } = await serverApi.query<GridTariff>({
-      table: 'grid_tariffs',
-      action: 'select',
-      select: '*',
-      filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-      orders: [{ column: 'effective_from', ascending: false }],
-      limit: 1,
-      maybeSingle: true,
-    });
-    if (prev?.id) {
-      await serverApi.query({
-        table: 'grid_tariffs',
-        action: 'update',
-        values: { effective_to: null },
-        filters: [{ op: 'eq', column: 'id', value: prev.id }],
-      });
-    }
-    return { success: true, data: null, error: null };
+    const res = await serverApi.delete(`/api/electricity/tariffs/${tariffId}`);
+    return { success: !res.error, data: null, error: res.error };
   },
 
   // ── Fetch Meter Multipliers ───────────────────────────────────────────────
   async fetchMultipliers(meterId: string) {
-    const res = await serverApi.query<MeterMultiplier[]>({
-      table: 'meter_multipliers',
-      action: 'select',
-      select: '*',
-      filters: [{ op: 'eq', column: 'meter_id', value: meterId }],
-      orders: [{ column: 'effective_from', ascending: false }],
-    });
-    return { success: !res.error, data: res.data ?? [], error: res.error };
+    const res = await serverApi.get<{ data: MeterMultiplier[] }>('/api/electricity/meter-multipliers', { meterId });
+    return { success: !res.error, data: res.data?.data ?? [], error: res.error };
   },
 
   // ── Create Multiplier (closes previous active) ────────────────────────────
   async createMultiplier(payload: Partial<MeterMultiplier>) {
-    if (payload.meter_id && payload.effective_from) {
-      const prevDate = new Date(payload.effective_from);
-      prevDate.setDate(prevDate.getDate() - 1);
-      await serverApi.query({
-        table: 'meter_multipliers',
-        action: 'update',
-        values: { effective_to: prevDate.toISOString().split('T')[0] },
-        filters: [
-          { op: 'eq', column: 'meter_id', value: payload.meter_id },
-          { op: 'is', column: 'effective_to', value: null },
-        ],
-      });
-    }
-    const res = await serverApi.query<MeterMultiplier>({
-      table: 'meter_multipliers',
-      action: 'insert',
-      values: payload,
-      select: '*',
-      single: true,
-    });
-    return { success: !res.error, data: res.data ?? null, error: res.error };
+    const res = await serverApi.post<{ data: MeterMultiplier }>('/api/electricity/meter-multipliers', payload);
+    return { success: !res.error, data: res.data?.data ?? null, error: res.error };
   },
 };

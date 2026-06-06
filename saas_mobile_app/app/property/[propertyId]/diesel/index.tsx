@@ -17,7 +17,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTheme } from "@/context";
+import { useTheme, useAuth } from "@/context";
 import { Colors } from "@/constants/Colors";
 import { serverApi } from '@/lib/serverApi';
 import { dieselService } from "@/services/dieselService";
@@ -1237,8 +1237,18 @@ export default function DieselScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const { user: authUser, membership } = useAuth();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
+
+  const currentProperty = membership?.properties?.find((p) => p.id === propertyId);
+  const role = currentProperty?.role || membership?.org_role || "view_only";
+
+  const MANAGE_ROLES = ["property_admin", "staff", "mst", "org_super_admin", "org_admin", "master_admin", "owner"];
+  const canManage = MANAGE_ROLES.includes(role);
+
+  const ADMIN_ROLES = ["property_admin", "org_super_admin", "org_admin", "master_admin", "owner"];
+  const canViewAnalytics = ADMIN_ROLES.includes(role);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
@@ -1447,16 +1457,18 @@ export default function DieselScreen() {
           <Text style={styles.headerTitleLine2}>Logger</Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() => {
-              setEditingGenerator(undefined);
-              setShowGenConfigModal(true);
-            }}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add-outline" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+          {canManage && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() => {
+                setEditingGenerator(undefined);
+                setShowGenConfigModal(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.headerCircularBtn}
             onPress={() => setShowHistoryModal(true)}
@@ -1464,22 +1476,26 @@ export default function DieselScreen() {
           >
             <Ionicons name="time-outline" size={18} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() =>
-              router.push(`/property/${propertyId}/diesel/analytics` as any)
-            }
-            activeOpacity={0.7}
-          >
-            <Ionicons name="analytics-outline" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerCircularBtn}
-            onPress={() => setShowTariffModal(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          {canViewAnalytics && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() =>
+                router.push(`/property/${propertyId}/diesel/analytics` as any)
+              }
+              activeOpacity={0.7}
+            >
+              <Ionicons name="analytics-outline" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          {canManage && (
+            <TouchableOpacity
+              style={styles.headerCircularBtn}
+              onPress={() => setShowTariffModal(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
         </View>
       </SafeBlurView>
 
@@ -1592,7 +1608,7 @@ export default function DieselScreen() {
                 readings={filteredReadings}
                 generators={generators}
                 colors={colors}
-                onDelete={handleDeleteReading}
+                onDelete={canManage ? handleDeleteReading : undefined}
                 deletingId={deletingId}
               />
               {readings.length > 0 && (
@@ -1625,14 +1641,22 @@ export default function DieselScreen() {
                 periodHours={periodGenStats[gen.id]?.hours ?? 0}
                 periodConsumption={periodGenStats[gen.id]?.consumption ?? 0}
                 colors={colors}
-                onPress={() => {
-                  setSelectedGenForLogging(gen.id);
-                  setShowSheet(true);
-                }}
-                onEdit={() => {
-                  setEditingGenerator(gen);
-                  setShowGenConfigModal(true);
-                }}
+                onPress={
+                  canManage
+                    ? () => {
+                        setSelectedGenForLogging(gen.id);
+                        setShowSheet(true);
+                      }
+                    : undefined
+                }
+                onEdit={
+                  canManage
+                    ? () => {
+                        setEditingGenerator(gen);
+                        setShowGenConfigModal(true);
+                      }
+                    : undefined
+                }
               />
             </View>
           )}
@@ -1721,17 +1745,19 @@ export default function DieselScreen() {
                                   {new Date(r.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                                 </Text>
                               </View>
-                              <TouchableOpacity
-                                style={{ padding: 6, marginTop: -4 }}
-                                onPress={() => handleDeleteReading(r.id)}
-                                disabled={deletingId === r.id}
-                              >
-                                {deletingId === r.id ? (
-                                  <ActivityIndicator size={14} color="#EF4444" />
-                                ) : (
-                                  <Trash2 size={16} color="#EF444480" />
-                                )}
-                              </TouchableOpacity>
+                              {canManage && (
+                                <TouchableOpacity
+                                  style={{ padding: 6, marginTop: -4 }}
+                                  onPress={() => handleDeleteReading(r.id)}
+                                  disabled={deletingId === r.id}
+                                >
+                                  {deletingId === r.id ? (
+                                    <ActivityIndicator size={14} color="#EF4444" />
+                                  ) : (
+                                    <Trash2 size={16} color="#EF444480" />
+                                  )}
+                                </TouchableOpacity>
+                              )}
                             </View>
                             {/* Stats row */}
                             <View style={{ flexDirection: 'row', marginTop: 12, gap: 16 }}>

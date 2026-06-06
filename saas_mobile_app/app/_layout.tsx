@@ -8,12 +8,10 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, ThemeProvider } from '@/context';
-import { useColorScheme, View, Text, StyleSheet, Platform } from 'react-native';
-import AutopilotSplash from '@/components/splash/AutopilotSplash';
+import { useColorScheme, View, Text, StyleSheet } from 'react-native';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import NotificationBanner from '@/components/notifications/NotificationBanner';
-import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { queryClient, mmkvPersister } from '@/utils/queryClient';
+import { PersistGate } from '@/components/PersistGate';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();
@@ -72,7 +70,6 @@ const styles = StyleSheet.create({
 
 function RootLayoutInner() {
   const colorScheme = useColorScheme();
-  const [showSplash, setShowSplash] = useState(true);
   const [appReady, setAppReady] = useState(false);
   const appReadyRef = useRef(false);
 
@@ -116,33 +113,25 @@ function RootLayoutInner() {
     if (fontsLoaded || fontError) {
       setAppReady(true);
       appReadyRef.current = true;
-      SplashScreen.hideAsync().catch(() => {});
+      // DON'T hide splash yet - wait for HydrationGate to be ready
     }
   }, [fontsLoaded, fontError]);
 
+  // Hide splash when HydrationGate signals ready
   const handleSplashComplete = useCallback(() => {
-    setShowSplash(false);
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   if (!appReady) {
     return null;
   }
 
-  if (showSplash && Platform.OS !== 'web') {
-    return (
-      <AutopilotSplash
-        key="splash"
-        onComplete={handleSplashComplete}
-      />
-    );
-  }
+  // Splash stays visible while HydrationGate resolves
+  // When HydrationGate is ready, it calls onReady which calls handleSplashComplete
 
   return (
     <ErrorBoundary>
-      <PersistQueryClientProvider
-        client={queryClient}
-        persistOptions={{ persister: mmkvPersister }}
-      >
+      <PersistGate onReady={handleSplashComplete}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <ThemeProvider>
@@ -154,7 +143,7 @@ function RootLayoutInner() {
             </ThemeProvider>
           </SafeAreaProvider>
         </GestureHandlerRootView>
-      </PersistQueryClientProvider>
+      </PersistGate>
     </ErrorBoundary>
   );
 }

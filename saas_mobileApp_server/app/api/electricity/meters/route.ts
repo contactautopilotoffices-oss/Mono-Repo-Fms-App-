@@ -49,7 +49,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const propertyId = body.property_id;
+    const { initial_multiplier, ...meterPayload } = body;
+    const propertyId = meterPayload.property_id;
 
     if (!propertyId) {
       return NextResponse.json({ error: "Missing property_id" }, { status: 400 });
@@ -63,13 +64,27 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from("electricity_meters")
-      .insert(body)
+      .insert(meterPayload)
       .select()
       .single();
 
     if (error) {
       console.error("[saas-mobile-server] electricity meters POST error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (initial_multiplier && data) {
+      await admin.from("meter_multipliers").insert({
+        meter_id: data.id,
+        ct_ratio_primary: initial_multiplier.ct_ratio_primary ?? null,
+        ct_ratio_secondary: initial_multiplier.ct_ratio_secondary ?? null,
+        pt_ratio_primary: initial_multiplier.pt_ratio_primary ?? null,
+        pt_ratio_secondary: initial_multiplier.pt_ratio_secondary ?? null,
+        meter_constant: initial_multiplier.meter_constant ?? 1,
+        effective_from: initial_multiplier.effective_from || new Date().toISOString().split("T")[0],
+        reason: initial_multiplier.reason ?? "Initial Setup",
+        created_by: auth.user.id,
+      });
     }
 
     return NextResponse.json({ success: true, meter: data });

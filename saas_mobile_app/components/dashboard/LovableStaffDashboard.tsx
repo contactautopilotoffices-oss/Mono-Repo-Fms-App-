@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useWeather } from '@/hooks/useWeather';
-import DashboardBackground from '@/components/dashboard/DashboardBackground';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -40,9 +40,7 @@ import { useRouter } from 'expo-router';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
-import { useAsyncStorageCache } from '@/hooks/useAsyncStorageCache';
-import { queryKeys } from '@/utils/queryKeys';
-import { useDashboardFetch } from '@/hooks/useDashboardFetch';
+import { useStaffDashboardQuery } from '@/hooks/useStaffDashboardQuery';
 import { GlassTile } from './DashboardComponents';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import SkeletonLoader from './lovable/SkeletonLoader';
@@ -439,42 +437,30 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   const isSoftServices = propRole.includes('soft_service') || propRole.includes('housekeeping');
   const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
 
-  // AsyncStorage cache for instant dashboard load on app reopen
-  const { cachedData: staffCache, hasCache: hasStaffCache, saveCache: saveStaffCache } = useAsyncStorageCache<{
-    property: { name: string } | null;
-    tickets: Ticket[];
-    isCheckedIn: boolean;
-    userSkills: string[];
-    specialization: string | null;
-    ppmTotal: number;
-    ppmDone: number;
-    ppmPending: number;
-    ppmOverdue: number;
-    ppmPostponed: number;
-  }>({
-    key: 'staff-dashboard',
-    propertyId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+  // ─── NEW: Unified React Query Data (Source of Truth) ───
+  const { data: staffData, isLoading, isFetching, forceRefresh } = useStaffDashboardQuery(propertyId, {
+    userId: user?.id ?? '',
+    initialLoadingOnMount: false, // Instant render from cache
   });
 
+  // Extract data from React Query cache
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
-  const [isLoading, setIsLoading] = useState(!hasStaffCache);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [property, setProperty] = useState<{ name: string } | null>(staffCache?.property ?? null);
-  const [tickets, setTickets] = useState<Ticket[]>(staffCache?.tickets ?? []);
-  const [isCheckedIn, setIsCheckedIn] = useState(staffCache?.isCheckedIn ?? false);
+  const [property, setProperty] = useState<{ name: string } | null>(staffData?.property ?? null);
+  const [tickets, setTickets] = useState<Ticket[]>(staffData?.tickets ?? []);
+  const [isCheckedIn, setIsCheckedIn] = useState(staffData?.isCheckedIn ?? false);
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
-  const [userSkills, setUserSkills] = useState<string[]>(staffCache?.userSkills ?? []);
-  const [specialization, setSpecialization] = useState<string | null>(staffCache?.specialization ?? null);
+  const [userSkills, setUserSkills] = useState<string[]>(staffData?.userSkills ?? []);
+  const [specialization, setSpecialization] = useState<string | null>(staffData?.specialization ?? null);
 
-  // PPM stats (local)
-  const [ppmTotal, setPpmTotal]   = useState(staffCache?.ppmTotal ?? 0);
-  const [ppmDone, setPpmDone]     = useState(staffCache?.ppmDone ?? 0);
-  const [ppmPending, setPpmPending] = useState(staffCache?.ppmPending ?? 0);
-  const [ppmOverdue, setPpmOverdue] = useState(staffCache?.ppmOverdue ?? 0);
-  const [ppmPostponed, setPpmPostponed] = useState(staffCache?.ppmPostponed ?? 0);
+  // PPM stats from React Query
+  const [ppmTotal, setPpmTotal]   = useState(staffData?.ppm.total ?? 0);
+  const [ppmDone, setPpmDone]     = useState(staffData?.ppm.done ?? 0);
+  const [ppmPending, setPpmPending] = useState(staffData?.ppm.pending ?? 0);
+  const [ppmOverdue, setPpmOverdue] = useState(staffData?.ppm.overdue ?? 0);
+  const [ppmPostponed, setPpmPostponed] = useState(staffData?.ppm.postponed ?? 0);
 
 
 
@@ -635,13 +621,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     }
   }, [propertyId, user?.id]);
 
-  // React Query wrapper: prevents re-fetching on every mount if data is fresh
-  const { refetch } = useDashboardFetch(queryKeys.property.dashboardStaff(propertyId), fetchData, {
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
-
   useEffect(() => {
-    // fetchData is called by useDashboardFetch on mount (if stale)
     hasRequestedPermissions().then(requested => {
       if (!requested) setShowPermissionOnboarding(true);
     });
@@ -649,7 +629,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await refetch();
+    await forceRefresh();
     setIsRefreshing(false);
   };
 
@@ -1090,11 +1070,12 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  if (!hasStaffCache && isLoading) {
+  // Show skeleton only on initial mount with no cache
+  if (isLoading && !staffData) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <StatusBar barStyle="light-content" />
-        <DashboardBackground />
+        <WeatherBackground condition={undefined} />
         <SkeletonLoader />
       </View>
     );
@@ -1103,8 +1084,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <DashboardBackground />
-      {/* WeatherBackground removed — DashboardBackground handles theming */}
+      <WeatherBackground condition={undefined} />
 
       <Animated.View entering={FadeInUp.duration(500)} style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
           <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
