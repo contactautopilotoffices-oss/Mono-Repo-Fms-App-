@@ -54,6 +54,8 @@ export function PersistGate({ children, onReady }: PersistGateProps) {
   );
 }
 
+import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
+
 // Component that waits for cache to be restored
 function CacheRestorationWaiter({ onRestored }: { onRestored: () => void }) {
   const [attempts, setAttempts] = useState(0);
@@ -96,8 +98,12 @@ function CacheRestorationWaiter({ onRestored }: { onRestored: () => void }) {
     };
   }, [attempts, onRestored]);
 
-  // Render nothing - this blocks children from rendering
-  return null;
+  // Render skeleton instead of nothing to avoid blank screen
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0B0B0F' }}>
+      <SkeletonLoader />
+    </View>
+  );
 }
 
 // ────────────────────────────────────────────────────────────────

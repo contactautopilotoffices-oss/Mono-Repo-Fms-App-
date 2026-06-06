@@ -40,6 +40,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="autopilot"/>
+        <data android:scheme="exp+autopilot-mobile"/>
       </intent-filter>
     </activity>
   </application>

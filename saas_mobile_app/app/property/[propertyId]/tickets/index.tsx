@@ -275,7 +275,7 @@ const getStatusCounts = useCallback(async () => {
     counts.open = await fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned'] }]);
     counts.in_progress = await fetchCount([{ op: 'in', column: 'status', values: ['in_progress'] }]);
     counts.resolved = await fetchCount([{ op: 'eq', column: 'status', value: 'resolved' }]);
-    counts.closed = await fetchCount([{ op: 'eq', column: 'status', value: 'closed' }]);
+    counts.closed = await fetchCount([{ op: 'in', column: 'status', values: ['closed', 'resolved', 'pending_validation'] }]);
 
     return counts;
   } catch (err) {

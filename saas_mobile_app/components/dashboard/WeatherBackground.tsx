@@ -90,7 +90,7 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-      <Animated.View key={mappedCondition} entering={FadeIn.duration(800)} style={StyleSheet.absoluteFillObject}>
+      <View key={mappedCondition} style={StyleSheet.absoluteFillObject}>
         {/* Base Climate-tailored Gradient */}
         <LinearGradient
           colors={gradientColors}
@@ -107,7 +107,7 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
         
         {/* Dark backdrop overlay to ensure text readability */}
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(10, 10, 15, 0.70)' }]} />
-      </Animated.View>
+      </View>
     </View>
   );
 }

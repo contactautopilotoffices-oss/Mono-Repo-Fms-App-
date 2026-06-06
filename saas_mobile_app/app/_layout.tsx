@@ -12,6 +12,7 @@ import { useColorScheme, View, Text, StyleSheet } from 'react-native';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import NotificationBanner from '@/components/notifications/NotificationBanner';
 import { PersistGate } from '@/components/PersistGate';
+import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();
@@ -123,7 +124,11 @@ function RootLayoutInner() {
   }, []);
 
   if (!appReady) {
-    return null;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0B0B0F' }}>
+        <SkeletonLoader />
+      </View>
+    );
   }
 
   // Splash stays visible while HydrationGate resolves

@@ -18,19 +18,21 @@ async function initializeFirebaseApp(): Promise<boolean> {
   if (firebaseInitialized) return true;
 
   try {
-    firebaseApp = require('@react-native-firebase/app').default;
-    // @react-native-firebase/app auto-initializes from google-services.json
-    // at build time via the com.google.gms.google-services gradle plugin.
-    // Just verify the default app exists.
-    const app = firebaseApp.getApp();
-    console.log('[Push] ✅ Firebase native app ready:', app.name);
+    // Dynamic import to avoid build errors if native module isn't available
+    firebaseApp = require('@react-native-firebase/app');
+    console.log('[Push] Firebase App module loaded');
+
+    // Check if default app already exists
+    const existingApp = firebaseApp.getApp();
+    console.log('[Push] ✅ Firebase app already initialized:', existingApp?.name || 'default');
     firebaseInitialized = true;
     return true;
   } catch (err: any) {
-    console.warn('[Push] Firebase native app not available:', err.message || err);
+    console.warn('[Push] Firebase app not initialized:', err.message || err);
+    console.warn('[Push] This means google-services.json was not processed during build');
   }
 
-  firebaseInitialized = true; // Mark as attempted
+  firebaseInitialized = true;
   return false;
 }
 
@@ -42,7 +44,7 @@ function tryLoadFirebaseNative(): boolean {
     console.log('[Push] ✅ @react-native-firebase/messaging loaded');
     return true;
   } catch (err) {
-    console.log('[Push] ℹ️ @react-native-firebase/messaging not available');
+    console.log('[Push] ❌ @react-native-firebase/messaging not available');
     return false;
   }
 }
@@ -123,8 +125,9 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
       console.log('[Push] Trying @react-native-firebase/messaging...');
       const messaging = firebaseMessaging.default || firebaseMessaging;
 
-      // Get token directly
-      const fcmToken = await messaging().getToken();
+      // Get messaging instance - in v7+ it's accessed directly
+      const messagingInstance = messaging;
+      const fcmToken = await messagingInstance.getToken();
       if (fcmToken) {
         token = fcmToken;
         console.log('[Push] ✅ FCM Token (native):', token?.substring(0, 20) + '...');
@@ -377,7 +380,7 @@ export function usePushNotifications() {
       try {
         if (tryLoadFirebaseNative()) {
           const messaging = firebaseMessaging.default || firebaseMessaging;
-          unsubscribe = messaging().onTokenRefresh(async (newToken: string) => {
+          unsubscribe = messaging.onTokenRefresh(async (newToken: string) => {
             console.log('[Push] Token refreshed via Firebase:', newToken);
             if (user?.id) {
               storePushToken(user.id, newToken, propertyId, organizationId);

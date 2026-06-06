@@ -88,7 +88,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     // Resolved today
     const todayStr = new Date().toISOString().split('T')[0];
     const resolvedTodayFilters: any[] = [
-      { op: 'in', column: 'status', values: ['resolved', 'closed'] },
+      { op: 'in', column: 'status', values: ['resolved', 'closed', 'pending_validation'] },
       { op: 'gte', column: 'updated_at', value: `${todayStr}T00:00:00.000Z` },
     ];
     if (resolvedPropertyId) resolvedTodayFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });

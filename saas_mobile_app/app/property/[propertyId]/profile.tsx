@@ -72,7 +72,15 @@ export default function ProfileScreen() {
       if (response.success && response.data) return response.data;
       if (response.id || response.full_name) return response;
       return null;
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.message?.includes('404')) {
+        // Fallback to basic auth info if user not in public.users yet
+        return {
+          id: user.id,
+          full_name: user.email?.split('@')[0] || 'User',
+          email: user.email || '',
+        };
+      }
       console.error('Error fetching profile:', error);
       return null;
     }

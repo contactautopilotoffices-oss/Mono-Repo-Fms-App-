@@ -37,7 +37,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
   // Determine user role from membership
   const userRole = membership?.properties?.[0]?.role || membership?.org_role || 'tenant';
   const isTenant = userRole === 'tenant';
-  const isSuperTenant = userRole === 'super_tenant' || userRole === 'org_super_admin';
+  const isSuperTenant = userRole === 'super_tenant';
 
   const activeTab = propActiveTab || 'dashboard';
 

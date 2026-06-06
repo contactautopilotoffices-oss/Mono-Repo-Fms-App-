@@ -105,7 +105,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
     }
 
     // PROPERTY ADMIN - matches PropertyAdminDashboard.tsx
-    if (userRole === 'property_admin' || userRole === 'org_admin') {
+    if (userRole === 'property_admin' || userRole === 'org_admin' || userRole === 'org_super_admin') {
       return [
         {
           title: 'CORE',
@@ -166,7 +166,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
     }
 
     // SUPER TENANT - matches SuperTenantDashboard.tsx
-    if (userRole === 'super_tenant' || userRole === 'org_super_admin') {
+    if (userRole === 'super_tenant') {
       return [
         {
           title: 'CORE',
