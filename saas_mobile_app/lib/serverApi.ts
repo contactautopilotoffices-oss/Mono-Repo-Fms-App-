@@ -5,7 +5,7 @@
 // Supabase directly. The interface is identical so all callers are unaffected.
 // ============================================================================
 
-import { getSupabaseToken } from '@/utils/api/mobileApi';
+import { getSupabaseToken } from '@/utils/supabase/mobile-auth';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -62,6 +62,32 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
 
     if (authToken) {
       headers['Authorization'] = `Bearer ${authToken}`;
+      
+      // Defensive fix: If the MOBILE_SERVER_URL inadvertently points to the Next.js web app (e.g. www.back2basiics.com)
+      // the web app's middleware.ts will reject the request with 401 Unauthorized because it expects a Cookie,
+      // not just a Bearer token. We synthesize the cookie here just like apiFetch does.
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+      const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
+      if (projectIdMatch) {
+        const projectId = projectIdMatch[1];
+        const cookieName = `sb-${projectId}-auth-token`;
+        // Since we only have the access token from getSupabaseToken(), we can't fully rebuild the session.
+        // However, we can use the local createClient to get the full session.
+        const { createClient } = require('@/utils/supabase/client');
+        const supabase = createClient();
+        supabase.auth.getSession().then(({ data }: any) => {
+          if (data?.session) {
+            const cookieValue = JSON.stringify([
+              data.session.access_token,
+              data.session.refresh_token,
+              null,
+              null,
+              null
+            ]);
+            headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
+          }
+        }).catch(() => {});
+      }
     }
 
     return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
@@ -101,6 +127,30 @@ async function serverGet(
     const headers: Record<string, string> = {};
     if (authToken) {
       headers['Authorization'] = `Bearer ${authToken}`;
+
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+      const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
+      if (projectIdMatch) {
+        const projectId = projectIdMatch[1];
+        const cookieName = `sb-${projectId}-auth-token`;
+        const { createClient } = require('@/utils/supabase/client');
+        const supabase = createClient();
+        // Fire and forget since doFetch isn't normally strictly awaiting the cookie, 
+        // but wait! We are inside an async function. Let's await it.
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data?.session) {
+            const cookieValue = JSON.stringify([
+              data.session.access_token,
+              data.session.refresh_token,
+              null,
+              null,
+              null
+            ]);
+            headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
+          }
+        } catch (e) {}
+      }
     }
 
     const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
@@ -267,6 +317,27 @@ export const serverApi = {
       };
       if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`;
+        const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+        const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
+        if (projectIdMatch) {
+          const projectId = projectIdMatch[1];
+          const cookieName = `sb-${projectId}-auth-token`;
+          const { createClient } = require('@/utils/supabase/client');
+          const supabase = createClient();
+          try {
+            const { data } = await supabase.auth.getSession();
+            if (data?.session) {
+              const cookieValue = JSON.stringify([
+                data.session.access_token,
+                data.session.refresh_token,
+                null,
+                null,
+                null
+              ]);
+              headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
+            }
+          } catch (e) {}
+        }
       }
       return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
         method,

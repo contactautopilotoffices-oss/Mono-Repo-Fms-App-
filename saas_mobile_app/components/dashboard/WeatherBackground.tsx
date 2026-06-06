@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 
-export type WeatherCondition = 'clear-night' | 'sunny' | 'cloudy' | 'rainy' | 'clear-day' | 'cloudy-day' | 'cloudy-night' | 'cosmic';
+export type WeatherCondition = 'clear-night' | 'sunny' | 'cloudy' | 'rainy' | 'clear-day' | 'cloudy-day' | 'cloudy-night' | 'cosmic' | 'custom' | string;
 
 interface WeatherBackgroundProps {
   condition: WeatherCondition | undefined | null;
@@ -18,6 +19,7 @@ const BACKGROUND_IMAGES: Record<string, any> = {
   'cloudy-night': require('@/assets/images/weather-cloud.png'),
   'rainy': require('@/assets/images/weather-rain.png'),
   'cosmic': require('@/assets/images/weather-moon.png'),
+  'custom': require('@/assets/images/launch-bg.png'),
 };
 
 const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = {
@@ -29,14 +31,48 @@ const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = 
   'cloudy-night': ['#090d16', '#121824', '#1b2333'],
   'rainy': ['#0f172a', '#1e293b', '#334155'],        // Deep Stormy Rain
   'cosmic': ['#0a0a1a', '#1a1040', '#0d1b3e'],       // Deep cosmic purple-blue
+  'custom': ['#0a0a1a', '#1a1040', '#0d1b3e'],       // Matching launch-bg gradient
 };
 
 export default function WeatherBackground({ condition }: WeatherBackgroundProps) {
+  const [overrideCondition, setOverrideCondition] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    // Read the user preference to override dynamic weather
+    const loadPref = async () => {
+      try {
+        const pref = await AsyncStorage.getItem('fms_dashboard_background');
+        setOverrideCondition(pref || null);
+      } catch (e) {
+        setOverrideCondition(null);
+      }
+    };
+    loadPref();
+  }, [condition]); // Re-check if component re-renders with new condition
+
+  if (overrideCondition === undefined) {
+    // Prevent flash of default night image while async storage resolves
+    return <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0f172a' }]} />;
+  }
+
+  // Handle custom image URIs
+  const isCustomUri = overrideCondition && (
+    overrideCondition.startsWith('file://') || 
+    overrideCondition.startsWith('http://') || 
+    overrideCondition.startsWith('https://') || 
+    overrideCondition.startsWith('data:image')
+  );
+
   // Default to night backdrop — dashboard always shows dark background
-  const mappedCondition = (condition && typeof condition === 'string')
-    ? condition.toLowerCase()
-    : 'clear-night';
-  const backgroundImage = BACKGROUND_IMAGES[mappedCondition] || BACKGROUND_IMAGES['clear-night'];
+  const mappedCondition = (overrideCondition && !isCustomUri)
+    ? overrideCondition.toLowerCase() 
+    : (condition && typeof condition === 'string')
+      ? condition.toLowerCase()
+      : 'clear-night';
+      
+  const backgroundImage = isCustomUri 
+    ? { uri: overrideCondition }
+    : (BACKGROUND_IMAGES[mappedCondition] || BACKGROUND_IMAGES['clear-night']);
   const gradientColors = THEME_GRADIENTS[mappedCondition] || THEME_GRADIENTS['clear-night'];
 
   return (

@@ -210,6 +210,10 @@ export const DASHBOARD_BACKGROUNDS = {
     label: 'Raining',
     image: require('@/assets/images/weather-rain.png'),
   },
+  custom: {
+    label: 'Custom (Launch)',
+    image: require('@/assets/images/launch-bg.png'),
+  },
 } as const;
 
 export type DashboardBgKey = keyof typeof DASHBOARD_BACKGROUNDS;

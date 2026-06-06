@@ -25,6 +25,7 @@ import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 import { LinearGradient } from 'expo-linear-gradient';
 import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
+import * as ImagePicker from 'expo-image-picker';
 
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
@@ -43,6 +44,7 @@ import {
   Smartphone,
   Lock,
   Mail,
+  Upload,
 } from 'lucide-react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -84,7 +86,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
 
   const [locationEnabled, setLocationEnabled] = useState(true);
-  const [dashboardBg, setDashboardBg] = useState<DashboardBgKey>('night');
+  const [dashboardBg, setDashboardBg] = useState<DashboardBgKey | string>('night');
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
 
@@ -133,8 +135,8 @@ export default function SettingsScreen() {
       setLocationEnabled(locSetting !== 'false');
 
       const bgSetting = await AsyncStorage.getItem('fms_dashboard_background');
-      if (bgSetting && bgSetting in DASHBOARD_BACKGROUNDS) {
-        setDashboardBg(bgSetting as DashboardBgKey);
+      if (bgSetting) {
+        setDashboardBg(bgSetting);
       }
     })();
   }, []);
@@ -258,11 +260,36 @@ export default function SettingsScreen() {
   };
 
   // ─── Background picker ─────────────────────────────────────────────────────
-  const handleSelectBg = async (key: DashboardBgKey) => {
+  const handleSelectBg = async (key: string) => {
     await AsyncStorage.setItem('fms_dashboard_background', key);
     setDashboardBg(key);
     setShowBgPicker(false);
     Alert.alert('Background Updated', 'Your dashboard background will change on next refresh.');
+  };
+
+  const handleUploadBg = async () => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need camera roll permissions to upload an image.');
+        return;
+      }
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [9, 16], // Mobile screen ratio
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0].uri) {
+        await handleSelectBg(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.error('Image picker error:', e);
+      Alert.alert('Error', 'Failed to pick image.');
+    }
   };
 
   const clearBgOverride = async () => {
@@ -407,6 +434,7 @@ export default function SettingsScreen() {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
       >
         {/* ── Property ── */}
         {property && (
@@ -438,7 +466,11 @@ export default function SettingsScreen() {
           <MenuRow
             icon={<ImageIcon size={18} color="#708F96" />}
             title="Dashboard Background"
-            subtitle={DASHBOARD_BACKGROUNDS[dashboardBg]?.label || 'Night'}
+            subtitle={
+              dashboardBg in DASHBOARD_BACKGROUNDS 
+                ? DASHBOARD_BACKGROUNDS[dashboardBg as DashboardBgKey]?.label || 'Night'
+                : 'Custom Photo'
+            }
             onPress={() => setShowBgPicker(true)}
           />
         </GlassCard>
@@ -525,6 +557,13 @@ export default function SettingsScreen() {
                     </TouchableOpacity>
                   );
                 })}
+
+                <TouchableOpacity style={styles.bgOption} onPress={handleUploadBg} activeOpacity={0.8}>
+                  <View style={[styles.bgOptionImg, { backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Upload size={24} color="#fff" />
+                  </View>
+                  <Text style={[styles.bgOptionLabel, { color: colors.text }]}>Upload Photo</Text>
+                </TouchableOpacity>
               </View>
 
               <TouchableOpacity style={styles.resetBtn} onPress={clearBgOverride} activeOpacity={0.7}>

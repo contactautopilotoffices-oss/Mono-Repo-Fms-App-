@@ -217,10 +217,12 @@ export default function NeedsAttentionModal({
               const severityColor = getSeverityColor(item.severity);
               const iconName = getTypeIcon(item.type);
               const typeLabel = getTypeLabel(item.type);
+              // Use entity_id + type as key to ensure uniqueness when same ticket appears multiple times
+              const itemKey = `${item.entity_id}-${item.type}`;
 
               return (
                 <Animated.View
-                  key={item.id}
+                  key={itemKey}
                   entering={FadeInUp.delay(index * 50).duration(350)}
                   style={{ marginHorizontal: SPACING.xl, marginBottom: 10 }}
                 >

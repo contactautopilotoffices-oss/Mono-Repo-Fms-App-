@@ -71,7 +71,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
         {
           title: 'ACCOUNT',
           items: [
-            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Settings', route: 'settings', icon: 'settings-outline' },
             { label: 'Profile', route: 'profile', icon: 'person-outline' },
           ],
         },
@@ -133,7 +133,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
         {
           title: 'SYSTEM',
           items: [
-            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Settings', route: 'settings', icon: 'settings-outline' },
             { label: 'Profile', route: 'profile', icon: 'person-outline' },
           ],
         },
@@ -158,7 +158,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
         {
           title: 'SYSTEM',
           items: [
-            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Settings', route: 'settings', icon: 'settings-outline' },
             { label: 'Profile', route: 'profile', icon: 'person-outline' },
           ],
         },
@@ -186,7 +186,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
         {
           title: 'ACCOUNT',
           items: [
-            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Settings', route: 'settings', icon: 'settings-outline' },
             { label: 'Profile', route: 'profile', icon: 'person-outline' },
           ],
         },
@@ -218,7 +218,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
         {
           title: 'SYSTEM',
           items: [
-            { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+            { label: 'Settings', route: 'settings', icon: 'settings-outline' },
             { label: 'Profile', route: 'profile', icon: 'person-outline' },
           ],
         },
@@ -233,7 +233,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
           { label: 'Dashboard', route: 'dashboard', icon: 'grid-outline' },
           { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
           { label: 'Visitors', route: 'visitors', icon: 'walk-outline' },
-          { label: 'Settings', route: 'profile', icon: 'settings-outline' },
+          { label: 'Settings', route: 'settings', icon: 'settings-outline' },
         ],
       },
     ];

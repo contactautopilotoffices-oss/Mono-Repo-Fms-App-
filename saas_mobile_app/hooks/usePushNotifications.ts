@@ -7,6 +7,7 @@ import { serverApi } from '@/lib/serverApi';
 import { useAuth } from './useAuth';
 import { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import { mmkvAsyncStorage } from '@/utils/storage';
+import { useDashboardStore } from '@/stores/dashboardStore';
 let firebaseModules:
   | {
       AuthorizationStatus: any;
@@ -24,6 +25,8 @@ function getFirebaseMessagingModules() {
     try {
       const messaging = require('@react-native-firebase/messaging');
       const app = require('@react-native-firebase/app');
+      // Verify Firebase is initialized — getApp() throws if not initialized
+      app.getApp();
       firebaseModules = {
         AuthorizationStatus: messaging.AuthorizationStatus,
         getApp: app.getApp,
@@ -33,7 +36,7 @@ function getFirebaseMessagingModules() {
         requestPermission: messaging.requestPermission,
       };
     } catch {
-      // Firebase native module not linked — skip FCM, fall back to expo-notifications only
+      // Firebase native module not linked or not initialized — skip FCM
       return null;
     }
   }
@@ -147,7 +150,9 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
 
 async function storePushToken(
   userId: string,
-  token: string
+  token: string,
+  propertyId?: string | null,
+  organizationId?: string | null
 ): Promise<boolean> {
   try {
     const { error } = await serverApi.query({
@@ -156,6 +161,8 @@ async function storePushToken(
       values: {
         user_id: userId,
         token,
+        property_id: propertyId || null,
+        organization_id: organizationId || null,
         device_info: `${Platform.OS} ${Device.modelName || 'unknown'}`,
         browser: `fcm-${Platform.OS}`,
         is_active: true,
@@ -168,6 +175,7 @@ async function storePushToken(
       console.error('[Push] Token storage error:', error);
       return false;
     }
+    console.log('[Push] Token stored:', { userId, propertyId, organizationId });
     return true;
   } catch (err) {
     console.error('[Push] Token storage exception:', err);
@@ -209,11 +217,16 @@ function extractRouteFromData(data: Record<string, any>): string | null {
 // ------------------------------------------------------------------
 export function usePushNotifications() {
   if (Platform.OS === 'web') return { lastTappedNotification: null };
-  const { user } = useAuth();
+  const { user, membership } = useAuth();
   const registeredRef = useRef(false);
   const tokenRef = useRef<string | null>(null);
 
   const [lastTappedNotification, setLastTappedNotification] = useState<ForegroundNotification | null>(null);
+
+  // Get selected property from dashboard store
+  const loadedPropertyId = useDashboardStore((state) => state.loadedPropertyId);
+  const propertyId = loadedPropertyId || membership?.properties?.[0]?.id;
+  const organizationId = membership?.org_id;
 
   const register = useCallback(async () => {
     if (!user?.id) return;
@@ -267,7 +280,7 @@ export function usePushNotifications() {
         return;
       }
 
-      const success = await storePushToken(user.id, token);
+      const success = await storePushToken(user.id, token, propertyId, organizationId);
       if (success) {
         tokenRef.current = token;
         registeredRef.current = true;
@@ -294,7 +307,7 @@ export function usePushNotifications() {
     } catch (err) {
       console.error('[Push] Registration failed:', err);
     }
-  }, [user?.id]);
+  }, [user?.id, propertyId, organizationId]);
 
   // Register on mount / login
   useEffect(() => {
@@ -309,7 +322,7 @@ export function usePushNotifications() {
         unsubscribe = firebaseMessaging.onTokenRefresh(messagingInstance, (newToken: string) => {
           console.log('[Push] Token refreshed via Firebase:', newToken);
           if (user?.id) {
-            storePushToken(user.id, newToken);
+            storePushToken(user.id, newToken, propertyId, organizationId);
             tokenRef.current = newToken;
           }
         });

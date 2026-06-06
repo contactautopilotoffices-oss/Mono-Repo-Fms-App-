@@ -379,7 +379,7 @@ export default function SecurityDashboard() {
             { icon: <FileText size={22} color="#708F96" />, label: 'Requests', route: `/property/${propertyId}/tickets` },
             { icon: <Shield size={22} color="#3B82F6" />, label: 'Security', route: `/property/${propertyId}/security`, active: true },
             { icon: <Box size={22} color="#708F96" />, label: 'Stock', route: `/property/${propertyId}/stock` },
-            { icon: <Settings2 size={22} color="#708F96" />, label: 'Settings', route: `/property/${propertyId}/profile` },
+            { icon: <Settings2 size={22} color="#708F96" />, label: 'Settings', route: `/property/${propertyId}/settings` },
           ].map((item) => (
             <TouchableOpacity key={item.label} style={styles.navItem} onPress={() => router.push(item.route as any)}>
               {item.active && <View style={styles.activeDot} />}

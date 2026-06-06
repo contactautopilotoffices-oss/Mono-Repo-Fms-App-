@@ -5,7 +5,6 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useAuth } from '@/hooks/useAuth';
 import { apiFetch } from '@/utils/api/mobileApi';
-import { serverApi } from '@/lib/serverApi';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Image } from 'react-native';
@@ -35,18 +34,11 @@ export function ProfileTab({ onSignOut }: ProfileTabProps) {
   const fetchProfile = React.useCallback(async () => {
     if (!user?.id) return null;
     try {
-      const response = await serverApi.query<any>({
-        table: 'users',
-        action: 'select',
-        filters: [{ op: 'eq', column: 'id', value: user.id }],
-        single: true
-      });
+      const response = await apiFetch<any>(`/api/users/${user.id}`);
 
-      if (response.error) {
-        console.error('Error fetching profile:', response.error.message);
-        return null;
-      }
-      return response.data;
+      if (response.success && response.data) return response.data;
+      if (response.id || response.full_name) return response;
+      return null;
     } catch (error) {
       console.error('Error fetching profile:', error);
       return null;

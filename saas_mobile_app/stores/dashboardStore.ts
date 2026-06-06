@@ -157,6 +157,8 @@ export const useDashboardStore = create<DashboardState>()(
         tenantUserIds: state.tenantUserIds,
         hasLoadedInitialData: state.hasLoadedInitialData,
         lastUpdatedAt: state.lastUpdatedAt,
+        // Persist per-property cache so data loads instantly on return
+        propertyCache: state.propertyCache,
       }),
     }
   )
