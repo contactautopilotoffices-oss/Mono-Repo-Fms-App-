@@ -1,4 +1,5 @@
 import { serverApi } from '@/lib/serverApi';
+import { apiFetch } from '@/utils/api/mobileApi';
 import { ApiResponse } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -128,98 +129,54 @@ export const checklistService = {
 
   // ── Create template ───────────────────────────────────────────────────────
   async createTemplate(payload: any) {
-    // Strip client-side propertyId; use property_id from payload
-    const { propertyId, items, ...templatePayload } = payload;
-
-    const { data: template, error: tErr } = await serverApi.query({
-      table: 'sop_templates',
-      action: 'insert',
-      select: '*',
-      values: templatePayload,
-      single: true,
+    // We can use apiFetch to POST to /api/checklist/templates
+    // Note: The backend expects propertyId or property_id.
+    const response = await apiFetch<any>('/api/checklist/templates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
-
-    if (tErr) throw new Error(tErr.message);
-
-    const createdTemplate = template as SOPTemplate;
-
-    if (items?.length) {
-      const itemRows = items.map((item: any, idx: number) => ({
-        ...item,
-        template_id: createdTemplate.id,
-        order_index: item.order_index ?? idx,
-        requires_comment: item.requires_comment ?? false,
-      }));
-      const { error: iErr } = await serverApi.query({
-        table: 'sop_checklist_items',
-        action: 'insert',
-        values: itemRows,
-      });
-      if (iErr) throw new Error(iErr.message);
-    }
-
-    return { template: createdTemplate };
+    if (response.error) throw new Error(response.error);
+    return { template: response.template };
   },
 
   // ── Update template ───────────────────────────────────────────────────────
   async updateTemplate(templateId: string, payload: any) {
-    // Strip client-side keys that shouldn't go to the API
-    const { propertyId, items, ...rest } = payload;
-    const { data, error } = await serverApi.query({
-      table: 'sop_templates',
-      action: 'update',
-      select: '*',
-      filters: [{ op: 'eq', column: 'id', value: templateId }],
-      values: rest,
-      single: true,
+    const response = await apiFetch<any>(`/api/checklist/templates/${templateId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     });
-
-    if (error) throw new Error(error.message);
-    return { template: data };
+    if (response.error) throw new Error(response.error);
+    return { template: response.template ?? payload };
   },
 
   // ── Soft-delete template ──────────────────────────────────────────────────
   async deleteTemplate(templateId: string) {
-    const { data, error } = await serverApi.query({
-      table: 'sop_templates',
-      action: 'update',
-      select: '*',
-      filters: [{ op: 'eq', column: 'id', value: templateId }],
-      values: { is_active: false },
-      single: true,
+    const response = await apiFetch<any>(`/api/checklist/templates/${templateId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: false }),
     });
-
-    if (error) throw new Error(error.message);
-    return { template: data };
+    if (response.error) throw new Error(response.error);
+    return { template: response.template ?? { id: templateId, is_active: false } };
   },
 
   // ── Start completion ──────────────────────────────────────────────────────
   async startCompletion(payload: any) {
-    const { data, error } = await serverApi.query({
-      table: 'sop_completions',
-      action: 'insert',
-      select: '*, template:template_id(*), items:sop_completion_items(*)',
-      values: payload,
-      single: true,
+    const response = await apiFetch<any>('/api/checklist/completions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
-
-    if (error) throw new Error(error.message);
-    return { completion: data };
+    if (response.error) throw new Error(response.error);
+    return { completion: response.completion };
   },
 
   // ── Update completion ─────────────────────────────────────────────────────
   async updateCompletion(completionId: string, payload: any) {
-    const { data, error } = await serverApi.query({
-      table: 'sop_completions',
-      action: 'update',
-      select: '*',
-      filters: [{ op: 'eq', column: 'id', value: completionId }],
-      values: payload,
-      single: true,
+    const response = await apiFetch<any>(`/api/checklist/completions/${completionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
     });
-
-    if (error) throw new Error(error.message);
-    return { completion: data };
+    if (response.error) throw new Error(response.error);
+    return { completion: response.completion ?? payload };
   },
 
   // ── Upload media ──────────────────────────────────────────────────────────

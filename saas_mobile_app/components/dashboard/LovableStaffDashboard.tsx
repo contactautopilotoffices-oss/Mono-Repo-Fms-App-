@@ -28,7 +28,6 @@ import Animated, {
   withTiming,
   runOnJS,
   interpolate,
-  Extrapolate,
   FadeInUp,
   FadeInDown,
 } from 'react-native-reanimated';
@@ -62,6 +61,7 @@ import {
 } from '@/lib/gamification';
 import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
+import TicketStack from '@/components/shared/TicketStack';
 import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
 import { ppmService } from '@/services/ppmService';
 
@@ -233,190 +233,7 @@ function TabButton({
   );
 }
 
-// ─── Ticket Stack (swipeable) ────────────────────────────────────────────────
 
-const STACK_HEIGHT = 420;
-
-function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
-  const [order, setOrder] = useState(initialTickets);
-  const translateX = useSharedValue(0);
-
-  const sendToBack = useCallback(() => {
-    setOrder((prev) => {
-      if (prev.length < 2) return prev;
-      const [first, ...rest] = prev;
-      return [...rest, first];
-    });
-    translateX.value = 0;
-  }, []);
-
-  const pan = Gesture.Pan()
-    .minDistance(10)
-    .onUpdate((e) => {
-      translateX.value = e.translationX;
-    })
-    .onEnd((e) => {
-      if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
-        const dest = e.translationX > 0 ? SCREEN_W : -SCREEN_W;
-        translateX.value = withTiming(dest, { duration: 150 }, () => {
-          runOnJS(sendToBack)();
-        });
-      } else {
-        translateX.value = withSpring(0, { damping: 15, stiffness: 120 });
-      }
-    });
-
-  return (
-    <View style={{ height: STACK_HEIGHT }}>
-      {order.map((t, i) => {
-        const isTop = i === 0;
-        const offset = i * 12;
-        const scale = 1 - i * 0.045;
-        const opacity = i > 3 ? 0 : 1 - i * 0.18;
-
-        return (
-          <View
-            key={t.id}
-            style={[
-              StyleSheet.absoluteFillObject,
-              {
-                transform: [{ translateY: offset }, { scale }],
-                opacity,
-                zIndex: order.length - i,
-                pointerEvents: isTop ? 'auto' : 'none',
-              },
-            ]}
-          >
-            {isTop ? (
-              <GestureDetector gesture={pan}>
-                <Animated.View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    useAnimatedStyle(() => ({
-                      transform: [
-                        { translateX: translateX.value },
-                        {
-                          rotate: `${interpolate(
-                            translateX.value,
-                            [-SCREEN_W, 0, SCREEN_W],
-                            [-8, 0, 8],
-                            Extrapolate.CLAMP
-                          )}deg`,
-                        },
-                      ],
-                    })),
-                  ]}
-                >
-                  <TicketCard ticket={t} />
-                </Animated.View>
-              </GestureDetector>
-            ) : (
-              <TicketCard ticket={t} />
-            )}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const TicketCard = React.memo(function TicketCard({ ticket }: { ticket: Ticket }) {
-  const priorityColors: Record<string, { bg: string; text: string; border: string }> = {
-    LOW: { bg: 'rgba(100,116,139,0.20)', text: '#94A3B8', border: 'rgba(100,116,139,0.40)' },
-    MEDIUM: { bg: 'rgba(251,191,36,0.15)', text: '#FDE68A', border: 'rgba(251,191,36,0.35)' },
-    HIGH: { bg: 'rgba(239,68,68,0.18)', text: '#FCA5A5', border: 'rgba(239,68,68,0.40)' },
-    URGENT: { bg: 'rgba(239,68,68,0.25)', text: '#FECACA', border: 'rgba(239,68,68,0.50)' },
-  };
-  const p = priorityColors[ticket.priority?.toUpperCase()] || priorityColors.LOW;
-
-  const statusColors: Record<string, { bg: string; text: string; border: string }> = {
-    ASSIGNED: { bg: 'rgba(124,92,250,0.15)', text: '#C4B5FD', border: 'rgba(124,92,250,0.35)' },
-    PENDING: { bg: 'rgba(251,191,36,0.12)', text: '#FDE68A', border: 'rgba(251,191,36,0.30)' },
-    'IN-PROGRESS': { bg: 'rgba(34,211,238,0.12)', text: '#A5F3FC', border: 'rgba(34,211,238,0.30)' },
-  };
-  const s = statusColors[ticket.status?.toUpperCase()] || statusColors.ASSIGNED;
-
-  return (
-    <View style={styles.ticketCard}>
-      <View style={styles.ticketCardInner}>
-        {/* Header */}
-        <View style={styles.ticketHeader}>
-          <View style={styles.ticketIconBox}>
-            <Ionicons name="time" size={20} color="rgba(255,255,255,0.80)" />
-          </View>
-          <View style={styles.ticketHeaderInfo}>
-            <Text style={styles.ticketId} numberOfLines={1}>
-              {ticket.ticket_number}
-            </Text>
-            <Text style={styles.ticketDate}>
-              {new Date(ticket.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </Text>
-          </View>
-          <View style={styles.ticketHeaderActions}>
-            <TouchableOpacity style={styles.ticketActionBtn}>
-              <Ionicons name="share-outline" size={14} color="rgba(255,255,255,0.70)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.ticketActionBtn}>
-              <Ionicons name="create-outline" size={14} color="rgba(255,255,255,0.70)" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Badges */}
-        <View style={styles.ticketBadges}>
-          <View style={[styles.ticketBadge, { backgroundColor: p.bg, borderColor: p.border }]}>
-            <Text style={[styles.ticketBadgeText, { color: p.text }]}>{ticket.priority}</Text>
-          </View>
-          <View style={[styles.ticketBadge, { backgroundColor: s.bg, borderColor: s.border }]}>
-            <Text style={[styles.ticketBadgeText, { color: s.text }]}>{ticket.status}</Text>
-          </View>
-        </View>
-
-        {/* Title */}
-        <Text style={styles.ticketTitle}>{ticket.title}</Text>
-
-        {/* Assignee */}
-        <View style={styles.ticketAssignee}>
-          <View style={styles.ticketAssigneeAvatar}>
-            <Text style={styles.ticketAssigneeInitials}>
-              {ticket.assignee?.full_name?.[0] || 'M'}
-            </Text>
-          </View>
-          <Text style={styles.ticketAssigneeName}>{ticket.assignee?.full_name || 'Unassigned'}</Text>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.ticketFooter}>
-          <View>
-            <Text style={styles.ticketFooterLabel}>SLA Countdown</Text>
-            <View style={styles.ticketSlaBadge}>
-              <Ionicons name="time" size={12} color="#FCA5A5" />
-              <Text style={styles.ticketSlaText}>1d 8h 54m</Text>
-            </View>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.ticketFooterLabel}>Score</Text>
-            <Text style={styles.ticketScore}>+5</Text>
-          </View>
-        </View>
-
-        {/* Actions */}
-        <View style={styles.ticketActionsRow}>
-          <TouchableOpacity style={styles.ticketViewBtn}>
-            <Text style={styles.ticketViewBtnText}>View Ticket</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.ticketAcceptBtn}>
-            <Text style={styles.ticketAcceptBtnText}>Accept Task</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-});
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
@@ -599,19 +416,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         setPpmPostponed(cachedPpmPostponed);
       }
 
-      // Save to AsyncStorage cache so next app open is instant
-      saveStaffCache({
-        property: propData ?? property,
-        tickets: ticketData ?? tickets,
-        isCheckedIn: !!shiftData?.is_checked_in,
-        userSkills: cachedUserSkills,
-        specialization: cachedSpecialization,
-        ppmTotal: cachedPpmTotal,
-        ppmDone: cachedPpmDone,
-        ppmPending: cachedPpmPending,
-        ppmOverdue: cachedPpmOverdue,
-        ppmPostponed: cachedPpmPostponed,
-      });
+      // Note: Caching is now handled by React Query, no need for manual saveStaffCache
 
     } catch (err) {
       console.warn('[LovableStaffDashboard] fetch error:', err);

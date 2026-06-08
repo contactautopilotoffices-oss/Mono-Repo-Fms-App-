@@ -61,6 +61,7 @@ import NotificationModal from '@/components/notifications/NotificationModal';
 import MobileFooter from '@/components/shared/MobileFooter';
 import Toast from '@/components/ui/Toast';
 import FloatingMenu from '@/components/ui/FloatingMenu';
+import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
 import { Audio } from 'expo-av';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -402,7 +403,6 @@ type ScopeFilter = 'property' | 'my_tasks';
 export default function LovableMstDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
   const { user, signOut, membership } = useAuth();
-  const { weather } = useWeather();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -418,6 +418,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   // Modals
   const [showCreate, setShowCreate] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
   const [showPermissionOnboarding, setShowPermissionOnboarding] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [toastConfig, setToastConfig] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
@@ -452,6 +453,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           select: '*',
           filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
           orders: [{ column: 'created_at', ascending: false }],
+          limit: 100,
         }),
         serverApi.query<{ is_checked_in: boolean }[]>({
           table: 'resolver_stats',
@@ -888,22 +890,13 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       <WeatherBackground condition={undefined} />
 
       <Animated.View  style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
-          <FloatingMenu
-            title="Maintenance Portal"
-            items={[
-              { label: 'Overview', icon: 'grid-outline', onPress: () => setActiveTab('dashboard') },
-              { label: 'Requests', icon: 'ticket-outline', onPress: () => setActiveTab('requests') },
-              { label: 'Live Flow Map', icon: 'git-branch-outline', onPress: () => setActiveTab('flow') },
-              { label: 'Visitors', icon: 'people-outline', onPress: () => router.push(`/property/${propertyId}/visitors` as any) },
-              { label: 'Diesel Logger', icon: 'flame-outline', onPress: () => router.push(`/property/${propertyId}/diesel` as any) },
-              { label: 'Electricity Logger', icon: 'flash-outline', onPress: () => router.push(`/property/${propertyId}/electricity` as any) },
-              { label: 'Checklists', icon: 'clipboard-outline', onPress: () => router.push(`/property/${propertyId}/checklist` as any) },
-              { label: 'Settings', icon: 'settings-outline', onPress: () => router.push(`/property/${propertyId}/settings` as any) },
-              { label: 'Profile', icon: 'person-outline', onPress: () => setActiveTab('profile') },
-            ]}
-            footer={{ label: 'Sign Out', icon: 'log-out-outline', danger: true, onPress: () => router.push('/(auth)/login' as any) }}
-            buttonStyle={styles.hamburgerBtn}
-          />
+          <TouchableOpacity 
+            style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }}
+            onPress={() => setShowDrawer(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="menu" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
           <View style={styles.headerCenter}>
             <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => setActiveTab('profile')}>
               <LinearGradient
@@ -998,6 +991,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
+      <GlobalNavigationDrawer
+        visible={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        propertyId={propertyId ?? ''}
+      />
       <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
       <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
 

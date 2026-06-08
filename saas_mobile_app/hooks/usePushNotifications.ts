@@ -18,21 +18,25 @@ async function initializeFirebaseApp(): Promise<boolean> {
   if (firebaseInitialized) return true;
 
   try {
-    // Dynamic import to avoid build errors if native module isn't available
-    firebaseApp = require('@react-native-firebase/app');
-    console.log('[Push] Firebase App module loaded');
-
-    // Check if default app already exists
-    const existingApp = firebaseApp.getApp();
-    console.log('[Push] ✅ Firebase app already initialized:', existingApp?.name || 'default');
+    const rnfbApp = require('@react-native-firebase/app');
+    // @react-native-firebase/app auto-initializes from google-services.json
+    // at NATIVE BUILD TIME via the com.google.gms.google-services gradle plugin.
+    // It is NOT possible to initialize it from JS at runtime.
+    // If getApp() throws, the APK was built WITHOUT the google-services plugin.
+    const app = rnfbApp.default ? rnfbApp.default.getApp() : rnfbApp.getApp();
+    console.log('[Push] ✅ Firebase native app ready:', app.name);
+    firebaseApp = rnfbApp.default || rnfbApp;
     firebaseInitialized = true;
     return true;
   } catch (err: any) {
-    console.warn('[Push] Firebase app not initialized:', err.message || err);
-    console.warn('[Push] This means google-services.json was not processed during build');
+    console.warn(
+      '[Push] ❌ Firebase native app not initialized. ' +
+      'Your APK was built before the google-services plugin was configured. ' +
+      'Rebuild with: npx expo prebuild --clean && cd android && ./gradlew assembleDebug'
+    );
   }
 
-  firebaseInitialized = true;
+  firebaseInitialized = true; // Don't retry
   return false;
 }
 
@@ -120,13 +124,12 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   await initializeFirebaseApp();
 
   // Try native Firebase first (for development builds with google-services)
-  if (tryLoadFirebaseNative()) {
+  if (firebaseInitialized && tryLoadFirebaseNative()) {
     try {
       console.log('[Push] Trying @react-native-firebase/messaging...');
-      const messaging = firebaseMessaging.default || firebaseMessaging;
-
-      // Get messaging instance - in v7+ it's accessed directly
-      const messagingInstance = messaging;
+      // messaging is a factory function: messaging() returns the instance
+      const messagingFactory = firebaseMessaging.default || firebaseMessaging;
+      const messagingInstance = messagingFactory();
       const fcmToken = await messagingInstance.getToken();
       if (fcmToken) {
         token = fcmToken;
@@ -135,6 +138,8 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     } catch (err: any) {
       console.warn('[Push] Native FCM error:', err.message);
     }
+  } else if (!firebaseInitialized) {
+    console.log('[Push] Skipping native FCM — Firebase app not initialized in this build');
   }
 
   // Fallback: Try expo-notifications (works with Expo EAS builds if FCM configured)
@@ -374,13 +379,14 @@ export function usePushNotifications() {
   useEffect(() => {
     register();
 
-    // Listen to token refreshes from Firebase
+    // Listen to token refreshes from Firebase (only if native Firebase is ready)
     let unsubscribe = () => {};
     (async () => {
       try {
-        if (tryLoadFirebaseNative()) {
-          const messaging = firebaseMessaging.default || firebaseMessaging;
-          unsubscribe = messaging.onTokenRefresh(async (newToken: string) => {
+        if (firebaseInitialized && tryLoadFirebaseNative()) {
+          const messagingFactory = firebaseMessaging.default || firebaseMessaging;
+          const messagingInstance = messagingFactory();
+          unsubscribe = messagingInstance.onTokenRefresh(async (newToken: string) => {
             console.log('[Push] Token refreshed via Firebase:', newToken);
             if (user?.id) {
               storePushToken(user.id, newToken, propertyId, organizationId);

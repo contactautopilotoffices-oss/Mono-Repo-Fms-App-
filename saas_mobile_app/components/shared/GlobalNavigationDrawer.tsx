@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import SignOutModal from '../ui/SignOutModal';
+import AnimatedLogo from '@/components/shared/AnimatedLogo';
 
 interface GlobalNavigationDrawerProps {
   visible: boolean;
@@ -79,7 +80,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
     }
 
     // STAFF - matches StaffDashboard.tsx
-    if (userRole === 'staff' || userRole === 'maintenance_staff') {
+    if (userRole === 'staff' || userRole === 'maintenance_staff' || userRole === 'mst') {
       return [
         {
           title: 'MAINTENANCE PORTAL',
@@ -92,6 +93,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             { label: 'Diesel Logger', route: 'diesel', icon: 'flame-outline' },
             { label: 'Electricity Logger', route: 'electricity', icon: 'flash-outline' },
             { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
+            { label: 'Gamification Info', route: 'gamification', icon: 'star-outline' },
           ],
         },
         {
@@ -247,11 +249,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             {/* Header */}
             <View style={styles.drawerHeader}>
               <View style={styles.drawerLogoContainer}>
-                <Image
-                  source={require('@/assets/images/autopilot-logo-new.png')}
-                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]}
-                  resizeMode="contain"
-                />
+                <AnimatedLogo size="lg" />
               </View>
               <TouchableOpacity onPress={onClose} style={styles.drawerCloseBtn}>
                 <Ionicons name="close" size={24} color="#FFFFFF" />
@@ -327,12 +325,12 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
 const styles = StyleSheet.create({
   container: { flex: 1, flexDirection: 'row' },
   drawerPanel: {
-    width: 320,
+    width: 288,
     height: '100%',
-    backgroundColor: '#111',
+    backgroundColor: '#0B0B0F',
     borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 20,
+    borderRightColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 14,
   },
   drawerHeader: {
     flexDirection: 'row',
@@ -340,9 +338,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
     marginTop: 8,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
-  drawerLogoContainer: { flex: 1, alignItems: 'flex-start' },
-  drawerLogo: { width: 160, height: 42, resizeMode: 'contain' },
+  drawerLogoContainer: {
+    flex: 1,
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  drawerLogo: {
+    width: 130,
+    height: 36,
+    resizeMode: 'contain',
+    // Bright appearance on dark background
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
+  },
   drawerCloseBtn: {
     width: 40,
     height: 40,

@@ -42,6 +42,7 @@ import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
+import TicketStack, { type Ticket } from '@/components/shared/TicketStack';
 import { SPACING, STATUS_COLORS } from '@/constants/designSystem';
 import { GlassTile, MiniBarChart, AttentionCard } from './DashboardComponents';
 import { useDashboardQuery, invalidateDashboard } from '@/hooks/useDashboardQuery';
@@ -395,6 +396,25 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
                 <AttentionCard key={item.id} item={item} index={index} onAction={() => item.entity_type === 'ticket' && router.push(`/property/${propertyId}/tickets/${item.entity_id}`)} />
               ))}
             </>
+          )}
+
+          {/* Swipeable Ticket Stack */}
+          {tickets.length > 0 && (
+            <Animated.View entering={FadeInUp.delay(160).duration(500)} style={{ marginBottom: 16, marginHorizontal: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>📋 ACTIVE TICKETS</Text>
+                <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/tickets`)}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>VIEW ALL</Text>
+                </TouchableOpacity>
+              </View>
+              <TicketStack
+                tickets={tickets.slice(0, 5) as Ticket[]}
+                onTicketPress={(ticket) => router.push(`/property/${propertyId}/tickets/${ticket.id}`)}
+                maxVisible={3}
+                height={320}
+                emptyMessage="No active tickets"
+              />
+            </Animated.View>
           )}
 
           {/* Checklist */}
