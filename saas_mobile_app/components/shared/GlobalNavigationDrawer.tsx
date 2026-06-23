@@ -84,7 +84,6 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
       return [
         {
           title: 'MAINTENANCE PORTAL',
-          badge: { text: 'STAFF', color: '#F59E0B' },
           items: [
             { label: 'Overview', route: 'dashboard', icon: 'grid-outline' },
             { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
@@ -344,11 +343,7 @@ const styles = StyleSheet.create({
   drawerLogoContainer: {
     flex: 1,
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
+    justifyContent: 'center',
   },
   drawerLogo: {
     width: 130,

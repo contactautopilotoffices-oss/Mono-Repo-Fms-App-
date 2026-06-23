@@ -201,7 +201,7 @@ async function storePushToken(
     console.log('[Push] Storing token for user:', userId);
     console.log('[Push] Token:', token?.substring(0, 30) + '...');
 
-    // Try Fastify server first
+    // Primary: upsert via /api/query (goes through serverApi with auth)
     const { error } = await serverApi.query({
       table: 'push_tokens',
       action: 'upsert',
@@ -209,7 +209,6 @@ async function storePushToken(
         user_id: userId,
         token,
         property_id: propertyId || null,
-        organization_id: organizationId || null,
         device_info: `${Platform.OS} ${Device.modelName || 'unknown'}`,
         browser: `fcm-${Platform.OS}`,
         is_active: true,
@@ -219,24 +218,22 @@ async function storePushToken(
     });
 
     if (error) {
-      console.warn('[Push] Fastify server store failed, trying Next.js server:', error.message);
-      // Fallback: Use mobile server directly
-      const mobileServerUrl = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL || 'https://fms-dev-saas-one.vercel.app';
-      const response = await fetch(`${mobileServerUrl}/api/push-tokens/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      console.warn('[Push] Primary store failed, trying /api/push-tokens/register:', error.message);
+
+      // Fallback: use serverApi.post() — this attaches the bearer token automatically
+      const { error: fallbackError } = await serverApi.post<{ success: boolean }>(
+        '/api/push-tokens/register',
+        {
           userId,
           token,
           propertyId,
           organizationId,
           deviceInfo: `${Platform.OS} ${Device.modelName || 'unknown'}`,
-        }),
-      });
+        }
+      );
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        console.error('[Push] ❌ Mobile server store failed:', errData.error || response.statusText);
+      if (fallbackError) {
+        console.error('[Push] ❌ Mobile server store failed:', fallbackError.message);
         return false;
       }
     }

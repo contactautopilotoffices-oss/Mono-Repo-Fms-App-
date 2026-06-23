@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions, useMicrophonePermissions, FlashMode } from 'expo-camera';
 import { Video, ResizeMode } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export type MediaFile = {
   uri: string;
@@ -41,16 +42,24 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
   const [isRecording, setIsRecording] = useState(false);
   const [facing, setFacing] = useState<'front' | 'back'>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
+  const [isCameraReady, setIsCameraReady] = useState(false);
   
   const cameraRef = React.useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
+  const insets = useSafeAreaInsets();
 
   React.useEffect(() => {
     if (isOpen) {
       setMode(initialMode === 'photo' ? 'picture' : 'video');
       requestCameraPermission();
       requestMicPermission();
+      // Delay camera mount to allow modal slide animation to finish without stuttering
+      const t = setTimeout(() => setIsCameraReady(true), 50);
+      return () => clearTimeout(t);
+    } else {
+      setIsCameraReady(false);
+      setCapturedMedia(null);
     }
   }, [isOpen, initialMode]);
 
@@ -147,10 +156,10 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
   };
 
   return (
-    <Modal visible={isOpen} animationType="slide" transparent={false} onRequestClose={handleClose}>
-      <SafeAreaView style={styles.container}>
+    <Modal visible={isOpen} animationType="slide" transparent={true} onRequestClose={handleClose}>
+      <View style={styles.container}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
           <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
             <Ionicons name="close" size={22} color="#FFF" />
           </TouchableOpacity>
@@ -204,7 +213,7 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
                 <TouchableOpacity onPress={requestCameraPermission} style={styles.permissionBtn}>
                   <Text style={styles.permissionText}>Grant Camera Permission</Text>
                 </TouchableOpacity>
-              ) : (
+              ) : isCameraReady ? (
                 <CameraView
                   ref={cameraRef}
                   style={styles.camera}
@@ -212,13 +221,17 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
                   flash={flash}
                   mode={mode}
                 />
+              ) : (
+                <View style={[styles.camera, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }]}>
+                  <ActivityIndicator size="large" color="#3B82F6" />
+                </View>
               )}
             </View>
           )}
         </View>
 
         {/* Controls */}
-        <View style={styles.controls}>
+        <View style={[styles.controls, { paddingBottom: Math.max(insets.bottom, 24) }]}>
           {capturedMedia ? (
             <View style={styles.reviewRow}>
               <TouchableOpacity onPress={retake} style={styles.retakeBtn}>
@@ -267,7 +280,7 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
             </View>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

@@ -179,6 +179,8 @@ export default function TicketDetailScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [optimisticMedia, setOptimisticMedia] = useState<{before?: {uri: string, type: 'image'|'video'}, after?: {uri: string, type: 'image'|'video'}}>({});
+  const [optimisticUploading, setOptimisticUploading] = useState<{before: boolean, after: boolean}>({before: false, after: false});
 
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
   const [availableMSTs, setAvailableMSTs] = useState<{ id: string; full_name: string }[]>([]);
@@ -202,7 +204,6 @@ export default function TicketDetailScreen() {
   // Property segregation: verify ticket belongs to current property
   const fetchTicket = useCallback(async () => {
     if (!propertyId || !id) return;
-    setLoading(true);
     try {
       // Use authUser from context — this is the definitive, always-hydrated user object
       // from AuthContext, which has the session correctly loaded via onAuthStateChange.
@@ -714,44 +715,38 @@ export default function TicketDetailScreen() {
 
   const handleMediaUpload = async (media: MediaFile) => {
     if (!mediaUploadType || !id) return;
+    const currentType = mediaUploadType;
     setShowMediaModal(false);
-    setIsUploading(true);
+    
+    // Instant Optimistic UI Update
+    setOptimisticMedia(prev => ({ ...prev, [currentType]: { uri: media.uri, type: media.type } }));
+    setOptimisticUploading(prev => ({ ...prev, [currentType]: true }));
+    setMediaUploadType(null);
 
     try {
       const isImage = media.type === 'image';
       const newExtension = isImage ? 'jpg' : 'mp4';
       const newBucket = isImage ? 'ticket_photos' : 'ticket_videos';
-      const newPath = getStoragePath(propertyId as string, id as string, mediaUploadType, newExtension);
+      const newPath = getStoragePath(propertyId as string, id as string, currentType, newExtension);
 
-      // ── Step 1: Delete the old file from storage (if any) ──────────────────
-      const oldPhotoUrl = mediaUploadType === 'before' ? ticket?.photo_before_url : ticket?.photo_after_url;
-      const oldVideoUrl = mediaUploadType === 'before' ? ticket?.video_before_url : ticket?.video_after_url;
+      const oldPhotoUrl = currentType === 'before' ? ticket?.photo_before_url : ticket?.photo_after_url;
+      const oldVideoUrl = currentType === 'before' ? ticket?.video_before_url : ticket?.video_after_url;
 
       if (oldPhotoUrl) {
-        const oldPath = getStoragePathForSlot(propertyId as string, id as string, mediaUploadType, true);
-        console.log('[handleMediaUpload] Deleting old photo:', oldPath);
+        const oldPath = getStoragePathForSlot(propertyId as string, id as string, currentType, true);
         await supabase.storage.from('ticket_photos').remove([oldPath]);
       }
       if (oldVideoUrl) {
-        const oldPath = getStoragePathForSlot(propertyId as string, id as string, mediaUploadType, false);
-        console.log('[handleMediaUpload] Deleting old video:', oldPath);
+        const oldPath = getStoragePathForSlot(propertyId as string, id as string, currentType, false);
         await supabase.storage.from('ticket_videos').remove([oldPath]);
       }
 
-      // ── Step 2: Compress image if needed ─────────────────────────────────────
       let finalUri = media.uri;
       if (isImage) {
-        console.log('[handleMediaUpload] Compressing image...');
         finalUri = await compressImage(media.uri);
       }
 
-      // ── Step 3: Upload new file (overwrites at the same path) ────────────
-      // Use an explicit Bearer token client to ensure RLS compliance in Expo Go
-      const authClient = session?.access_token 
-        ? createClientFromToken(session.access_token)
-        : supabase;
-
-      console.log('[handleMediaUpload] Final upload attempt — Bucket:', newBucket, 'Path:', newPath);
+      const authClient = session?.access_token ? createClientFromToken(session.access_token) : supabase;
       const arrayBuffer = await readFileAsArrayBuffer(finalUri);
 
       const { error: uploadError } = await authClient.storage
@@ -764,37 +759,23 @@ export default function TicketDetailScreen() {
 
       if (uploadError) throw uploadError;
 
-      // ── Step 4: Get public URL and strip Supabase transform params ───────────
-      const { data: { publicUrl: rawUrl } } = authClient.storage
-        .from(newBucket)
-        .getPublicUrl(newPath);
-
-      // Remove Supabase transformation params (e.g. ?transform=...)
+      const { data: { publicUrl: rawUrl } } = authClient.storage.from(newBucket).getPublicUrl(newPath);
       const publicUrl = rawUrl.split('?')[0];
-      console.log('[handleMediaUpload] Public URL:', publicUrl);
 
-      // ── Step 5: Build DB update payload ──────────────────────────────────────
-      // If type changed (photo→video or video→photo), CLEAR the old column
       const updates: Record<string, unknown> = {};
-
       if (isImage) {
-        updates.photo_before_url = mediaUploadType === 'before' ? publicUrl : undefined;
-        updates.photo_after_url  = mediaUploadType === 'after'  ? publicUrl : undefined;
-        // Clear the opposite (video) column for this slot
-        if (mediaUploadType === 'before') updates.video_before_url = null;
-        else                              updates.video_after_url  = null;
+        updates.photo_before_url = currentType === 'before' ? publicUrl : undefined;
+        updates.photo_after_url  = currentType === 'after'  ? publicUrl : undefined;
+        if (currentType === 'before') updates.video_before_url = null;
+        else                          updates.video_after_url  = null;
       } else {
-        updates.video_before_url = mediaUploadType === 'before' ? publicUrl : undefined;
-        updates.video_after_url  = mediaUploadType === 'after'  ? publicUrl : undefined;
-        // Clear the opposite (photo) column for this slot
-        if (mediaUploadType === 'before') updates.photo_before_url = null;
-        else                              updates.photo_after_url  = null;
+        updates.video_before_url = currentType === 'before' ? publicUrl : undefined;
+        updates.video_after_url  = currentType === 'after'  ? publicUrl : undefined;
+        if (currentType === 'before') updates.photo_before_url = null;
+        else                          updates.photo_after_url  = null;
       }
 
-      // Clean up undefined values
       Object.keys(updates).forEach(k => updates[k] === undefined && delete updates[k]);
-
-      console.log('[handleMediaUpload] DB updates:', updates);
 
       const mediaRes = await serverApi.query({
         table: 'tickets',
@@ -806,19 +787,75 @@ export default function TicketDetailScreen() {
       if (mediaRes.error) throw new Error(mediaRes.error.message);
 
       await fetchTicket();
-      Alert.alert('Success', `${isImage ? 'Photo' : 'Video'} uploaded successfully.`);
     } catch (err) {
       console.error('[handleMediaUpload] Error:', err);
+      // Revert optimistic state on error
+      setOptimisticMedia(prev => { const n = {...prev}; delete n[currentType]; return n; });
       Alert.alert('Upload Failed', 'There was an error storing your media. Please try again.');
     } finally {
-      setIsUploading(false);
-      setMediaUploadType(null);
+      setOptimisticUploading(prev => ({ ...prev, [currentType]: false }));
     }
+  };
+
+  const handleMediaRemove = async (slot: 'before' | 'after') => {
+    if (!id || !ticket) return;
+    
+    Alert.alert('Remove Media', 'Are you sure you want to delete this media?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          // Optimistic UI update
+          const originalTicket = { ...ticket };
+          const optimistic = { ...ticket };
+          if (slot === 'before') { optimistic.photo_before_url = null; optimistic.video_before_url = null; }
+          if (slot === 'after') { optimistic.photo_after_url = null; optimistic.video_after_url = null; }
+          setTicket(optimistic);
+          setOptimisticMedia(prev => { const n = {...prev}; delete n[slot]; return n; });
+
+          try {
+            const oldPhotoUrl = slot === 'before' ? originalTicket.photo_before_url : originalTicket.photo_after_url;
+            const oldVideoUrl = slot === 'before' ? originalTicket.video_before_url : originalTicket.video_after_url;
+            
+            if (oldPhotoUrl) {
+              const oldPath = getStoragePathForSlot(propertyId as string, id as string, slot, true);
+              await supabase.storage.from('ticket_photos').remove([oldPath]);
+            }
+            if (oldVideoUrl) {
+              const oldPath = getStoragePathForSlot(propertyId as string, id as string, slot, false);
+              await supabase.storage.from('ticket_videos').remove([oldPath]);
+            }
+
+            const updates: Record<string, unknown> = {};
+            if (slot === 'before') { updates.photo_before_url = null; updates.video_before_url = null; }
+            if (slot === 'after') { updates.photo_after_url = null; updates.video_after_url = null; }
+
+            const res = await serverApi.query({
+              table: 'tickets',
+              action: 'update',
+              values: updates,
+              filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
+            });
+            if (res.error) throw new Error(res.error.message);
+          } catch (err) {
+            console.error('Failed to remove media:', err);
+            setTicket(originalTicket);
+            Alert.alert('Error', 'Could not remove media.');
+          }
+        }
+      }
+    ]);
   };
 
   // Derive current media URL and type from the selected slot
   const getCurrentMedia = () => {
     if (!ticket || !selectedMediaSlot) return { url: '', fileType: 'photo' as const };
+    
+    // Check optimistic media first
+    const opt = optimisticMedia[selectedMediaSlot];
+    if (opt) return { url: opt.uri, fileType: opt.type === 'image' ? 'photo' as const : 'video' as const };
+
     const url = selectedMediaSlot === 'before'
       ? (ticket.photo_before_url || ticket.video_before_url || '')
       : (ticket.photo_after_url || ticket.video_after_url || '');
@@ -1104,13 +1141,8 @@ export default function TicketDetailScreen() {
                   <TouchableOpacity
                     style={[styles.primaryBlockBtn, { backgroundColor: '#3B82F6', flex: 1 }]}
                     onPress={() => handleUpdateStatus('in_progress')}
-                    disabled={updatingStatus}
                   >
-                    {updatingStatus ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <Ionicons name="play-circle" size={20} color="#FFF" />
-                    )}
+                    <Ionicons name="play-circle" size={20} color="#FFF" />
                     <Text style={styles.primaryBlockBtnText}>Start Work</Text>
                   </TouchableOpacity>
                 )}
@@ -1119,13 +1151,8 @@ export default function TicketDetailScreen() {
                   <TouchableOpacity
                     style={[styles.primaryBlockBtn, { backgroundColor: validationEnabled ? '#8B5CF6' : '#10B981', flex: 1 }]}
                     onPress={() => handleUpdateStatus(validationEnabled ? 'resolved' : 'closed')}
-                    disabled={updatingStatus}
                   >
-                    {updatingStatus ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <Ionicons name={validationEnabled ? 'shield-checkmark' : 'checkmark-circle'} size={20} color="#FFF" />
-                    )}
+                    <Ionicons name={validationEnabled ? 'shield-checkmark' : 'checkmark-circle'} size={20} color="#FFF" />
                     <Text style={styles.primaryBlockBtnText}>
                       {validationEnabled ? 'Send for Approval' : 'Complete'}
                     </Text>
@@ -1588,18 +1615,13 @@ export default function TicketDetailScreen() {
               {/* Media Section */}
               <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
             <Text style={[styles.sectionTitle, { color: textPrimary }]}>Photos & Videos</Text>
-            {isUploading && (
-              <View style={styles.uploadingRow}>
-                <ActivityIndicator size="small" color="#3B82F6" />
-                <Text style={[styles.uploadingText, { color: textSecondary }]}>Uploading...</Text>
-              </View>
-            )}
+            {/* isUploading global overlay removed for optimistic media updates */}
             <View style={styles.mediaGrid}>
               {/* Before */}
               <TouchableOpacity
                 style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
                 onPress={() => {
-                  const hasMedia = Boolean(ticket.photo_before_url || ticket.video_before_url);
+                  const hasMedia = Boolean(ticket.photo_before_url || ticket.video_before_url || optimisticMedia.before);
                   if (hasMedia) {
                     setSelectedMediaSlot('before');
                     setShowMediaActions(true);
@@ -1608,9 +1630,14 @@ export default function TicketDetailScreen() {
                     setShowMediaModal(true);
                   }
                 }}
-                disabled={isUploading}
               >
-                {ticket.photo_before_url ? (
+                {optimisticMedia.before ? (
+                  optimisticMedia.before.type === 'image' ? (
+                    <Image source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} />
+                  ) : (
+                    <Video source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                  )
+                ) : ticket.photo_before_url ? (
                   <Image source={{ uri: ticket.photo_before_url }} style={styles.mediaImage} />
                 ) : ticket.video_before_url ? (
                   <Video
@@ -1627,13 +1654,18 @@ export default function TicketDetailScreen() {
                     <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>Before</Text>
                   </View>
                 )}
+                {optimisticUploading.before && (
+                  <View style={styles.optimisticOverlay}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                  </View>
+                )}
               </TouchableOpacity>
 
               {/* After */}
               <TouchableOpacity
                 style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
                 onPress={() => {
-                  const hasMedia = Boolean(ticket.photo_after_url || ticket.video_after_url);
+                  const hasMedia = Boolean(ticket.photo_after_url || ticket.video_after_url || optimisticMedia.after);
                   if (hasMedia) {
                     setSelectedMediaSlot('after');
                     setShowMediaActions(true);
@@ -1642,9 +1674,14 @@ export default function TicketDetailScreen() {
                     setShowMediaModal(true);
                   }
                 }}
-                disabled={isUploading}
               >
-                {ticket.photo_after_url ? (
+                {optimisticMedia.after ? (
+                  optimisticMedia.after.type === 'image' ? (
+                    <Image source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} />
+                  ) : (
+                    <Video source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                  )
+                ) : ticket.photo_after_url ? (
                   <Image source={{ uri: ticket.photo_after_url }} style={styles.mediaImage} />
                 ) : ticket.video_after_url ? (
                   <Video
@@ -1659,6 +1696,11 @@ export default function TicketDetailScreen() {
                   <View style={styles.mediaPlaceholder}>
                     <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
                     <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>After</Text>
+                  </View>
+                )}
+                {optimisticUploading.after && (
+                  <View style={styles.optimisticOverlay}>
+                    <ActivityIndicator size="small" color="#FFF" />
                   </View>
                 )}
               </TouchableOpacity>
@@ -2000,6 +2042,10 @@ export default function TicketDetailScreen() {
               // Handle download in parent — it has access to the URL
               setShowMediaActions(false);
               handleMediaDownload(url, selectedMediaSlot || 'before', fileType);
+            }}
+            onRemove={() => {
+              setShowMediaActions(false);
+              if (selectedMediaSlot) handleMediaRemove(selectedMediaSlot);
             }}
           />
         );
@@ -3098,5 +3144,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  optimisticOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
   },
 });

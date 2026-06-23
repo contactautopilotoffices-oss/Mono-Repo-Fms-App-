@@ -24,6 +24,8 @@ interface MediaActionsSheetProps {
   onViewFullScreen: () => void;
   /** Called when user wants to download */
   onDownload: () => void;
+  /** Called when user wants to remove the media */
+  onRemove: () => void;
   /** Called when user wants to close the sheet (cancel, backdrop, back button) */
   onClose: () => void;
   mediaType: MediaType;
@@ -33,6 +35,7 @@ interface MediaActionsSheetProps {
 export default function MediaActionsSheet({
   isOpen,
   onReplace,
+  onRemove,
   onViewFullScreen,
   onDownload,
   onClose,
@@ -50,6 +53,10 @@ export default function MediaActionsSheet({
   const handleReplace = () => {
     // Close the sheet first, then parent will open the camera
     onReplace();
+  };
+
+  const handleRemove = () => {
+    onRemove();
   };
 
   const handleView = () => {
@@ -144,6 +151,22 @@ export default function MediaActionsSheet({
               <View style={styles.actionTextGroup}>
                 <Text style={styles.actionLabel}>Replace Photo</Text>
                 <Text style={styles.actionHint}>Take a new photo instead</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
+            </TouchableOpacity>
+
+            {/* Remove */}
+            <TouchableOpacity
+              style={styles.actionItem}
+              onPress={handleRemove}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+                <Ionicons name="trash-outline" size={22} color="#EF4444" />
+              </View>
+              <View style={styles.actionTextGroup}>
+                <Text style={[styles.actionLabel, { color: '#EF4444' }]}>Remove Photo</Text>
+                <Text style={styles.actionHint}>Delete from this ticket</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color="#CBD5E1" />
             </TouchableOpacity>

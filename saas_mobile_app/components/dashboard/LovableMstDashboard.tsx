@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Dimensions,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,10 +31,12 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withRepeat,
   runOnJS,
   interpolate,
   Extrapolate,
   FadeInUp,
+  Easing,
 } from 'react-native-reanimated';
 import {
   Gesture,
@@ -98,6 +101,7 @@ type MstDashboardQueryData = {
   property: { name: string } | null;
   tickets: Ticket[];
   isCheckedIn: boolean;
+  checklistStats?: { completed: number; total: number };
 };
 
 const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
@@ -175,16 +179,28 @@ function ProfileStat({
 
 // ─── Ticket Stack (swipeable) ────────────────────────────────────────────────
 
-const STACK_HEIGHT = 420;
+const CARD_H = 210;
+const PEEK_OFFSET = 10;
+const MAX_STACK = 4;
 
-function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
+interface TicketStackProps {
+  tickets: Ticket[];
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}
+
+function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: TicketStackProps) {
   const [order, setOrder] = useState(initialTickets);
   const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const rotate = useSharedValue(0);
 
   useEffect(() => {
     setOrder(initialTickets);
     translateX.value = 0;
-  }, [initialTickets, translateX]);
+    translateY.value = 0;
+    rotate.value = 0;
+  }, [initialTickets]);
 
   const sendToBack = useCallback(() => {
     setOrder((prev) => {
@@ -193,70 +209,80 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
       return [...rest, first];
     });
     translateX.value = 0;
+    translateY.value = 0;
+    rotate.value = 0;
   }, []);
 
   const pan = Gesture.Pan()
-    .minDistance(10)
+    .minDistance(8)
     .onUpdate((e) => {
       translateX.value = e.translationX;
+      translateY.value = e.translationY * 0.3;
+      rotate.value = interpolate(e.translationX, [-SCREEN_W, 0, SCREEN_W], [-12, 0, 12], Extrapolate.CLAMP);
     })
     .onEnd((e) => {
-      if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
-        const dest = e.translationX > 0 ? SCREEN_W : -SCREEN_W;
-        translateX.value = withTiming(dest, { duration: 150 }, () => {
+      const shouldDismiss = Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 600;
+      if (shouldDismiss) {
+        const dest = e.translationX > 0 ? SCREEN_W * 1.4 : -SCREEN_W * 1.4;
+        translateX.value = withTiming(dest, { duration: 200 }, () => {
           runOnJS(sendToBack)();
         });
+        translateY.value = withTiming(e.translationY * 0.5, { duration: 200 });
       } else {
-        translateX.value = withSpring(0, { damping: 15, stiffness: 120 });
+        translateX.value = withSpring(0, { damping: 18, stiffness: 130 });
+        translateY.value = withSpring(0, { damping: 18, stiffness: 130 });
+        rotate.value = withSpring(0, { damping: 18, stiffness: 130 });
       }
     });
 
+  const topAnimStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { rotate: `${rotate.value}deg` },
+    ],
+  }));
+
+  const visible = order.slice(0, MAX_STACK);
+  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
+
   return (
-    <View style={{ height: STACK_HEIGHT }}>
-      {order.map((t, i) => {
+    <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
+      {visible.map((t, i) => {
         const isTop = i === 0;
-        const offset = i * 12;
-        const scale = 1 - i * 0.045;
-        const opacity = i > 3 ? 0 : 1 - i * 0.18;
+        // i=0 is front card, i=1 is behind it, etc.
+        const zIndex = visible.length - i;
+        
+        // Arrange cards to peek from the TOP:
+        // The back-most card (highest i) gets top: 0
+        // The front card (i=0) gets pushed DOWN so the back cards can peek out the top.
+        const maxOffset = (MAX_STACK - 1) * 16; // 16px peek offset
+        const yOffset = maxOffset - (i * 16);
+        const scale = 1 - i * 0.05;
+        const bgOpacity = 1 - i * 0.15;
 
         return (
           <View
             key={t.id}
             style={[
-              StyleSheet.absoluteFillObject,
+              styles.tcStackSlot,
               {
-                transform: [{ translateY: offset }, { scale }],
-                opacity,
-                zIndex: order.length - i,
-                pointerEvents: isTop ? 'auto' : 'none',
+                top: yOffset,
+                transform: [{ scale }],
+                zIndex: zIndex,
+                opacity: bgOpacity,
               },
             ]}
+            pointerEvents={isTop ? 'auto' : 'none'}
           >
             {isTop ? (
               <GestureDetector gesture={pan}>
-                <Animated.View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    useAnimatedStyle(() => ({
-                      transform: [
-                        { translateX: translateX.value },
-                        {
-                          rotate: `${interpolate(
-                            translateX.value,
-                            [-SCREEN_W, 0, SCREEN_W],
-                            [-8, 0, 8],
-                            Extrapolate.CLAMP
-                          )}deg`,
-                        },
-                      ],
-                    })),
-                  ]}
-                >
-                  <TicketCard ticket={t} />
+                <Animated.View style={[{ flex: 1 }, topAnimStyle]}>
+                  <TicketCard ticket={t} propertyName={propertyName} onView={() => onViewTicket?.(t)} />
                 </Animated.View>
               </GestureDetector>
             ) : (
-              <TicketCard ticket={t} />
+              <TicketCard ticket={t} propertyName={propertyName} onView={() => onViewTicket?.(t)} />
             )}
           </View>
         );
@@ -265,99 +291,193 @@ function TicketStack({ tickets: initialTickets }: { tickets: Ticket[] }) {
   );
 }
 
-const TicketCard = React.memo(function TicketCard({ ticket }: { ticket: Ticket }) {
-  const getPriorityColor = () => {
+// ─── Gemini animated gradient border wrapper ───────────────────────────────
+
+const GEMINI_COLORS: readonly [string, string, ...string[]] = [
+  '#3B82F6', '#06B6D4', '#0EA5E9', '#2DD4BF', '#3B82F6',
+];
+
+function GeminiCardBorder({ children }: { children: React.ReactNode }) {
+  const angle = useSharedValue(0);
+
+  useEffect(() => {
+    angle.value = withRepeat(
+      withTiming(360, { duration: 3000, easing: Easing.linear }),
+      -1,
+      false
+    );
+  }, []);
+
+  const spinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${angle.value}deg` }],
+  }));
+
+  return (
+    <View style={geminiStyles.outer}>
+      {/* Spinning gradient — acts as the border */}
+      <Animated.View style={[geminiStyles.gradientSpin, spinStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={GEMINI_COLORS}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </Animated.View>
+      {/* Inner card inset to expose 1.5px border */}
+      <View style={geminiStyles.inner}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+const geminiStyles = StyleSheet.create({
+  outer: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    flex: 1,
+    padding: 1.5,           // this 1.5px gap shows the spinning gradient
+    position: 'relative',
+  },
+  gradientSpin: {
+    position: 'absolute',
+    width: '250%',
+    height: '250%',
+    top: '-75%',
+    left: '-75%',
+  },
+  inner: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#162B35',
+  },
+});
+
+interface TicketCardProps {
+  ticket: Ticket;
+  propertyName?: string;
+  onView?: () => void;
+}
+
+const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView }: TicketCardProps) {
+  // ── Priority badge ──
+  const getPriorityStyle = () => {
     switch (ticket.priority?.toLowerCase()) {
       case 'urgent':
       case 'critical':
-        return { bg: 'rgba(239,68,68,0.15)', text: '#EF4444', border: 'rgba(239,68,68,0.25)' };
+        return { bg: 'rgba(239,68,68,0.25)', text: '#FCA5A5', label: 'URGENT' };
       case 'high':
-        return { bg: 'rgba(249,115,22,0.15)', text: '#F97316', border: 'rgba(249,115,22,0.25)' };
+        return { bg: 'rgba(20,184,166,0.25)', text: '#2DD4BF', label: 'HIGH' };
       case 'medium':
-        return { bg: 'rgba(71,85,105,0.10)', text: '#475569', border: 'rgba(71,85,105,0.20)' };
+        return { bg: 'rgba(251,191,36,0.20)', text: '#FCD34D', label: 'MEDIUM' };
+      case 'low':
+        return { bg: 'rgba(99,102,241,0.20)', text: '#A5B4FC', label: 'LOW' };
       default:
-        return { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', border: 'rgba(100,116,139,0.25)' };
+        return { bg: 'rgba(148,163,184,0.15)', text: '#94A3B8', label: (ticket.priority || 'NORMAL').toUpperCase() };
     }
   };
 
-  const priorityColors = getPriorityColor();
-  
-  const slaTime = ticket.sla_due_at 
-    ? new Date(ticket.sla_due_at).getTime() - Date.now()
-    : null;
-  const slaHours = slaTime ? Math.floor(slaTime / (1000 * 60 * 60)) : 0;
-  const slaMinutes = slaTime ? Math.floor((slaTime % (1000 * 60 * 60)) / (1000 * 60)) : 0;
+  const pStyle = getPriorityStyle();
+
+  const statusLabel = ticket.status
+    ? ticket.status.replace(/_/g, ' ').toUpperCase()
+    : 'OPEN';
+
+  // Running time (time elapsed since creation)
+  const runningMs = ticket.created_at ? Date.now() - new Date(ticket.created_at).getTime() : 0;
+  const runDays = Math.floor(runningMs / 86400000);
+  const runHrs = Math.floor((runningMs % 86400000) / 3600000);
+  const runMins = Math.floor((runningMs % 3600000) / 60000);
+  const runningStr = runningMs > 0 ? `${runDays}d ${runHrs}h ${runMins}m` : null;
+
+  const formattedDate = ticket.created_at
+    ? new Date(ticket.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
 
   return (
-    <View style={[styles.ticketCard, { padding: 20 }]}>
-      {/* Header */}
-      <View style={{ marginBottom: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF', flex: 1, lineHeight: 22 }} numberOfLines={2}>
-            {ticket.title}
-          </Text>
-        </View>
-      </View>
-
-      {/* Priority & Status */}
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: priorityColors.bg, borderColor: priorityColors.border }}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: priorityColors.text }}>
-            {ticket.priority?.toUpperCase()}
-          </Text>
-        </View>
-        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, backgroundColor: 'rgba(139,92,246,0.15)', borderColor: 'rgba(139,92,246,0.25)' }}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>
-            ASSIGNED
-          </Text>
-        </View>
-      </View>
-
-      {/* Assignee */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#708F96', justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
-            {ticket.assignee?.full_name?.[0] || 'M'}
-          </Text>
-        </View>
-        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)' }}>
-          {ticket.assignee?.full_name || 'Unassigned'}
-        </Text>
-      </View>
-
-      {/* SLA */}
-      {slaTime && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-          <Ionicons name="time-outline" size={14} color="#EF4444" />
-          <Text style={{ fontSize: 12, fontWeight: '600', color: '#EF4444' }}>
-            {slaHours}h {slaMinutes}m
-          </Text>
-        </View>
-      )}
-
-      {/* Bottom Actions Row */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          {/* Ticket Score Pill */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(234,179,8,0.15)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(234,179,8,0.3)' }}>
-            <Ionicons name="star" size={12} color="#EAB308" />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: '#EAB308' }}>
-              {(ticket as any).gamification_points || (ticket as any).score || 5} pts
-            </Text>
+    <GeminiCardBorder>
+      <View style={styles.tcCard}>
+        {/* ── Row 1: Thumb | Title + Badges | Action icons ── */}
+        <View style={styles.tcRow1}>
+          {/* Thumbnail */}
+          <View style={styles.tcThumbBox}>
+            {ticket.photo_before_url ? (
+              <Image source={{ uri: ticket.photo_before_url }} style={styles.tcThumb} resizeMode="cover" />
+            ) : (
+              <View style={styles.tcThumbFallback}>
+                <Ionicons name="image" size={24} color="rgba(255,255,255,0.25)" />
+              </View>
+            )}
           </View>
-          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>{ticket.ticket_number}</Text>
+
+          {/* Title + badges */}
+          <View style={styles.tcMiddle}>
+            <Text style={styles.tcTitle} numberOfLines={2}>{ticket.title}</Text>
+            <View style={styles.tcBadgeRow}>
+              <View style={[styles.tcBadge, { backgroundColor: pStyle.bg }]}>
+                <Text style={[styles.tcBadgeText, { color: pStyle.text }]}>{pStyle.label}</Text>
+              </View>
+              <View style={[styles.tcBadge, styles.tcBadgeDark]}>
+                <Text style={styles.tcBadgeDarkText}>{statusLabel}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Two action icons — Share on top, Bookmark below */}
+          <View style={styles.tcIconCol}>
+            <TouchableOpacity style={styles.tcIconBtn} activeOpacity={0.7}>
+              <Ionicons name="share-outline" size={15} color="rgba(255,255,255,0.70)" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tcIconBtn} activeOpacity={0.7}>
+              <Ionicons name="bookmark-outline" size={15} color="rgba(255,255,255,0.50)" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Small Action Button */}
-        <TouchableOpacity 
-          style={{ backgroundColor: '#5A8A8F', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-          activeOpacity={0.8}
-        >
-          <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>View</Text>
-          <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-        </TouchableOpacity>
+        {/* ── Row 2: Raised By ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Raised By:</Text>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.creator?.full_name || 'Unknown'}
+          </Text>
+        </View>
+
+        {/* ── Row 3: Serving (Assigned To) ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Serving:</Text>
+          <View style={styles.tcMhPill}>
+            <Text style={styles.tcMhPillText}>MH</Text>
+          </View>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.assignee?.full_name || 'Unassigned'}
+          </Text>
+        </View>
+
+        {/* ── Divider ── */}
+        <View style={styles.tcDivider} />
+
+        {/* ── Footer: TKT ID + SLA + View button ── */}
+        <View style={styles.tcFooter}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.tcFooterTkt} numberOfLines={1}>
+              {ticket.ticket_number ? `${ticket.ticket_number} • ${formattedDate}` : formattedDate}
+            </Text>
+            {runningStr && (
+              <View style={styles.tcSlaRow}>
+                <Ionicons name="time-outline" size={11} color="#F87171" />
+                <Text style={[styles.tcSlaText, { color: '#F87171' }]}>
+                  {runningStr}
+                </Text>
+              </View>
+            )}
+          </View>
+          <TouchableOpacity style={styles.tcViewBtn} onPress={onView} activeOpacity={0.8}>
+            <Text style={styles.tcViewBtnText}>View</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    </GeminiCardBorder>
   );
 });
 
@@ -436,10 +556,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     property: { name: string } | null;
     tickets: Ticket[];
     isCheckedIn: boolean;
+    checklistStats?: { completed: number; total: number };
   }>(
     queryKeys.property.mstDashboardLovable(propertyId),
     async () => {
-      const [propRes, ticketRes, shiftRes] = await Promise.all([
+      const [propRes, ticketRes, shiftRes, checklistRes] = await Promise.all([
         serverApi.query<{ name: string }[]>({
           table: 'properties',
           action: 'select',
@@ -447,13 +568,9 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           filters: [{ op: 'eq', column: 'id', value: propertyId }],
           limit: 1,
         }),
-        serverApi.query<Ticket[]>({
-          table: 'tickets',
-          action: 'select',
-          select: '*',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'created_at', ascending: false }],
-          limit: 100,
+        serverApi.get<{ tickets: Ticket[]; total: number }>('/api/tickets', {
+          propertyId,
+          limit: '100',
         }),
         serverApi.query<{ is_checked_in: boolean }[]>({
           table: 'resolver_stats',
@@ -465,11 +582,30 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           ],
           limit: 1,
         }),
+        serverApi.get<{ templates: any[] }>('/api/checklist', { propertyId }),
       ]);
+
+      let totalChecklists = 0;
+      let completedChecklists = 0;
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      if (checklistRes.data?.templates) {
+        checklistRes.data.templates.forEach((t) => {
+          if (t.frequency?.toLowerCase() === 'daily') {
+            totalChecklists++;
+            const todaysCompletion = t.completions?.find((c: any) => c.completion_date === todayStr || c.created_at?.startsWith(todayStr));
+            if (todaysCompletion && todaysCompletion.status === 'completed') {
+              completedChecklists++;
+            }
+          }
+        });
+      }
+
       return {
         property: propRes.data?.[0] ?? null,
-        tickets: ticketRes.data ?? [],
+        tickets: (ticketRes.data as any)?.tickets ?? ticketRes.data ?? [],
         isCheckedIn: shiftRes.data?.[0]?.is_checked_in ?? false,
+        checklistStats: { completed: completedChecklists, total: totalChecklists },
       };
     },
     { staleTime: 1000 * 60 * 5 }
@@ -505,7 +641,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   }, [tickets, timeFilter, scopeFilter, user?.id]);
 
   const shuffledTickets = useMemo(() => {
-    const next = [...filteredTickets];
+    // Only show open tickets on shuffled cards
+    const openTickets = filteredTickets.filter(t => 
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
+    );
+    const next = [...openTickets];
     for (let i = next.length - 1; i > 0; i -= 1) {
       const swapIndex = Math.floor(Math.random() * (i + 1));
       [next[i], next[swapIndex]] = [next[swapIndex], next[i]];
@@ -585,10 +725,10 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   const stats = useMemo(() => {
     const total = filteredTickets.length;
     const open = filteredTickets.filter((t) =>
-      ['open', 'in_progress', 'assigned'].includes(t.status)
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
     ).length;
     const closed = filteredTickets.filter((t) =>
-      ['resolved', 'closed', 'pending_validation'].includes(t.status)
+      ['closed', 'completed', 'resolved', 'pending_validation'].includes(t.status?.toLowerCase())
     ).length;
     return { total, open, closed };
   }, [filteredTickets]);
@@ -714,9 +854,22 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       </GlassTile>
 
       <View style={{ marginTop: 24 }}>
-        <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', marginBottom: 12, letterSpacing: 1 }}>RECENT TICKETS</Text>
-        {shuffledTickets.length > 0 ? (
-          <TicketStack tickets={shuffledTickets.slice(0, 5)} />
+        <View style={[styles.sectionHeader, { marginTop: 0 }]}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', letterSpacing: 1 }}>RECENT TICKETS</Text>
+          <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
+            <Text style={{ fontSize: 12, color: '#FFFFFF' }}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        {isLoading || isFetching ? (
+          <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+            <ActivityIndicator color="rgba(255,255,255,0.6)" />
+          </View>
+        ) : shuffledTickets.length > 0 ? (
+          <TicketStack
+            tickets={shuffledTickets.slice(0, 5)}
+            propertyName={property?.name}
+            onViewTicket={(t) => router.push({ pathname: '/property/[propertyId]/tickets/[id]', params: { propertyId, id: t.id } } as any)}
+          />
         ) : (
           <View style={styles.ticketStackEmpty}>
             <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
@@ -724,7 +877,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         )}
       </View>
 
-      <ChecklistProgressCard completed={stats.closed} total={stats.total} delay={280} />
+      <ChecklistProgressCard completed={data?.checklistStats?.completed ?? 0} total={data?.checklistStats?.total ?? 0} delay={280} />
     </>
   );
 
@@ -1267,6 +1420,7 @@ const styles = StyleSheet.create({
   // Gamification strip
   gamifyCard: {
     marginTop: 20,
+    marginBottom: 20,
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
@@ -1500,7 +1654,177 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Ticket card (for stack)
+  // ─── Ticket Card (screenshot-style: dark teal) ────────────────────────────
+  tcStackSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: CARD_H,
+  },
+  // Card shell — bg handled by GeminiCardBorder.inner (#1B3040)
+  tcCard: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    padding: 14,
+    gap: 6,
+  },
+  // Row 1: thumb | title+badges | icons
+  tcRow1: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  tcThumbBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexShrink: 0,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcThumb: {
+    width: 64,
+    height: 64,
+  },
+  tcThumbFallback: {
+    width: 64,
+    height: 64,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcMiddle: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  tcTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 18,
+  },
+  tcBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  tcBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  tcBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  tcBadgeDark: {
+    backgroundColor: 'rgba(30,41,59,0.80)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  tcBadgeDarkText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 0.3,
+  },
+  // Two vertically-stacked icon buttons — top right
+  tcIconCol: {
+    gap: 6,
+    flexShrink: 0,
+  },
+  tcIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Meta rows (Raised By / Serving)
+  tcMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tcMetaLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    fontWeight: '500',
+    width: 62,
+  },
+  tcMetaValue: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    flex: 1,
+  },
+  // "MH" pill
+  tcMhPill: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  tcMhPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 0.5,
+  },
+  // Thin divider
+  tcDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  // Footer
+  tcFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tcFooterTkt: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.40)',
+    fontWeight: '500',
+  },
+  tcSlaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  tcSlaText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  tcViewBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexShrink: 0,
+  },
+  tcViewBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  // Legacy (unused but kept to avoid TS errors)
+  tcTopRow: { flexDirection: 'row' },
+  tcThumbPlaceholder: {},
+  tcContent: { flex: 1 },
+  tcActionCol: { gap: 6 },
+  tcMetaSection: { gap: 4 },
+  tcServingPill: { backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  tcServingPillText: { fontSize: 9, fontWeight: '800', color: '#FFFFFF' },
+  tcFooterId: { fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 },
+
+  // Legacy (kept for safety)
   ticketCard: {
     borderRadius: 24,
     borderWidth: 1,

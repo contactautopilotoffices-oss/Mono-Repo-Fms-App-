@@ -58,7 +58,7 @@ export default function AnimatedLogo({ size = 'md' }: AnimatedLogoProps) {
       <Animated.View style={[styles.logoWrap, containerStyle]}>
         <Image
           source={LOGO_SOURCE}
-          style={[styles.logo, { width: w, height: w * (60 / 140) }]}
+          style={[styles.logo, { width: w, height: w * (60 / 140), tintColor: '#FFFFFF' }]}
           resizeMode="contain"
         />
       </Animated.View>

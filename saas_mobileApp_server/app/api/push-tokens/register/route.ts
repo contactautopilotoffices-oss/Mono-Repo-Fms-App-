@@ -31,7 +31,6 @@ export async function POST(request: NextRequest) {
           user_id: userId,
           token,
           property_id: propertyId || null,
-          organization_id: organizationId || null,
           device_info: deviceInfo || null,
           browser: 'fcm-mobile',
           is_active: true,

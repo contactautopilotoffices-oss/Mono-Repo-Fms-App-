@@ -24,7 +24,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SkeletonLoader from './lovable/SkeletonLoader';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 
 import { useAuth } from '@/hooks/useAuth';
@@ -36,13 +36,10 @@ import DetailModal, { type TileDetail } from '@/components/dashboard/DetailModal
 import NeedsAttentionModal from '@/components/dashboard/NeedsAttentionModal';
 import NotificationModal from '@/components/notifications/NotificationModal';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
-import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
-import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
-import TicketStack, { type Ticket } from '@/components/shared/TicketStack';
 import { SPACING, STATUS_COLORS } from '@/constants/designSystem';
 import { GlassTile, MiniBarChart, AttentionCard } from './DashboardComponents';
 import { useDashboardQuery, invalidateDashboard } from '@/hooks/useDashboardQuery';
@@ -398,32 +395,9 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
             </>
           )}
 
-          {/* Swipeable Ticket Stack */}
-          {tickets.length > 0 && (
-            <Animated.View entering={FadeInUp.delay(160).duration(500)} style={{ marginBottom: 16, marginHorizontal: 16 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>📋 ACTIVE TICKETS</Text>
-                <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/tickets`)}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>VIEW ALL</Text>
-                </TouchableOpacity>
-              </View>
-              <TicketStack
-                tickets={tickets.slice(0, 5) as Ticket[]}
-                onTicketPress={(ticket) => router.push(`/property/${propertyId}/tickets/${ticket.id}`)}
-                maxVisible={3}
-                height={320}
-                emptyMessage="No active tickets"
-              />
-            </Animated.View>
-          )}
-
           {/* Checklist */}
           <ChecklistProgressCard completed={sopCount} total={sopTotal} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
 
-          {/* PPM */}
-          <PPMProgressCard propertyId={propertyId} organizationId={orgId} done={ppm.done} total={ppm.total} pending={ppm.pending} overdue={ppm.overdue} postponed={ppm.postponed} delay={240} onPress={() => router.push(`/property/${propertyId}/ppm`)} />
-
-          <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
 
           {/* Energy */}
           <GlassTile label="Energy Usage" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
@@ -554,10 +528,10 @@ const styles = StyleSheet.create({
   tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
   tileSuffix: { fontSize: 16, color: 'rgba(255,255,255,0.3)', fontWeight: '600' },
   tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
-  timeToggleRow: { flexDirection: 'row', gap: 6, marginBottom: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: 4, width: '100%' },
-  timeToggleBtn: { flex: 1, paddingVertical: 6, borderRadius: 8, alignItems: 'center' },
+  timeToggleRow: { flexDirection: 'row', gap: 4, marginBottom: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 3, width: '100%' },
+  timeToggleBtn: { flex: 1, paddingVertical: 3, borderRadius: 6, alignItems: 'center' },
   timeToggleBtnActive: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  timeToggleText: { fontSize: 11, color: 'rgba(255,255,255,0.4)' },
+  timeToggleText: { fontSize: 10, color: 'rgba(255,255,255,0.4)' },
   timeToggleTextActive: { color: '#FFF', fontWeight: '700' },
   trendChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(31,194,110,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   trendChipText: { color: '#1FC26E', fontSize: 12, fontWeight: '700' },
