@@ -5,10 +5,6 @@ import { dieselApi } from './dieselApi';
 // Re-export types and API for convenience
 export { dieselApi };
 export type {
-  Generator,
-  DieselReading,
-  DGTariff,
-  ReadingPayload,
   DieselDashboardData,
   PrefetchResult,
 } from './dieselApi';

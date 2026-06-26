@@ -24,6 +24,7 @@ import { dieselService } from "@/services/dieselService";
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import GeneratorConfigModal from "@/components/diesel/GeneratorConfigModal";
 import DGTariffModal from "@/components/diesel/DGTariffModal";
+import { DieselLoggerCard } from "@/components/diesel/DieselLoggerCard";
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import { LinearGradient } from "expo-linear-gradient";
 import { useDieselPrefetch } from '@/hooks/useDieselPrefetch';
@@ -1267,6 +1268,29 @@ export default function DieselScreen() {
   >(undefined);
   const [showTariffModal, setShowTariffModal] = useState(false);
 
+  const handleDeleteGenerator = async (id: string) => {
+    Alert.alert(
+      "Delete Generator",
+      "Are you sure you want to delete this DG? This will hide it from the list. Past readings may still be kept.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const res = await dieselService.deleteGenerator(id);
+              if (!res.success) throw new Error(String(res.error || "Failed to delete DG"));
+              refetch();
+            } catch (e: any) {
+              Alert.alert("Error", e.message || "Failed to delete");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleDeleteReading = async (id: string) => {
     Alert.alert(
       "Delete Reading",
@@ -1327,16 +1351,28 @@ export default function DieselScreen() {
     }
   };
 
-  // FAST: Use optimized parallel fetch from dieselService
   const fetchData = useCallback(async () => {
-    if (!propertyId) return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };
+    if (!propertyId) return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing>, tariffs: [] as any[] };
     try {
       const result = await dieselService.fetchAll(propertyId);
       if (!result.success) throw new Error(String(result.error ?? 'Failed to fetch diesel data'));
-      return result.data;
+      
+      const generators = result.data.generators || [];
+      const tariffsRes = await Promise.all(
+        generators.map(g => dieselService.fetchTariffs(g.id))
+      );
+      
+      let allTariffs: any[] = [];
+      tariffsRes.forEach(tRes => {
+        if (tRes.success && tRes.data) {
+          allTariffs = allTariffs.concat(tRes.data);
+        }
+      });
+
+      return { ...result.data, tariffs: allTariffs };
     } catch (e) {
       console.error("Diesel fetch error:", e);
-      return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing> };
+      return { generators: [] as Generator[], readings: [] as DieselReading[], lastClosings: {} as Record<string, LastClosing>, tariffs: [] as any[] };
     }
   }, [propertyId]);
 
@@ -1349,11 +1385,22 @@ export default function DieselScreen() {
   const generators = data?.generators ?? [];
   const readings = data?.readings ?? [];
   const lastClosings = data?.lastClosings ?? {};
+  const tariffs = data?.tariffs ?? [];
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     refetch().finally(() => setIsRefreshing(false));
   }, [refetch]);
+
+  const handleSaveReading = async (payload: any) => {
+    try {
+      const res = await dieselService.submitReading(payload);
+      if (!res.success) throw new Error(String(res.error || 'Failed to save reading'));
+      refetch();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to save reading");
+    }
+  };
 
   const handleOpenSheet = () => {
     setShowSheet(true);
@@ -1634,21 +1681,14 @@ export default function DieselScreen() {
           }
           renderItem={({ item: gen }) => (
             <View style={{ marginBottom: 12 }}>
-              <GeneratorCard
+              <DieselLoggerCard
                 generator={gen}
-                lastClosing={lastClosings[gen.id] ?? null}
-                latestReading={latestGenReadings[gen.id] ?? null}
-                periodHours={periodGenStats[gen.id]?.hours ?? 0}
-                periodConsumption={periodGenStats[gen.id]?.consumption ?? 0}
+                readings={readings}
+                tariffs={tariffs?.filter((t: any) => t.generator_id === gen.id) || []}
+                onSaveReading={handleSaveReading}
+                onDelete={canManage ? handleDeleteGenerator : undefined}
                 colors={colors}
-                onPress={
-                  canManage
-                    ? () => {
-                        setSelectedGenForLogging(gen.id);
-                        setShowSheet(true);
-                      }
-                    : undefined
-                }
+                isDark={isDark}
                 onEdit={
                   canManage
                     ? () => {
@@ -1813,20 +1853,7 @@ export default function DieselScreen() {
         propertyId={propertyId!}
       />
 
-      {showSheet && (
-        <LogReadingModal
-          visible={showSheet}
-          onClose={() => {
-            setShowSheet(false);
-            setSelectedGenForLogging(null);
-          }}
-          generators={generators}
-          propertyId={propertyId!}
-          colors={colors}
-          onSuccess={fetchData}
-          initialGenId={selectedGenForLogging}
-        />
-      )}
+
 
       <GeneratorConfigModal
         visible={showGenConfigModal}

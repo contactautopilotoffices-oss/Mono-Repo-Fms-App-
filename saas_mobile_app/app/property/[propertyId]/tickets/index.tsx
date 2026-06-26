@@ -34,10 +34,14 @@ import { queryKeys } from '@/utils/queryKeys';
 
 
 
-type StatusFilter = 'all' | 'mine' | 'open' | 'in_progress' | 'resolved' | 'closed';
+type StatusFilter = 'all' | 'mine' | 'open' | 'closed';
 type DateRangeFilter = 'all' | 'today' | 'week' | 'month';
 type SortBy = 'newest' | 'oldest' | 'priority_high' | 'priority_low';
 type MaterialFilter = 'all' | 'with_material' | 'without_material';
+type TicketTypeFilter = 'all' | 'has_material' | 'internal' | 'client_raised';
+type PriorityFilter = 'all' | 'critical' | 'urgent' | 'high' | 'medium' | 'low';
+type InternalFilter = 'all' | 'internal_only' | 'external_only';
+type FloorFilter = 'all' | 'unspecified' | string;
 
 const CATEGORIES = [
   { value: 'all', label: 'All Categories' },
@@ -61,8 +65,6 @@ const FILTER_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'all',                label: 'All' },
   { key: 'mine',               label: 'My Tickets' },
   { key: 'open',               label: 'Opened' },
-  { key: 'in_progress',        label: 'In Progress' },
-  { key: 'resolved',           label: 'Resolved' },
   { key: 'closed',             label: 'Closed' },
 ];
 
@@ -77,6 +79,39 @@ const MATERIAL_FILTERS: { key: MaterialFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'with_material', label: 'Has Material' },
   { key: 'without_material', label: 'No Material' },
+];
+
+const TYPE_FILTERS: { key: TicketTypeFilter; label: string }[] = [
+  { key: 'all', label: 'All Types' },
+  { key: 'has_material', label: 'Has Material' },
+  { key: 'internal', label: 'Internal' },
+  { key: 'client_raised', label: 'Client Raised' },
+];
+
+const PRIORITY_FILTERS: { key: PriorityFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'critical', label: 'Critical' },
+  { key: 'urgent', label: 'Urgent' },
+  { key: 'high', label: 'High' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'low', label: 'Low' },
+];
+
+const INTERNAL_FILTERS: { key: InternalFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'internal_only', label: 'Internal' },
+  { key: 'external_only', label: 'External' },
+];
+
+const FLOOR_FILTERS: { key: FloorFilter; label: string }[] = [
+  { key: 'all', label: 'All Floors' },
+  { key: 'unspecified', label: 'Not Set' },
+  { key: '0', label: 'Ground Floor' },
+  { key: '1', label: 'Floor 1' },
+  { key: '2', label: 'Floor 2' },
+  { key: '3', label: 'Floor 3' },
+  { key: '4', label: 'Floor 4' },
+  { key: '5', label: 'Floor 5' },
 ];
 
 interface TicketEscalationLog {
@@ -131,6 +166,8 @@ export default function TicketsScreen() {
   const [raisedByFilter, setRaisedByFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [materialFilter, setMaterialFilter] = useState<MaterialFilter>('all');
+  const [ticketTypeFilter, setTicketTypeFilter] = useState<TicketTypeFilter>('all');
+  const [showTypeFilter, setShowTypeFilter] = useState(false);
   const [allUsers, setAllUsers] = useState<{ id: string; full_name: string }[]>([]);
   const insets = useSafeAreaInsets();
   const orgId = membership?.org_id ?? '';
@@ -163,11 +200,13 @@ export default function TicketsScreen() {
       // we can fetch open, assigned, in_progress, etc.
       queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'needs_approval'] });
     } else if (statusFilter === 'mine') {
-      queryFilters.push({ op: 'eq', column: 'assigned_to', value: authUser?.id ?? '' });
+      if (authUser?.id) {
+        queryFilters.push({ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` });
+      }
     } else if (statusFilter === 'open') {
-      queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned'] });
-    } else if (statusFilter === 'in_progress') {
-      queryFilters.push({ op: 'in', column: 'status', values: ['in_progress'] });
+      queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] });
+    } else if (statusFilter === 'closed') {
+      queryFilters.push({ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] });
     } else if (statusFilter !== 'all') {
       queryFilters.push({ op: 'eq', column: 'status', value: statusFilter });
     }
@@ -231,7 +270,7 @@ export default function TicketsScreen() {
   }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant]);
 
 const defaultCounts: Record<StatusFilter, number> = {
-  all: 0, mine: 0, open: 0, in_progress: 0, resolved: 0, closed: 0,
+  all: 0, mine: 0, open: 0, closed: 0,
 };
 
 const getStatusCounts = useCallback(async () => {
@@ -282,11 +321,11 @@ const getStatusCounts = useCallback(async () => {
     };
 
     counts.all = await fetchCount([]);
-    counts.mine = await fetchCount([{ op: 'eq', column: 'assigned_to', value: authUser?.id ?? '' }]);
-    counts.open = await fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned'] }]);
-    counts.in_progress = await fetchCount([{ op: 'in', column: 'status', values: ['in_progress'] }]);
-    counts.resolved = await fetchCount([{ op: 'eq', column: 'status', value: 'resolved' }]);
-    counts.closed = await fetchCount([{ op: 'in', column: 'status', values: ['closed', 'resolved', 'pending_validation'] }]);
+    if (authUser?.id) {
+      counts.mine = await fetchCount([{ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` }]);
+    }
+    counts.open = await fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] }]);
+    counts.closed = await fetchCount([{ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] }]);
 
     return counts;
   } catch (err) {
@@ -353,7 +392,20 @@ const displayedTickets = useMemo(() => {
         return false;
       });
     }
-    // Material filter
+    // Type filter
+    if (ticketTypeFilter === 'has_material') {
+      source = source.filter((t: Ticket) => (t.material_requests?.length ?? 0) > 0);
+    } else if (ticketTypeFilter === 'internal') {
+      source = source.filter((t: Ticket) => t.internal === true);
+    } else if (ticketTypeFilter === 'client_raised') {
+      source = source.filter((t: Ticket) => {
+        const creatorRoles = t.creator?.property_memberships;
+        const isTenantCreator = creatorRoles?.some(m => m.role === 'tenant') ?? false;
+        return t.internal === false && isTenantCreator;
+      });
+    }
+
+    // Legacy material filter compatibility just in case
     if (materialFilter === 'with_material') {
       source = source.filter((t: Ticket) => (t.material_requests?.length ?? 0) > 0);
     } else if (materialFilter === 'without_material') {
@@ -366,7 +418,7 @@ const displayedTickets = useMemo(() => {
       (t.ticket_number ?? '').toLowerCase().includes(q) ||
       (t.description ?? '').toLowerCase().includes(q)
     );
-  }, [data, isNeedsAttentionMode, searchQuery, materialFilter]);
+  }, [data, isNeedsAttentionMode, searchQuery, materialFilter, ticketTypeFilter]);
 const hasMore = data?.hasMore ?? false;
 const statusCounts = data?.statusCounts ?? defaultCounts;
 
@@ -563,7 +615,7 @@ const onRefresh = () => {
           )}
         </SafeBlurView>
 
-        {/* Date Range Filter */}
+        {/* Date & Type Range Filters */}
         <View style={[styles.dateFilterRow, { borderBottomColor: borderColor }]}>
           <TouchableOpacity
             style={styles.dateFilterBtn}
@@ -576,6 +628,22 @@ const onRefresh = () => {
             </Text>
             <Ionicons
               name={showDateFilter ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={textSecondary}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.dateFilterBtn}
+            onPress={() => setShowTypeFilter(!showTypeFilter)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="filter-outline" size={15} color={textSecondary} />
+            <Text style={[styles.dateFilterLabel, { color: textSecondary }]}>
+              {TYPE_FILTERS.find(d => d.key === ticketTypeFilter)?.label ?? 'All Types'}
+            </Text>
+            <Ionicons
+              name={showTypeFilter ? 'chevron-up' : 'chevron-down'}
               size={14}
               color={textSecondary}
             />
@@ -607,6 +675,55 @@ const onRefresh = () => {
             ))}
           </View>
         )}
+
+      {/* Type Filter Modal */}
+      <Modal
+        visible={showTypeFilter}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTypeFilter(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setShowTypeFilter(false)}
+        >
+          <View style={[styles.modalContent, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: isDark ? '#F9FAFB' : '#111827' }]}>Filter Tickets By Type</Text>
+              <TouchableOpacity onPress={() => setShowTypeFilter(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={20} color={isDark ? '#9CA3AF' : '#6B7280'} />
+              </TouchableOpacity>
+            </View>
+
+            {TYPE_FILTERS.map(type => (
+              <TouchableOpacity
+                key={type.key}
+                style={[
+                  styles.filterOption,
+                  ticketTypeFilter === type.key && { backgroundColor: isDark ? 'rgba(59,130,246,0.1)' : '#EFF6FF' }
+                ]}
+                onPress={() => {
+                  setTicketTypeFilter(type.key);
+                  setShowTypeFilter(false);
+                  setLimit(PAGE_SIZE);
+                }}
+              >
+                <Text style={[
+                  styles.filterOptionText,
+                  { color: isDark ? '#F3F4F6' : '#374151' },
+                  ticketTypeFilter === type.key && { color: isDark ? '#60A5FA' : '#2563EB', fontFamily: 'Urbanist-Bold' }
+                ]}>
+                  {type.label}
+                </Text>
+                {ticketTypeFilter === type.key && (
+                  <Ionicons name="checkmark" size={20} color={isDark ? '#60A5FA' : '#2563EB'} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
         {/* Ticket List */}
         {isLoading ? (
@@ -1010,6 +1127,7 @@ const styles = StyleSheet.create({
   dateFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     paddingHorizontal: 20,
     paddingVertical: 12,
   },

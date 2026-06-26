@@ -21,12 +21,28 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
 
-    const { error: statsError } = await admin
+    const { data: existingStats, error: fetchError } = await admin
       .from("resolver_stats")
-      .upsert(
-        { property_id: propertyId, user_id: userId, is_checked_in: isCheckedIn },
-        { onConflict: "user_id,property_id" }
-      );
+      .select("id")
+      .eq("user_id", userId)
+      .eq("property_id", propertyId)
+      .limit(1);
+
+    if (fetchError) throw fetchError;
+
+    let statsError = null;
+    if (existingStats && existingStats.length > 0) {
+      const { error } = await admin
+        .from("resolver_stats")
+        .update({ is_checked_in: isCheckedIn })
+        .eq("id", existingStats[0].id);
+      statsError = error;
+    } else {
+      const { error } = await admin
+        .from("resolver_stats")
+        .insert({ property_id: propertyId, user_id: userId, is_checked_in: isCheckedIn });
+      statsError = error;
+    }
 
     if (statsError) throw statsError;
 

@@ -108,21 +108,21 @@ export async function GET(request: NextRequest) {
       // Open Tickets Count (All)
       admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
       // Closed Tickets Count (All)
-      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).in('status', ['resolved', 'closed']),
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).in('status', ['completed', 'resolved', 'closed', 'pending_validation']),
       
       // Total Tickets Count (Month)
       admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
       // Open Tickets Count (Month)
       admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
       // Closed Tickets Count (Month)
-      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).in('status', ['resolved', 'closed']),
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).in('status', ['completed', 'resolved', 'closed', 'pending_validation']),
 
       // Total Tickets Count (Today)
       admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr),
       // Open Tickets Count (Today)
       admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
       // Closed Tickets Count (Today)
-      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr).in('status', ['resolved', 'closed']),
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr).in('status', ['completed', 'resolved', 'closed', 'pending_validation']),
 
       // Tenant Users
       admin.from('property_memberships').select('user_id').in('property_id', propIds).in('role', ['tenant', 'super_tenant']),
