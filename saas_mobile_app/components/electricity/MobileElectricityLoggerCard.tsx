@@ -86,6 +86,10 @@ export function MobileElectricityLoggerCard({
     }
   }, [activeMultiplier]);
 
+  const getLocalDateStr = (d: Date) => {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   const { opening } = useMemo(() => {
     const meterReadings = readings
       .filter((r) => r.meter_id === meter.id)
@@ -96,12 +100,37 @@ export function MobileElectricityLoggerCard({
         return (a.created_at || "") < (b.created_at || "") ? 1 : -1;
       });
 
-    const readingDateStr = readingDate.toISOString().split("T")[0];
+    const readingDateStr = getLocalDateStr(readingDate);
     const before = meterReadings.find((r) => (r.reading_date || "") < readingDateStr);
+    const current = meterReadings.find((r) => (r.reading_date || "") === readingDateStr);
 
-    const openVal = before?.closing_reading ?? meter.last_reading ?? 0;
+    let openVal = 0;
+    if (before) {
+      openVal = before.closing_reading;
+    } else if (current && current.opening_reading != null) {
+      // Editing an existing reading that has no prior reading
+      openVal = current.opening_reading;
+    } else if (meterReadings.length === 0) {
+      // Absolutely no readings exist, safe to use last_reading (which acts as initial reading)
+      openVal = meter.last_reading ?? 0;
+    } else {
+      // Backdating before any existing readings
+      openVal = 0;
+    }
+    
     return { opening: openVal };
   }, [meter.id, meter.last_reading, readings, readingDate]);
+
+  // Pre-fill closing reading if selecting a date that already has a reading
+  useEffect(() => {
+    const readingDateStr = getLocalDateStr(readingDate);
+    const existing = readings.find(r => r.meter_id === meter.id && (r.reading_date || "") === readingDateStr);
+    if (existing) {
+      setClosingReading(String(existing.closing_reading));
+    } else {
+      setClosingReading('');
+    }
+  }, [readingDate, meter.id]); // intentionally omitting `readings` to avoid overwriting active typing during background refetches
 
   const numericClosing = closingReading === '' ? 0 : parseFloat(closingReading);
   const hasValidReading = !isNaN(numericClosing) && closingReading !== '' && numericClosing > opening;
@@ -112,11 +141,16 @@ export function MobileElectricityLoggerCard({
     try {
       await onSaveReading({
         meter_id: meter.id,
-        reading_date: readingDate.toISOString().split('T')[0],
+        reading_date: getLocalDateStr(readingDate),
         opening_reading: opening,
         closing_reading: numericClosing,
       });
       setClosingReading('');
+      
+      // Auto-advance date by 1 day for consecutive logging
+      const nextDate = new Date(readingDate);
+      nextDate.setDate(nextDate.getDate() + 1);
+      setReadingDate(nextDate);
     } catch (e) {
       console.error(e);
     } finally {

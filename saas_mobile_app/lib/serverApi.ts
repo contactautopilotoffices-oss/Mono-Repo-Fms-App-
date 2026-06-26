@@ -424,73 +424,65 @@ export const serverApi = {
   },
 
   // ── Storage (1 caller each) ───────────────────────────────────────────────
-  async upload(
+  async uploadFile(
     bucket: string,
     path: string,
     file: File | Blob | ArrayBuffer | { uri: string; name?: string; type?: string },
     contentType?: string,
   ): Promise<ServerApiResponse<{ path: string }>> {
     try {
-      let payload: { bucket: string; path: string; contentType?: string; file: unknown };
+      const token = await getSupabaseToken();
+      const formData = new FormData();
+      formData.append('bucket', bucket);
+      formData.append('path', path);
 
-      if (file instanceof ArrayBuffer || file instanceof Blob || file instanceof File) {
-        const base64 = await fileToBase64(file);
-        payload = {
-          bucket,
-          path,
-          contentType,
-          file: {
-            base64,
-            name: (file as File).name ?? path.split('/').pop() ?? 'file',
-            type: contentType ?? (file as File).type ?? 'application/octet-stream',
-          },
-        };
-      } else {
-        // URI object — pass as-is
-        payload = {
-          bucket,
-          path,
-          contentType,
-          file,
-        };
+      if (file instanceof File || file instanceof Blob) {
+        formData.append('file', file, (file as File).name || 'upload');
+      } else if (file instanceof ArrayBuffer) {
+        // Only possible in web, wrap in Blob
+        const blob = new Blob([file], { type: contentType || 'application/octet-stream' });
+        formData.append('file', blob, 'upload');
+      } else if (file && 'uri' in file) {
+        // React Native uri object
+        formData.append('file', {
+          uri: file.uri,
+          name: file.name || path.split('/').pop() || 'upload',
+          type: file.type || contentType || 'application/octet-stream',
+        } as any);
       }
 
-      const result = (await serverFetch('/api/storage/upload', payload)) as ServerApiResponse<{ path: string }>;
-      return result;
+      const headers: Record<string, string> = {
+        Accept: 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch(`${MOBILE_SERVER_URL}/api/upload`, {
+        method: 'POST',
+        body: formData,
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(errorText || response.statusText);
+      }
+
+      const json = await response.json();
+      if (json.error) throw new Error(json.error);
+      
+      return { data: { path: json.data?.path || json.path }, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
       return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
     }
   },
 
   async getPublicUrl(bucket: string, path: string): Promise<ServerApiResponse<{ publicUrl: string }>> {
     try {
-      const token = await getSupabaseToken();
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(
-        `${MOBILE_SERVER_URL}/api/storage/url?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}`,
-        { method: 'GET', headers }
-      );
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new ServerApiError(
-          `Server error ${response.status}: ${text || response.statusText}`,
-          response.status
-        );
-      }
-
-      return (await response.json()) as ServerApiResponse<{ publicUrl: string }>;
+      const { createClient } = require('@/utils/supabase/client');
+      const supabase = createClient();
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      return { data: { publicUrl: data.publicUrl }, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
       return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
     }
   },

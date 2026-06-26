@@ -1139,7 +1139,7 @@ export default function TicketDetailScreen() {
                 {ticket.status !== 'closed' && (
                   <TouchableOpacity
                     style={[styles.primaryBlockBtn, { backgroundColor: isDark ? '#2D3748' : '#F1F5F9', flex: 1, shadowOpacity: 0 }]}
-                    onPress={() => { fetchMSTs(); setShowAssigneePicker(true); }}
+                    onPress={() => setShowAssigneePicker(true)}
                   >
                     <Ionicons name="swap-horizontal" size={18} color={textPrimary} />
                     <Text style={[styles.primaryBlockBtnText, { color: textPrimary }]}>Reassign</Text>
@@ -1149,7 +1149,7 @@ export default function TicketDetailScreen() {
                 {ticket.status === 'closed' && (
                   <TouchableOpacity
                     style={[styles.primaryBlockBtn, { backgroundColor: '#F59E0B', flex: 1 }]}
-                    onPress={() => { fetchMSTs(); setShowAssigneePicker(true); }}
+                    onPress={() => setShowAssigneePicker(true)}
                     disabled={updatingStatus}
                   >
                     {updatingStatus ? (
@@ -1594,92 +1594,98 @@ export default function TicketDetailScreen() {
             {/* isUploading global overlay removed for optimistic media updates */}
             <View style={styles.mediaGrid}>
               {/* Before */}
-              <TouchableOpacity
-                style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
-                onPress={() => {
-                  const hasMedia = Boolean(ticket.photo_before_url || ticket.video_before_url || optimisticMedia.before);
-                  if (hasMedia) {
-                    setSelectedMediaSlot('before');
-                    setShowMediaActions(true);
-                  } else {
-                    setMediaUploadType('before');
-                    setShowMediaModal(true);
-                  }
-                }}
-              >
-                {optimisticMedia.before ? (
-                  optimisticMedia.before.type === 'image' ? (
-                    <Image source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before Photo</Text>
+                <TouchableOpacity
+                  style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
+                  onPress={() => {
+                    const hasMedia = Boolean(ticket.photo_before_url || ticket.video_before_url || optimisticMedia.before);
+                    if (hasMedia) {
+                      setSelectedMediaSlot('before');
+                      setShowMediaActions(true);
+                    } else {
+                      setMediaUploadType('before');
+                      setShowMediaModal(true);
+                    }
+                  }}
+                >
+                  {optimisticMedia.before ? (
+                    optimisticMedia.before.type === 'image' ? (
+                      <Image source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} />
+                    ) : (
+                      <Video source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                    )
+                  ) : ticket.photo_before_url ? (
+                    <Image source={{ uri: ticket.photo_before_url }} style={styles.mediaImage} />
+                  ) : ticket.video_before_url ? (
+                    <Video
+                      source={{ uri: ticket.video_before_url }}
+                      style={styles.mediaImage}
+                      resizeMode={ResizeMode.COVER}
+                      isMuted
+                      shouldPlay
+                      isLooping
+                    />
                   ) : (
-                    <Video source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
-                  )
-                ) : ticket.photo_before_url ? (
-                  <Image source={{ uri: ticket.photo_before_url }} style={styles.mediaImage} />
-                ) : ticket.video_before_url ? (
-                  <Video
-                    source={{ uri: ticket.video_before_url }}
-                    style={styles.mediaImage}
-                    resizeMode={ResizeMode.COVER}
-                    isMuted
-                    shouldPlay
-                    isLooping
-                  />
-                ) : (
-                  <View style={styles.mediaPlaceholder}>
-                    <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
-                    <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>Before</Text>
-                  </View>
-                )}
-                {optimisticUploading.before && (
-                  <View style={styles.optimisticOverlay}>
-                    <ActivityIndicator size="small" color="#FFF" />
-                  </View>
-                )}
-              </TouchableOpacity>
+                    <View style={styles.mediaPlaceholder}>
+                      <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
+                      <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>Add Before</Text>
+                    </View>
+                  )}
+                  {optimisticUploading.before && (
+                    <View style={styles.optimisticOverlay}>
+                      <ActivityIndicator size="small" color="#FFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
 
               {/* After */}
-              <TouchableOpacity
-                style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
-                onPress={() => {
-                  const hasMedia = Boolean(ticket.photo_after_url || ticket.video_after_url || optimisticMedia.after);
-                  if (hasMedia) {
-                    setSelectedMediaSlot('after');
-                    setShowMediaActions(true);
-                  } else {
-                    setMediaUploadType('after');
-                    setShowMediaModal(true);
-                  }
-                }}
-              >
-                {optimisticMedia.after ? (
-                  optimisticMedia.after.type === 'image' ? (
-                    <Image source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>After Photo</Text>
+                <TouchableOpacity
+                  style={[styles.mediaSlot, { backgroundColor: isDark ? '#1E2633' : '#F8FAFC', borderColor }]}
+                  onPress={() => {
+                    const hasMedia = Boolean(ticket.photo_after_url || ticket.video_after_url || optimisticMedia.after);
+                    if (hasMedia) {
+                      setSelectedMediaSlot('after');
+                      setShowMediaActions(true);
+                    } else {
+                      setMediaUploadType('after');
+                      setShowMediaModal(true);
+                    }
+                  }}
+                >
+                  {optimisticMedia.after ? (
+                    optimisticMedia.after.type === 'image' ? (
+                      <Image source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} />
+                    ) : (
+                      <Video source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                    )
+                  ) : ticket.photo_after_url ? (
+                    <Image source={{ uri: ticket.photo_after_url }} style={styles.mediaImage} />
+                  ) : ticket.video_after_url ? (
+                    <Video
+                      source={{ uri: ticket.video_after_url }}
+                      style={styles.mediaImage}
+                      resizeMode={ResizeMode.COVER}
+                      isMuted
+                      shouldPlay
+                      isLooping
+                    />
                   ) : (
-                    <Video source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
-                  )
-                ) : ticket.photo_after_url ? (
-                  <Image source={{ uri: ticket.photo_after_url }} style={styles.mediaImage} />
-                ) : ticket.video_after_url ? (
-                  <Video
-                    source={{ uri: ticket.video_after_url }}
-                    style={styles.mediaImage}
-                    resizeMode={ResizeMode.COVER}
-                    isMuted
-                    shouldPlay
-                    isLooping
-                  />
-                ) : (
-                  <View style={styles.mediaPlaceholder}>
-                    <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
-                    <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>After</Text>
-                  </View>
-                )}
-                {optimisticUploading.after && (
-                  <View style={styles.optimisticOverlay}>
-                    <ActivityIndicator size="small" color="#FFF" />
-                  </View>
-                )}
-              </TouchableOpacity>
+                    <View style={styles.mediaPlaceholder}>
+                      <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
+                      <Text style={[styles.mediaSlotLabel, { color: textSecondary }]}>Add After</Text>
+                    </View>
+                  )}
+                  {optimisticUploading.after && (
+                    <View style={styles.optimisticOverlay}>
+                      <ActivityIndicator size="small" color="#FFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -1711,7 +1717,7 @@ export default function TicketDetailScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.reassignBtn}
-                  onPress={() => { fetchMSTs(); setShowAssigneePicker(true); }}
+                  onPress={() => setShowAssigneePicker(true)}
                 >
                   <Ionicons name="swap-horizontal" size={16} color="#3B82F6" />
                   <Text style={styles.reassignBtnText}>Reassign</Text>
@@ -1725,7 +1731,7 @@ export default function TicketDetailScreen() {
                 </Text>
                 <TouchableOpacity
                   style={styles.assignNowBtn}
-                  onPress={() => { fetchMSTs(); setShowAssigneePicker(true); }}
+                  onPress={() => setShowAssigneePicker(true)}
                 >
                   <Text style={styles.assignNowBtnText}>Assign Now</Text>
                 </TouchableOpacity>

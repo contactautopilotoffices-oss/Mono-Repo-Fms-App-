@@ -13,6 +13,11 @@
     "scheme": "autopilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F1521"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.autopilot.app"

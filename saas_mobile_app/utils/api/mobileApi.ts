@@ -934,26 +934,29 @@ export async function uploadTicketMedia(
   console.log(`[uploadTicketMedia] Uploading to ${url} with type ${fileType}`);
   
   try {
-    const uploadResult = await FileSystem.uploadAsync(url, mediaUri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName: 'file',
-      mimeType: fileType,
-      parameters: {
-        type: type,
-      },
+    const formData = new FormData();
+    formData.append('file', {
+      uri: mediaUri,
+      name: filename,
+      type: fileType,
+    } as any);
+    formData.append('type', type);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
       },
     });
 
-    if (uploadResult.status < 200 || uploadResult.status >= 300) {
-      console.error('[uploadTicketMedia] Server error:', uploadResult.status, uploadResult.body);
-      return { success: false, error: uploadResult.body || 'Server Error' };
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      return { success: false, error: body || response.statusText };
     }
 
-    const json = JSON.parse(uploadResult.body);
+    const json = await response.json();
     console.log('[uploadTicketMedia] Success:', json);
     return json;
   } catch (err) {

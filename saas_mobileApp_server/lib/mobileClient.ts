@@ -108,7 +108,7 @@ export function applyQueryFilters(query: any, filters: QueryFilter[] = []) {
         nextQuery = nextQuery.neq(filter.column, filter.value);
         break;
       case "in":
-        nextQuery = nextQuery.in(filter.column, filter.values ?? []);
+        nextQuery = nextQuery.in(filter.column, (filter.values ?? filter.value ?? []) as any[]);
         break;
       case "gte":
         nextQuery = nextQuery.gte(filter.column, filter.value);

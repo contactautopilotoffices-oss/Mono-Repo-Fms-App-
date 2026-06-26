@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAuthenticatedUser } from "@/lib/auth";
+import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { canManageProperty } from "@/lib/authorization";
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -12,7 +12,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const propertyId = request.nextUrl.searchParams.get("propertyId");
     const { id } = await params;
     if (!propertyId) return NextResponse.json({ error: "Missing propertyId" }, { status: 400 });
-    if (!(await canManageProperty(auth.user.id, propertyId))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const access = await getPropertyAccess(auth.user.id, propertyId);
+    if (!access.authorized) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const admin = createAdminClient();
     const { data: reading } = await admin.from("electricity_readings").select("*").eq("id", id).eq("property_id", propertyId).maybeSingle();

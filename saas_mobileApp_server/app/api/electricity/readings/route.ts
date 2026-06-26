@@ -66,7 +66,8 @@ export async function POST(request: NextRequest) {
     if (!propertyId || !body.meter_id || !body.reading_date) {
       return NextResponse.json({ error: "Missing reading fields" }, { status: 400 });
     }
-    if (!(await canManageProperty(auth.user.id, propertyId))) {
+    const access = await getPropertyAccess(auth.user.id, propertyId);
+    if (!access.authorized) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -135,10 +136,34 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Dual write to facility_meter_readings
+    // Heal missing facility_meters on-the-fly to prevent FK constraint errors
+    const { data: existingFacilityMeter } = await admin
+      .from("facility_meters")
+      .select("id")
+      .eq("id", body.meter_id)
+      .maybeSingle();
+
+    if (!existingFacilityMeter) {
+      const { data: elecMeter } = await admin
+        .from("electricity_meters")
+        .select("name, meter_number")
+        .eq("id", body.meter_id)
+        .single();
+        
+      if (elecMeter) {
+        await admin.from("facility_meters").insert({
+          id: body.meter_id,
+          property_id: propertyId,
+          name: elecMeter.name,
+          meter_number: elecMeter.meter_number,
+          created_by: auth.user.id
+        });
+      }
+    }
+
     const { error: fwError } = await admin.from("facility_meter_readings").upsert({
       meter_id: body.meter_id,
       reading_date: body.reading_date,
-      property_id: propertyId,
       initial_reading: body.opening_reading,
       final_reading: body.closing_reading,
       consumption: finalUnits,

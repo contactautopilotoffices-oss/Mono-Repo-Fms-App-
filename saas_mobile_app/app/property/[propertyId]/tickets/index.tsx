@@ -37,6 +37,7 @@ import { queryKeys } from '@/utils/queryKeys';
 type StatusFilter = 'all' | 'mine' | 'open' | 'in_progress' | 'resolved' | 'closed';
 type DateRangeFilter = 'all' | 'today' | 'week' | 'month';
 type SortBy = 'newest' | 'oldest' | 'priority_high' | 'priority_low';
+type MaterialFilter = 'all' | 'with_material' | 'without_material';
 
 const CATEGORIES = [
   { value: 'all', label: 'All Categories' },
@@ -72,6 +73,12 @@ const DATE_RANGES: { key: DateRangeFilter; label: string }[] = [
   { key: 'month', label: 'This Month' },
 ];
 
+const MATERIAL_FILTERS: { key: MaterialFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'with_material', label: 'Has Material' },
+  { key: 'without_material', label: 'No Material' },
+];
+
 interface TicketEscalationLog {
   from_level: number;
   to_level: number | null;
@@ -97,6 +104,7 @@ interface Ticket {
   internal?: boolean | null;
   raised_by?: string | null;
   ticket_escalation_logs?: TicketEscalationLog[];
+  material_requests?: { id: string; status: string }[];
 }
 
 const PAGE_SIZE = 20;
@@ -122,6 +130,7 @@ export default function TicketsScreen() {
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [raisedByFilter, setRaisedByFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
+  const [materialFilter, setMaterialFilter] = useState<MaterialFilter>('all');
   const [allUsers, setAllUsers] = useState<{ id: string; full_name: string }[]>([]);
   const insets = useSafeAreaInsets();
   const orgId = membership?.org_id ?? '';
@@ -212,7 +221,8 @@ export default function TicketsScreen() {
                creator:users!raised_by(id, full_name, property_memberships(role)),
                ticket_escalation_logs(from_level, to_level, escalated_at,
                  from_employee:users!from_employee_id(full_name, user_photo_url),
-                 to_employee:users!to_employee_id(full_name, user_photo_url))`,
+                 to_employee:users!to_employee_id(full_name, user_photo_url)),
+               material_requests(id, status)`,
       filters: queryFilters,
       orders: [{ column: 'created_at', ascending: sortBy === 'oldest' }],
       limit,
@@ -343,6 +353,12 @@ const displayedTickets = useMemo(() => {
         return false;
       });
     }
+    // Material filter
+    if (materialFilter === 'with_material') {
+      source = source.filter((t: Ticket) => (t.material_requests?.length ?? 0) > 0);
+    } else if (materialFilter === 'without_material') {
+      source = source.filter((t: Ticket) => (t.material_requests?.length ?? 0) === 0);
+    }
     if (!searchQuery.trim()) return source;
     const q = searchQuery.toLowerCase().trim();
     return source.filter((t: Ticket) =>
@@ -350,7 +366,7 @@ const displayedTickets = useMemo(() => {
       (t.ticket_number ?? '').toLowerCase().includes(q) ||
       (t.description ?? '').toLowerCase().includes(q)
     );
-  }, [data, isNeedsAttentionMode, searchQuery]);
+  }, [data, isNeedsAttentionMode, searchQuery, materialFilter]);
 const hasMore = data?.hasMore ?? false;
 const statusCounts = data?.statusCounts ?? defaultCounts;
 
@@ -434,6 +450,8 @@ const onRefresh = () => {
       });
       if (escalationChain.length === 0) escalationChain = undefined;
     }
+    const hasMaterial = (item.material_requests?.length ?? 0) > 0;
+    const materialCount = item.material_requests?.length ?? 0;
     return (
       <TicketListItem
         id={item.id}
@@ -446,6 +464,8 @@ const onRefresh = () => {
         assigneePhotoUrl={item.assignee?.user_photo_url}
         photoUrl={item.photo_before_url ?? undefined}
         escalationChain={escalationChain}
+        hasMaterial={hasMaterial}
+        materialCount={materialCount}
         onPress={() => router.push(`/property/${propertyId}/tickets/${item.id}`)}
       />
     );
@@ -770,6 +790,34 @@ const onRefresh = () => {
                     </View>
                   </View>
 
+                  {/* Material Filter */}
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={[styles.filterLabel, { color: textSecondary }]}>Material</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {MATERIAL_FILTERS.map(opt => (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                            backgroundColor: materialFilter === opt.key
+                              ? (isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9'),
+                            borderWidth: 1,
+                            borderColor: materialFilter === opt.key ? '#8B5CF6' : (isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0'),
+                          }}
+                          onPress={() => setMaterialFilter(opt.key)}
+                        >
+                          <Text style={{
+                            fontSize: 12, fontWeight: materialFilter === opt.key ? '700' : '500',
+                            color: materialFilter === opt.key ? '#8B5CF6' : textSecondary
+                          }}>
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
                   {/* Raised By */}
                   {allUsers.length > 0 && (
                     <View style={{ marginBottom: 16 }}>
@@ -869,6 +917,7 @@ const onRefresh = () => {
                       setSortBy('newest');
                       setRaisedByFilter('all');
                       setAssignedToFilter('all');
+                      setMaterialFilter('all');
                     }}
                   >
                     <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 14 }}>Clear All</Text>

@@ -22,25 +22,43 @@ import { queryKeys } from '@/utils/queryKeys';
 import { fetchDashboardData, type DashboardData } from '@/hooks/useDashboardQuery';
 
 // ---------------------------------------------------------------------------
+// Helper: Check if error is an access-denied error
+// ---------------------------------------------------------------------------
+
+function isAccessDeniedError(error: any): boolean {
+  if (!error) return false;
+  const msg = error?.message || '';
+  return msg.includes('403') || msg.includes('Access Denied') || msg.includes('Forbidden');
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard Prefetch (uses unified fetchDashboardData)
 // ---------------------------------------------------------------------------
 
 /**
  * Prefetch full dashboard data into React Query cache.
  * This replaces individual fetchers and writes directly to RQ.
+ * Handles 403 errors gracefully - some users may not have access to all properties.
  */
 export async function prefetchDashboard(propertyId: string): Promise<void> {
   if (!propertyId || propertyId === 'all') return;
 
   console.log('[prefetchService] Prefetching dashboard for:', propertyId);
 
-  await queryClient.prefetchQuery({
-    queryKey: queryKeys.property.dashboard(propertyId),
-    queryFn: () => fetchDashboardData(propertyId),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  console.log('[prefetchService] Dashboard prefetch complete');
+  try {
+    await queryClient.prefetchQuery({
+      queryKey: queryKeys.property.dashboard(propertyId),
+      queryFn: () => fetchDashboardData(propertyId),
+      staleTime: 5 * 60 * 1000,
+    });
+    console.log('[prefetchService] Dashboard prefetch complete');
+  } catch (error: any) {
+    if (isAccessDeniedError(error)) {
+      console.log('[prefetchService] Skipping dashboard prefetch - no access to property');
+    } else {
+      console.error('[prefetchService] Dashboard prefetch error:', error);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -60,24 +78,32 @@ export async function prefetchCriticalOnLogin(
   await prefetchDashboard(propertyId);
 
   // Also prefetch tickets with the EXACT query key the ticket page uses
-  await queryClient.prefetchQuery({
-    queryKey: ['tickets', propertyId, 'all', 'all', 'false', '20'],
-    queryFn: async () => {
-      const { data } = await serverApi.query({
-        table: 'tickets',
-        action: 'select',
-        select: `id, title, description, status, priority, ticket_number, created_at,
-                 property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
-                 assignee:users!assigned_to(id, full_name, user_photo_url),
-                 creator:users!raised_by(id, full_name)`,
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-        orders: [{ column: 'created_at', ascending: false }],
-        limit: 21,
-      });
-      return data ?? [];
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  try {
+    await queryClient.prefetchQuery({
+      queryKey: ['tickets', propertyId, 'all', 'all', 'false', '20'],
+      queryFn: async () => {
+        const { data } = await serverApi.query({
+          table: 'tickets',
+          action: 'select',
+          select: `id, title, description, status, priority, ticket_number, created_at,
+                   property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
+                   assignee:users!assigned_to(id, full_name, user_photo_url),
+                   creator:users!raised_by(id, full_name)`,
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+          limit: 21,
+        });
+        return data ?? [];
+      },
+      staleTime: 5 * 60 * 1000,
+    });
+  } catch (error: any) {
+    if (isAccessDeniedError(error)) {
+      console.log('[prefetchService] Skipping tickets prefetch - no access to property');
+    } else {
+      console.error('[prefetchService] Tickets prefetch error:', error);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

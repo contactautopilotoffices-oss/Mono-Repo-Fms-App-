@@ -22,6 +22,8 @@ interface TicketListItemProps {
   assigneePhotoUrl?: string | null;
   photoUrl?: string;
   escalationChain?: { name: string; avatar?: string | null }[];
+  hasMaterial?: boolean;
+  materialCount?: number;
   onPress: () => void;
 }
 
@@ -49,7 +51,7 @@ function formatTimeAgo(dateStr: string): string {
 export default function TicketListItem({
   id, title, status, priority, ticketNumber,
   createdAt, assignedTo, assigneePhotoUrl, photoUrl,
-  escalationChain, onPress,
+  escalationChain, hasMaterial, materialCount, onPress,
 }: TicketListItemProps) {
   const [timeAgo, setTimeAgo] = useState(() => formatTimeAgo(createdAt));
   const isClosed = ['resolved', 'closed'].includes(status);
@@ -93,6 +95,14 @@ export default function TicketListItem({
                 {priority?.toUpperCase()}
               </Text>
             </View>
+            {hasMaterial && (
+              <View style={styles.materialBadge}>
+                <Ionicons name="cube-outline" size={10} color="#FFF" />
+                <Text style={styles.materialText}>
+                  MATERIAL {materialCount && materialCount > 1 ? `(${materialCount})` : ''}
+                </Text>
+              </View>
+            )}
             {escalationChain && escalationChain.length > 0 && (
               <View style={styles.escalatedBadge}>
                 <Ionicons name="arrow-up" size={10} color="#FFF" />
@@ -250,6 +260,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   escalatedText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.3,
+  },
+  materialBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#8B5CF6',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  materialText: {
     fontSize: 9,
     fontWeight: '700',
     color: '#FFF',

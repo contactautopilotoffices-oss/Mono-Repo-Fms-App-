@@ -65,11 +65,12 @@ const PROPERTY_ROLES = new Set([
   "food_vendor", "vendor", "maintenance_vendor", "procurement"
 ]);
 
+/** MST roles - can be stored in either org_memberships or property_memberships */
+const MST_ROLES = ['mst', 'master_admin', 'super_admin'];
+
 // ── Property Access (read gate) ────────────────────────────────────────────
 // Mirrors saas_one web app property-access logic + super_tenant portfolio check.
 // Any user that can READ property data passes this gate.
-
-const MST_ROLES = ['mst', 'master_admin', 'super_admin'];
 
 export async function getPropertyAccess(userId: string, propertyId: string) {
   const admin = createAdminClient();
@@ -85,54 +86,14 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     return { authorized: true, role: "master_admin" };
   }
 
-  // 2. Org-level admin / MST / procurement / super_tenant check
+  // 2. Get property's organization
   const { data: property } = await admin
     .from("properties")
     .select("organization_id")
     .eq("id", propertyId)
     .maybeSingle();
 
-  if (property?.organization_id) {
-    const { data: orgMembership } = await admin
-      .from("organization_memberships")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("organization_id", property.organization_id)
-      .or("is_active.eq.true,is_active.is.null")
-      .maybeSingle();
-
-    // MST users get access to ALL properties in the org
-    if (orgMembership && MST_ROLES.includes(orgMembership.role)) {
-      return { authorized: true, role: orgMembership.role };
-    }
-
-    // Org admins get access to ALL properties in the org
-    if (orgMembership && ORG_ADMIN_ROLES.has(orgMembership.role)) {
-      return { authorized: true, role: orgMembership.role };
-    }
-
-    // Super tenant: must have property in their portfolio
-    if (orgMembership?.role === "super_tenant") {
-      const { data: stProp } = await admin
-        .from("super_tenant_properties")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("property_id", propertyId)
-        .eq("organization_id", property.organization_id)
-        .maybeSingle();
-
-      if (stProp) {
-        return { authorized: true, role: "super_tenant" };
-      }
-    }
-
-    // Any active org member can read property-scoped data (mirrors web app RLS)
-    if (orgMembership) {
-      return { authorized: true, role: orgMembership.role };
-    }
-  }
-
-  // 3. Property-level membership (any active role)
+  // 3. Check property-level membership FIRST (MST may store role here)
   const { data: propertyMembership } = await admin
     .from("property_memberships")
     .select("role")
@@ -142,7 +103,53 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .maybeSingle();
 
   if (propertyMembership) {
+    // MST users from property_memberships get access
+    if (MST_ROLES.includes(propertyMembership.role)) {
+      return { authorized: true, role: propertyMembership.role };
+    }
+    // All other property-level roles get access
     return { authorized: true, role: propertyMembership.role };
+  }
+
+  // 4. If no property membership, check org-level membership
+  if (property?.organization_id) {
+    const { data: orgMembership } = await admin
+      .from("organization_memberships")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("organization_id", property.organization_id)
+      .or("is_active.eq.true,is_active.is.null")
+      .maybeSingle();
+
+    if (orgMembership) {
+      // MST users get access to ALL properties in the org
+      if (MST_ROLES.includes(orgMembership.role)) {
+        return { authorized: true, role: orgMembership.role };
+      }
+
+      // Org admins get access to ALL properties in the org
+      if (ORG_ADMIN_ROLES.has(orgMembership.role)) {
+        return { authorized: true, role: orgMembership.role };
+      }
+
+      // Super tenant: must have property in their portfolio
+      if (orgMembership.role === "super_tenant") {
+        const { data: stProp } = await admin
+          .from("super_tenant_properties")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("property_id", propertyId)
+          .eq("organization_id", property.organization_id)
+          .maybeSingle();
+
+        if (stProp) {
+          return { authorized: true, role: "super_tenant" };
+        }
+      }
+
+      // Any active org member can read property-scoped data
+      return { authorized: true, role: orgMembership.role };
+    }
   }
 
   return { authorized: false as const };
