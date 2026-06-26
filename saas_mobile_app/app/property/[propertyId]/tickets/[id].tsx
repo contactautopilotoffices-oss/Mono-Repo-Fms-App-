@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
 
 import { Video, ResizeMode } from 'expo-av';
 import { createClient } from '@/utils/supabase/client';
@@ -38,13 +39,15 @@ import ImagePreviewModal from '@/components/shared/ImagePreviewModal';
 import VideoPreviewModal from '@/components/shared/VideoPreviewModal';
 import ProcurementCatalogModal from '@/components/procurement/ProcurementCatalogModal';
 import { compressImage, getStoragePath, getStoragePathForSlot, readFileAsArrayBuffer } from '@/utils/mediaUtils';
-import { WEB_API_BASE } from '@/utils/api/mobileApi';
+import { MOBILE_API_BASE, uploadTicketMedia, deleteTicketMedia } from '@/utils/api/mobileApi';
 import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import { queryClient } from '@/utils/queryClient';
+import TicketDetailSkeleton from '@/components/tickets/TicketDetailSkeleton';
 
 interface Ticket {
   id: string;
@@ -437,33 +440,59 @@ export default function TicketDetailScreen() {
     }
   }, [id, propertyId]);
 
-  const handleSendComment = async () => {
+  const handleSendComment = () => {
     if (!newComment.trim() || !id) return;
-    setSendingComment(true);
-    try {
-      // Use authUser from AuthContext — the definitive session source.
-      const userId = authUser?.id;
-      const { data, error } = await supabase
-        .from('ticket_comments')
-        .insert({ ticket_id: id, comment: newComment.trim(), user_id: userId, is_internal: false } as any)
-        .select(`*, user:users(full_name, user_photo_url)`)
-        .single();
-      if (error) throw error;
-      setComments(prev => [...prev, data as Comment]);
-      if (activeTab !== 'chat') useUnreadStore.getState().incrementTicketChat();
-      setNewComment('');
-    } catch (err) {
-      console.error('Error sending comment:', err);
-    } finally {
-      setSendingComment(false);
-    }
+    
+    // Save original state for rollback
+    const originalComments = [...comments];
+    const commentText = newComment.trim();
+    setNewComment(''); // Clear input instantly
+
+    const optimisticComment: Comment = {
+      id: `temp-${Date.now()}`,
+      comment: commentText,
+      created_at: new Date().toISOString(),
+      is_internal: false,
+      user_id: authUser?.id,
+      user: {
+        full_name: authUser?.user_metadata?.full_name || 'You',
+        user_photo_url: authUser?.user_metadata?.avatar_url,
+      }
+    };
+
+    // Optimistic UI update
+    setComments(prev => [...prev, optimisticComment]);
+    if (activeTab !== 'chat') useUnreadStore.getState().incrementTicketChat();
+
+    // Background sync
+    const userId = authUser?.id;
+    supabase
+      .from('ticket_comments')
+      .insert({ ticket_id: id, comment: commentText, user_id: userId, is_internal: false } as any)
+      .select(`*, user:users(full_name, user_photo_url)`)
+      .single()
+      .then(({ data, error }) => {
+        if (error) throw error;
+        // Replace temp comment with actual server data to get real ID
+        setComments(prev => prev.map(c => c.id === optimisticComment.id ? (data as Comment) : c));
+      })
+      .catch((err) => {
+        console.error('Error sending comment:', err);
+        // Rollback
+        setComments(originalComments);
+        setNewComment(commentText); // Restore drafted text
+        Toast.show({
+          type: 'error',
+          text1: 'Failed to send comment',
+          text2: 'Please check your connection and try again.',
+        });
+      });
   };
 
 
 
-  const handleUpdateStatus = async (newStatus: string) => {
+  const handleUpdateStatus = (newStatus: string) => {
     if (!id || !ticket) return;
-    setUpdatingStatus(true);
     setShowStatusPicker(false);
 
     // Optimistic update: immediately update local state so UI reflects change
@@ -481,148 +510,160 @@ export default function TicketDetailScreen() {
     }
     setTicket(optimisticTicket);
 
-    try {
-      const updates: any = { status: newStatus };
-      // Web app flow: 'closed' = MST completes (sets resolved_at), 'resolved' = tenant approves
-      if ((newStatus === 'closed' || newStatus === 'resolved') && !ticket.resolved_at) {
-        updates.resolved_at = new Date().toISOString();
-      }
-      if (newStatus === 'in_progress' && !ticket.work_started_at) {
-        updates.work_started_at = new Date().toISOString();
-      }
-      // When tenant rejects validation → back to 'open', clear resolved_at
-      if (newStatus === 'open' && ticket.status === 'resolved') {
-        updates.resolved_at = null;
-      }
-
-      console.log('[handleUpdateStatus] Updating ticket:', id, 'with:', updates);
-      const updateRes = await serverApi.query({
-        table: 'tickets',
-        action: 'update',
-        values: updates,
-        filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
+    // Optimistically update the dashboard cache
+    const queryKey = ['tickets', propertyId];
+    const previousTicketsData = queryClient.getQueryData<{ data: Ticket[] }>(queryKey);
+    if (previousTicketsData?.data) {
+      queryClient.setQueryData(queryKey, {
+        ...previousTicketsData,
+        data: previousTicketsData.data.map((t) =>
+          t.id === id ? { ...t, ...optimisticTicket } : t
+        ),
       });
+    }
 
-      if (updateRes.error) {
-        console.error('[handleUpdateStatus] Server error:', updateRes.error);
-        setTicket(originalTicket);
-        Alert.alert('Update Failed', `Could not update status: ${updateRes.error.message ?? 'Unknown error'}`);
-        return;
-      }
+    const updates: any = { status: newStatus };
+    if ((newStatus === 'closed' || newStatus === 'resolved') && !ticket.resolved_at) {
+      updates.resolved_at = new Date().toISOString();
+    }
+    if (newStatus === 'in_progress' && !ticket.work_started_at) {
+      updates.work_started_at = new Date().toISOString();
+    }
+    if (newStatus === 'open' && ticket.status === 'resolved') {
+      updates.resolved_at = null;
+    }
 
-      // Verify the update actually persisted in the DB
-      const verifyRes = await serverApi.query<{ id: string; status: string; resolved_at: string | null }>({
+    // Fire in background
+    serverApi.query({
+      table: 'tickets',
+      action: 'update',
+      values: updates,
+      filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
+    }).then((updateRes) => {
+      if (updateRes.error) throw new Error(updateRes.error.message);
+
+      // Verify
+      return serverApi.query<{ id: string; status: string; resolved_at: string | null }>({
         table: 'tickets',
         action: 'select',
         select: 'id, status, resolved_at',
         filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
         single: true,
       });
-
-      if (verifyRes.error || !verifyRes.data) {
-        console.error('[handleUpdateStatus] Verification read failed:', verifyRes.error);
-        await fetchTicket();
-        Alert.alert('Update Failed', 'Could not verify the update. Please refresh the page.');
-        return;
+    }).then((verifyRes) => {
+      if (verifyRes?.error || verifyRes?.data?.status !== newStatus) {
+        throw new Error('Status was not saved correctly.');
       }
-
-      if (verifyRes.data.status !== newStatus) {
-        console.error('[handleUpdateStatus] DB status mismatch:', verifyRes.data.status, '!=', newStatus);
-        setTicket(originalTicket);
-        await fetchTicket();
-        Alert.alert('Update Failed', 'Status was not saved. Please try again.');
-        return;
-      }
-
-      // DB confirmed — proceed with full refresh
-      await fetchTicket();
-
-      // Log activity (like web app does)
-      // Use authUser from AuthContext — the definitive session source.
+      
+      // Log activity
       const actingUserId = authUser?.id;
       let activityAction: string | null = null;
-      if (newStatus === 'in_progress' && ticket.status === 'assigned') activityAction = 'work_started';
+      if (newStatus === 'in_progress' && originalTicket.status === 'assigned') activityAction = 'work_started';
       else if (newStatus === 'resolved' || newStatus === 'closed') activityAction = 'completed';
-      else if (newStatus === 'in_progress' && ticket.status === 'resolved') activityAction = 'resumed';
+      else if (newStatus === 'in_progress' && originalTicket.status === 'resolved') activityAction = 'resumed';
 
       if (activityAction && actingUserId) {
-        try {
-          await serverApi.query({
-            table: 'ticket_activity_log',
-            action: 'insert',
-            values: {
-              ticket_id: id,
-              performed_by: actingUserId,
-              action: activityAction,
-              details: JSON.stringify({ old_value: ticket.status, new_value: newStatus }),
-            },
-          });
-        } catch (logErr) {
-          console.warn('[handleUpdateStatus] Activity log insert failed (non-critical):', logErr);
-        }
+        serverApi.query({
+          table: 'ticket_activity_log',
+          action: 'insert',
+          values: {
+            ticket_id: id,
+            performed_by: actingUserId,
+            action: activityAction,
+            details: JSON.stringify({ old_value: originalTicket.status, new_value: newStatus }),
+          },
+        }).catch(() => {});
       }
 
-      const statusLabel = STATUS_LABELS[newStatus] ?? newStatus;
-      Alert.alert('Status Updated', `Ticket marked as ${statusLabel}.`);
-    } catch (err) {
-      console.error('Error updating status:', err);
+      Toast.show({
+        type: 'success',
+        text1: 'Status Updated',
+        text2: `Ticket marked as ${STATUS_LABELS[newStatus] ?? newStatus}.`,
+      });
+    }).catch((err) => {
+      console.error('[handleUpdateStatus] Background sync failed:', err);
+      // Rollback
       setTicket(originalTicket);
-      Alert.alert('Update Failed', 'Could not refresh ticket data. Please try again.');
-    } finally {
-      setUpdatingStatus(false);
-    }
+      if (previousTicketsData) queryClient.setQueryData(queryKey, previousTicketsData);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Update Failed',
+        text2: 'Reverted status change due to network error.',
+      });
+    });
   };
 
 
 
-  const handleReassign = async (mstId: string) => {
+  const handleReassign = (mstId: string) => {
     if (!id || !ticket) return;
     setShowAssigneePicker(false);
 
-    try {
-      // Use authUser from AuthContext — the definitive session source.
-      const actingUserId = authUser?.id;
+    // Use authUser from AuthContext
+    const actingUserId = authUser?.id;
 
-      let newStatus = ticket.status;
-      if (mstId) {
-        // If assigning TO someone, and current status is open/closed/resolved, move to assigned
-        if (['open', 'closed', 'resolved'].includes(ticket.status)) {
-          newStatus = 'assigned';
-        }
-      } else {
-        // If unassigning, revert to open
-        newStatus = 'open';
+    let newStatus = ticket.status;
+    if (mstId) {
+      if (['open', 'closed', 'resolved'].includes(ticket.status)) {
+        newStatus = 'assigned';
       }
+    } else {
+      newStatus = 'open';
+    }
 
-      const updates: any = {
-        assigned_to: mstId || null,
-        status: newStatus,
-        assigned_at: mstId ? new Date().toISOString() : null,
-      };
+    // Optimistic UI updates
+    const originalTicket = ticket;
+    const optimisticTicket: Ticket = { ...ticket };
+    optimisticTicket.status = newStatus;
+    
+    // We update the local assignee visually if possible.
+    // If unassigned, clear it.
+    if (!mstId) optimisticTicket.assignee = null;
+    optimisticTicket.assigned_to = mstId || null;
+    optimisticTicket.assigned_at = mstId ? new Date().toISOString() : undefined;
 
-      // If we are moving from a finished state to assigned, clear completion data
-      if (['closed', 'resolved'].includes(ticket.status) && newStatus === 'assigned') {
-        updates.resolved_at = null;
-        updates.total_paused_minutes = 0; // Reset metrics if needed
-      }
+    if (['closed', 'resolved'].includes(ticket.status) && newStatus === 'assigned') {
+      optimisticTicket.resolved_at = undefined;
+      optimisticTicket.total_paused_minutes = 0;
+    }
+    
+    setTicket(optimisticTicket);
 
-      console.log('[handleReassign] Applying updates:', updates);
-
-      const reassignRes = await serverApi.query({
-        table: 'tickets',
-        action: 'update',
-        values: updates,
-        filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
+    const queryKey = ['tickets', propertyId];
+    const previousTicketsData = queryClient.getQueryData<{ data: Ticket[] }>(queryKey);
+    if (previousTicketsData?.data) {
+      queryClient.setQueryData(queryKey, {
+        ...previousTicketsData,
+        data: previousTicketsData.data.map((t) =>
+          t.id === id ? { ...t, ...optimisticTicket } : t
+        ),
       });
+    }
 
-      if (reassignRes.error) {
-        throw new Error(reassignRes.error.message);
-      }
+    const updates: any = {
+      assigned_to: mstId || null,
+      status: newStatus,
+      assigned_at: mstId ? new Date().toISOString() : null,
+    };
+
+    if (['closed', 'resolved'].includes(ticket.status) && newStatus === 'assigned') {
+      updates.resolved_at = null;
+      updates.total_paused_minutes = 0;
+    }
+
+    // Background sync
+    serverApi.query({
+      table: 'tickets',
+      action: 'update',
+      values: updates,
+      filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
+    }).then((reassignRes) => {
+      if (reassignRes.error) throw new Error(reassignRes.error.message);
 
       if (actingUserId) {
-        // Use raw assigned_to as fallback for old assignee ID
-        const oldAssigneeId = ticket.assignee?.id ?? ticket.assigned_to ?? null;
-        const oldStatus = ticket.status;
+        const oldAssigneeId = originalTicket.assignee?.id ?? originalTicket.assigned_to ?? null;
+        const oldStatus = originalTicket.status;
         
         let action = 'assigned';
         if (oldStatus === 'closed' || oldStatus === 'resolved') {
@@ -630,31 +671,37 @@ export default function TicketDetailScreen() {
         } else if (oldAssigneeId && mstId && String(oldAssigneeId) !== String(mstId)) {
           action = 'reassigned';
         }
-        
         if (!mstId) action = 'unassigned';
 
-        try {
-          await serverApi.query({
-            table: 'ticket_activity_log',
-            action: 'insert',
-            values: {
-              ticket_id: id,
-              performed_by: actingUserId,
-              action: action,
-              details: JSON.stringify({ old_value: oldAssigneeId, new_value: mstId }),
-            },
-          });
-        } catch (logErr) {
-          console.warn('[handleReassign] Activity log insert failed:', logErr);
-        }
+        serverApi.query({
+          table: 'ticket_activity_log',
+          action: 'insert',
+          values: {
+            ticket_id: id,
+            performed_by: actingUserId,
+            action: action,
+            details: JSON.stringify({ old_value: oldAssigneeId, new_value: mstId }),
+          },
+        }).catch(() => {});
       }
 
-      await fetchTicket();
-      Alert.alert('Success', mstId ? 'Ticket assigned and reopened successfully.' : 'Ticket unassigned.');
-    } catch (err) {
+      Toast.show({
+        type: 'success',
+        text1: 'Success',
+        text2: mstId ? 'Ticket assigned successfully.' : 'Ticket unassigned.',
+      });
+    }).catch((err) => {
       console.error('[handleReassign] Error:', err);
-      Alert.alert('Reassign Failed', 'Could not reassign the ticket. Please try again.');
-    }
+      // Rollback
+      setTicket(originalTicket);
+      if (previousTicketsData) queryClient.setQueryData(queryKey, previousTicketsData);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Reassign Failed',
+        text2: 'Could not reassign the ticket. Reverting...',
+      });
+    });
   };
 
   const handleMediaDownload = async (url: string, mediaType: 'before' | 'after', fileType: 'photo' | 'video') => {
@@ -717,74 +764,27 @@ export default function TicketDetailScreen() {
     if (!mediaUploadType || !id) return;
     const currentType = mediaUploadType;
     setShowMediaModal(false);
-    
-    // Instant Optimistic UI Update
-    setOptimisticMedia(prev => ({ ...prev, [currentType]: { uri: media.uri, type: media.type } }));
+
+    // Step 1: Compress FIRST (especially for images — reduces file size significantly)
+    const isImage = media.type === 'image';
+    let finalUri = media.uri;
+    if (isImage) {
+      try {
+        finalUri = await compressImage(media.uri);
+      } catch (compressErr) {
+        console.warn('[handleMediaUpload] Compression failed, using raw:', compressErr);
+        finalUri = media.uri;
+      }
+    }
+
+    // Step 2: Set optimistic preview
+    setOptimisticMedia(prev => ({ ...prev, [currentType]: { uri: finalUri, type: media.type } }));
     setOptimisticUploading(prev => ({ ...prev, [currentType]: true }));
     setMediaUploadType(null);
 
     try {
-      const isImage = media.type === 'image';
-      const newExtension = isImage ? 'jpg' : 'mp4';
-      const newBucket = isImage ? 'ticket_photos' : 'ticket_videos';
-      const newPath = getStoragePath(propertyId as string, id as string, currentType, newExtension);
-
-      const oldPhotoUrl = currentType === 'before' ? ticket?.photo_before_url : ticket?.photo_after_url;
-      const oldVideoUrl = currentType === 'before' ? ticket?.video_before_url : ticket?.video_after_url;
-
-      if (oldPhotoUrl) {
-        const oldPath = getStoragePathForSlot(propertyId as string, id as string, currentType, true);
-        await supabase.storage.from('ticket_photos').remove([oldPath]);
-      }
-      if (oldVideoUrl) {
-        const oldPath = getStoragePathForSlot(propertyId as string, id as string, currentType, false);
-        await supabase.storage.from('ticket_videos').remove([oldPath]);
-      }
-
-      let finalUri = media.uri;
-      if (isImage) {
-        finalUri = await compressImage(media.uri);
-      }
-
-      const authClient = session?.access_token ? createClientFromToken(session.access_token) : supabase;
-      const arrayBuffer = await readFileAsArrayBuffer(finalUri);
-
-      const { error: uploadError } = await authClient.storage
-        .from(newBucket)
-        .upload(newPath, arrayBuffer, {
-          contentType: isImage ? 'image/jpeg' : 'video/mp4',
-          cacheControl: '3600',
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl: rawUrl } } = authClient.storage.from(newBucket).getPublicUrl(newPath);
-      const publicUrl = rawUrl.split('?')[0];
-
-      const updates: Record<string, unknown> = {};
-      if (isImage) {
-        updates.photo_before_url = currentType === 'before' ? publicUrl : undefined;
-        updates.photo_after_url  = currentType === 'after'  ? publicUrl : undefined;
-        if (currentType === 'before') updates.video_before_url = null;
-        else                          updates.video_after_url  = null;
-      } else {
-        updates.video_before_url = currentType === 'before' ? publicUrl : undefined;
-        updates.video_after_url  = currentType === 'after'  ? publicUrl : undefined;
-        if (currentType === 'before') updates.photo_before_url = null;
-        else                          updates.photo_after_url  = null;
-      }
-
-      Object.keys(updates).forEach(k => updates[k] === undefined && delete updates[k]);
-
-      const mediaRes = await serverApi.query({
-        table: 'tickets',
-        action: 'update',
-        values: updates,
-        filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
-      });
-
-      if (mediaRes.error) throw new Error(mediaRes.error.message);
+      const res = await uploadTicketMedia(id as string, finalUri, currentType, media.type);
+      if (!res.success) throw new Error(res.error || 'Failed to upload media');
 
       await fetchTicket();
     } catch (err) {
@@ -815,29 +815,9 @@ export default function TicketDetailScreen() {
           setOptimisticMedia(prev => { const n = {...prev}; delete n[slot]; return n; });
 
           try {
-            const oldPhotoUrl = slot === 'before' ? originalTicket.photo_before_url : originalTicket.photo_after_url;
-            const oldVideoUrl = slot === 'before' ? originalTicket.video_before_url : originalTicket.video_after_url;
-            
-            if (oldPhotoUrl) {
-              const oldPath = getStoragePathForSlot(propertyId as string, id as string, slot, true);
-              await supabase.storage.from('ticket_photos').remove([oldPath]);
-            }
-            if (oldVideoUrl) {
-              const oldPath = getStoragePathForSlot(propertyId as string, id as string, slot, false);
-              await supabase.storage.from('ticket_videos').remove([oldPath]);
-            }
-
-            const updates: Record<string, unknown> = {};
-            if (slot === 'before') { updates.photo_before_url = null; updates.video_before_url = null; }
-            if (slot === 'after') { updates.photo_after_url = null; updates.video_after_url = null; }
-
-            const res = await serverApi.query({
-              table: 'tickets',
-              action: 'update',
-              values: updates,
-              filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
-            });
-            if (res.error) throw new Error(res.error.message);
+            const isPhoto = slot === 'before' ? !!originalTicket.photo_before_url : !!originalTicket.photo_after_url;
+            const res = await deleteTicketMedia(id as string, slot, isPhoto ? 'image' : 'video');
+            if (!res.success) throw new Error(res.error || 'Failed to delete media');
           } catch (err) {
             console.error('Failed to remove media:', err);
             setTicket(originalTicket);
@@ -918,11 +898,7 @@ export default function TicketDetailScreen() {
   const textTertiary = colors.textTertiary;
 
   if (loading) {
-    return (
-      <View style={[styles.centered, { backgroundColor: bg }]}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-      </View>
-    );
+    return <TicketDetailSkeleton />;
   }
 
   if (!ticket) {
@@ -1039,7 +1015,7 @@ export default function TicketDetailScreen() {
             style={styles.headerActionBtn}
             onPress={async () => {
               try {
-                const shareUrl = `${WEB_API_BASE}/tickets/${id}`;
+                const shareUrl = `${MOBILE_API_BASE}/tickets/${id}`;
                 const shareText = `Ticket ${ticket.ticket_number ?? ticket.id.slice(0, 8).toUpperCase()}: ${ticket.title}`;
                 await Share.share({
                   message: `${shareText}\n${shareUrl}`,
@@ -1943,7 +1919,6 @@ export default function TicketDetailScreen() {
       </Modal>
 
       <MediaCaptureModal
-        key={`media-capture-${mediaUploadType}-${Date.now()}`}
         isOpen={showMediaModal}
         onClose={() => { setShowMediaModal(false); setMediaUploadType(null); }}
         onCapture={handleMediaUpload}

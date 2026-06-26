@@ -117,17 +117,7 @@ export default function TenantRoomsPage() {
     }
   }, [propertyId, user?.id]);
 
-  // Fetch all bookings
-  const fetchAllBookings = useCallback(async () => {
-    if (!propertyId) return { allBookings: [] as MeetingRoomBooking[] };
-    try {
-      const bookingsRes = await getMeetingRoomBookings(propertyId as string);
-      return { allBookings: bookingsRes.bookings || [] };
-    } catch (err) {
-      console.error('[TenantRooms] Fetch error:', err);
-      return { allBookings: [] as MeetingRoomBooking[] };
-    }
-  }, [propertyId]);
+  // Fetch all bookings was removed to prevent tenants from seeing all history
 
   const { data: roomsData, isLoading: isLoadingRooms, refetch: refetchRooms } = useServerQuery<{ rooms: MeetingRoom[] }>(
     queryKeys.property.tenantRooms(propertyId),
@@ -141,15 +131,10 @@ export default function TenantRoomsPage() {
     { staleTime: 1000 * 60 * 5 }
   );
 
-  const { data: allBookingsData, isLoading: isLoadingAllBookings, refetch: refetchAllBookings } = useServerQuery<{ allBookings: MeetingRoomBooking[] }>(
-    ['tenant-rooms-all-bookings', propertyId],
-    fetchAllBookings,
-    { staleTime: 1000 * 60 * 5 }
-  );
+  // allBookingsData fetcher removed
 
   const rooms = roomsData?.rooms ?? [];
   const myBookings = myBookingsData?.bookings ?? [];
-  const allBookings = allBookingsData?.allBookings ?? [];
 
   const handleBookRoom = async () => {
     if (!selectedRoom || !bookingTitle || !bookingDate || !bookingStartTime || !bookingEndTime) {
@@ -357,19 +342,13 @@ export default function TenantRoomsPage() {
         >
           <Text style={[styles.tabText, activeTab === 'myBookings' && styles.tabTextActive]}>My Bookings</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'allBookings' && styles.tabActive]}
-          onPress={() => setActiveTab('allBookings')}
-        >
-          <Text style={[styles.tabText, activeTab === 'allBookings' && styles.tabTextActive]}>All History</Text>
-        </TouchableOpacity>
       </View>
 
       {activeTab === 'rooms' ? (
         <View style={{ flex: 1, paddingTop: 8 }}>
           <RoomBookingTab propertyId={propertyId as string} userId={user?.id || ''} />
         </View>
-      ) : activeTab === 'myBookings' ? (
+      ) : (
         <FlatList
           data={myBookings}
           keyExtractor={(item) => item.id}
@@ -382,22 +361,6 @@ export default function TenantRoomsPage() {
               <Ionicons name="calendar" size={48} color="rgba(255,255,255,0.2)" />
               <Text style={styles.emptyTitle}>No bookings yet</Text>
               <Text style={styles.emptySubtitle}>Book a room from the All Rooms tab</Text>
-            </View>
-          }
-        />
-      ) : (
-        <FlatList
-          data={allBookings}
-          keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={isLoadingAllBookings} onRefresh={refetchAllBookings} tintColor="rgba(255,255,255,0.6)" />}
-          contentContainerStyle={{ paddingHorizontal: SPACING.xl, paddingBottom: insets.bottom + 100 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={renderBookingCard}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Ionicons name="calendar" size={48} color="rgba(255,255,255,0.2)" />
-              <Text style={styles.emptyTitle}>No bookings found</Text>
-              <Text style={styles.emptySubtitle}>All booking history will appear here</Text>
             </View>
           }
         />

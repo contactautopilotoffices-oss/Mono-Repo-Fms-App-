@@ -70,7 +70,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
 
     const { error } = await admin
       .from("electricity_meters")
-      .delete()
+      .update({ status: 'inactive', deleted_at: new Date().toISOString() })
       .eq("id", meterId);
 
     if (error) {

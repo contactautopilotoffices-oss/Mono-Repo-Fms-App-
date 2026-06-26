@@ -69,6 +69,8 @@ const PROPERTY_ROLES = new Set([
 // Mirrors saas_one web app property-access logic + super_tenant portfolio check.
 // Any user that can READ property data passes this gate.
 
+const MST_ROLES = ['mst', 'master_admin', 'super_admin'];
+
 export async function getPropertyAccess(userId: string, propertyId: string) {
   const admin = createAdminClient();
 
@@ -83,7 +85,7 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     return { authorized: true, role: "master_admin" };
   }
 
-  // 2. Org-level admin / procurement / super_tenant check
+  // 2. Org-level admin / MST / procurement / super_tenant check
   const { data: property } = await admin
     .from("properties")
     .select("organization_id")
@@ -98,6 +100,11 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
       .eq("organization_id", property.organization_id)
       .or("is_active.eq.true,is_active.is.null")
       .maybeSingle();
+
+    // MST users get access to ALL properties in the org
+    if (orgMembership && MST_ROLES.includes(orgMembership.role)) {
+      return { authorized: true, role: orgMembership.role };
+    }
 
     // Org admins get access to ALL properties in the org
     if (orgMembership && ORG_ADMIN_ROLES.has(orgMembership.role)) {

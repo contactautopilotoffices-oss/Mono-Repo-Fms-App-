@@ -13,6 +13,7 @@ import {
   StatusBar,
   Dimensions,
   Image,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +38,7 @@ import Animated, {
   Extrapolate,
   FadeInUp,
   Easing,
+  LinearTransition,
 } from 'react-native-reanimated';
 import {
   Gesture,
@@ -61,7 +63,6 @@ import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import NotificationModal from '@/components/notifications/NotificationModal';
-import MobileFooter from '@/components/shared/MobileFooter';
 import Toast from '@/components/ui/Toast';
 import FloatingMenu from '@/components/ui/FloatingMenu';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
@@ -191,15 +192,9 @@ interface TicketStackProps {
 
 function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: TicketStackProps) {
   const [order, setOrder] = useState(initialTickets);
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const rotate = useSharedValue(0);
 
   useEffect(() => {
     setOrder(initialTickets);
-    translateX.value = 0;
-    translateY.value = 0;
-    rotate.value = 0;
   }, [initialTickets]);
 
   const sendToBack = useCallback(() => {
@@ -208,24 +203,72 @@ function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: Ti
       const [first, ...rest] = prev;
       return [...rest, first];
     });
-    translateX.value = 0;
-    translateY.value = 0;
-    rotate.value = 0;
   }, []);
+
+  const visible = order.slice(0, MAX_STACK);
+  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
+
+  return (
+    <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
+      {visible.map((t, i) => (
+        <StackCard
+          key={t.id}
+          ticket={t}
+          index={i}
+          total={MAX_STACK}
+          onSwipeComplete={sendToBack}
+          propertyName={propertyName}
+          onViewTicket={onViewTicket}
+        />
+      ))}
+    </View>
+  );
+}
+
+const StackCard = memo(function StackCard({
+  ticket, index, total, onSwipeComplete, propertyName, onViewTicket
+}: {
+  ticket: Ticket;
+  index: number;
+  total: number;
+  onSwipeComplete: () => void;
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}) {
+  const isTop = index === 0;
+
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const rotate = useSharedValue(0);
+
+  useEffect(() => {
+    if (!isTop) {
+      // When card is sent to the back, smoothly reset its internal swipe state
+      // after a tiny delay so it's hidden while resetting
+      const timeout = setTimeout(() => {
+        translateX.value = 0;
+        translateY.value = 0;
+        rotate.value = 0;
+      }, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTop]);
 
   const pan = Gesture.Pan()
     .minDistance(8)
     .onUpdate((e) => {
+      if (!isTop) return;
       translateX.value = e.translationX;
       translateY.value = e.translationY * 0.3;
       rotate.value = interpolate(e.translationX, [-SCREEN_W, 0, SCREEN_W], [-12, 0, 12], Extrapolate.CLAMP);
     })
     .onEnd((e) => {
+      if (!isTop) return;
       const shouldDismiss = Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 600;
       if (shouldDismiss) {
         const dest = e.translationX > 0 ? SCREEN_W * 1.4 : -SCREEN_W * 1.4;
         translateX.value = withTiming(dest, { duration: 200 }, () => {
-          runOnJS(sendToBack)();
+          runOnJS(onSwipeComplete)();
         });
         translateY.value = withTiming(e.translationY * 0.5, { duration: 200 });
       } else {
@@ -234,62 +277,48 @@ function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: Ti
         rotate.value = withSpring(0, { damping: 18, stiffness: 130 });
       }
     });
+  const maxOffset = (total - 1) * 16;
+  const yOffset = maxOffset - (index * 16);
+  const scale = 1 - index * 0.05;
+  const bgOpacity = 1 - index * 0.15;
+  const zIndex = total - index;
 
-  const topAnimStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { rotate: `${rotate.value}deg` },
-    ],
-  }));
+  const animStyle = useAnimatedStyle(() => {
+    return {
+      top: withSpring(yOffset, { damping: 18, stiffness: 130 }),
+      transform: [{ scale: withSpring(scale, { damping: 18, stiffness: 130 }) }],
+      opacity: withSpring(bgOpacity, { damping: 18, stiffness: 130 }),
+    };
+  }, [yOffset, scale, bgOpacity]);
 
-  const visible = order.slice(0, MAX_STACK);
-  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
+  const panStyle = useAnimatedStyle(() => {
+    if (!isTop) return { transform: [] };
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { rotate: `${rotate.value}deg` },
+      ],
+    };
+  });
 
   return (
-    <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
-      {visible.map((t, i) => {
-        const isTop = i === 0;
-        // i=0 is front card, i=1 is behind it, etc.
-        const zIndex = visible.length - i;
-        
-        // Arrange cards to peek from the TOP:
-        // The back-most card (highest i) gets top: 0
-        // The front card (i=0) gets pushed DOWN so the back cards can peek out the top.
-        const maxOffset = (MAX_STACK - 1) * 16; // 16px peek offset
-        const yOffset = maxOffset - (i * 16);
-        const scale = 1 - i * 0.05;
-        const bgOpacity = 1 - i * 0.15;
-
-        return (
-          <View
-            key={t.id}
-            style={[
-              styles.tcStackSlot,
-              {
-                top: yOffset,
-                transform: [{ scale }],
-                zIndex: zIndex,
-                opacity: bgOpacity,
-              },
-            ]}
-            pointerEvents={isTop ? 'auto' : 'none'}
-          >
-            {isTop ? (
-              <GestureDetector gesture={pan}>
-                <Animated.View style={[{ flex: 1 }, topAnimStyle]}>
-                  <TicketCard ticket={t} propertyName={propertyName} onView={() => onViewTicket?.(t)} />
-                </Animated.View>
-              </GestureDetector>
-            ) : (
-              <TicketCard ticket={t} propertyName={propertyName} onView={() => onViewTicket?.(t)} />
-            )}
-          </View>
-        );
-      })}
-    </View>
+    <Animated.View
+      style={[
+        styles.tcStackSlot,
+        animStyle,
+        { zIndex },
+      ]}
+      pointerEvents={isTop ? 'auto' : 'none'}
+    >
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[{ flex: 1 }, panStyle]}>
+          <TicketCard ticket={ticket} propertyName={propertyName} onView={() => onViewTicket?.(ticket)} />
+        </Animated.View>
+      </GestureDetector>
+    </Animated.View>
   );
-}
+});
 
 // ─── Gemini animated gradient border wrapper ───────────────────────────────
 
@@ -350,7 +379,7 @@ const geminiStyles = StyleSheet.create({
     flex: 1,
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: '#162B35',
+    backgroundColor: 'rgba(47, 47, 48, 0.90)', // Glassy #2f2f30
   },
 });
 
@@ -395,9 +424,25 @@ const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView
     ? new Date(ticket.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     : '';
 
+  const handleShare = async () => {
+    try {
+      const msg = `🎫 Ticket: ${ticket.title}\n📋 ${ticket.ticket_number}\n📊 Priority: ${ticket.priority} | Status: ${statusLabel}\n👤 Raised By: ${ticket.creator?.full_name || 'Unknown'}`;
+      await Share.share({
+        message: msg,
+        title: `Ticket ${ticket.ticket_number}`,
+      });
+    } catch (e) {
+      console.warn('Share failed', e);
+    }
+  };
+
   return (
-    <GeminiCardBorder>
-      <View style={styles.tcCard}>
+    <View style={[styles.tcCard, { 
+      backgroundColor: '#121212', 
+      borderRadius: 20,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.25)'
+    }]}>
         {/* ── Row 1: Thumb | Title + Badges | Action icons ── */}
         <View style={styles.tcRow1}>
           {/* Thumbnail */}
@@ -424,13 +469,10 @@ const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView
             </View>
           </View>
 
-          {/* Two action icons — Share on top, Bookmark below */}
+          {/* Action icons — Share */}
           <View style={styles.tcIconCol}>
-            <TouchableOpacity style={styles.tcIconBtn} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.tcIconBtn} onPress={handleShare} activeOpacity={0.7}>
               <Ionicons name="share-outline" size={15} color="rgba(255,255,255,0.70)" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.tcIconBtn} activeOpacity={0.7}>
-              <Ionicons name="bookmark-outline" size={15} color="rgba(255,255,255,0.50)" />
             </TouchableOpacity>
           </View>
         </View>
@@ -457,27 +499,21 @@ const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView
         {/* ── Divider ── */}
         <View style={styles.tcDivider} />
 
-        {/* ── Footer: TKT ID + SLA + View button ── */}
+        {/* ── Footer: Ticket ID / Date + Timer + View Btn ── */}
         <View style={styles.tcFooter}>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.tcFooterTkt} numberOfLines={1}>
-              {ticket.ticket_number ? `${ticket.ticket_number} • ${formattedDate}` : formattedDate}
+          <Text style={styles.tcFooterTkt}>{ticket.ticket_number} • {formattedDate}</Text>
+          <View style={styles.tcSlaRow}>
+            <Ionicons name="time-outline" size={12} color="#F87171" />
+            <Text style={[styles.tcSlaText, { color: '#FCA5A5' }]}>
+              {runningStr ? runningStr : '0m'}
             </Text>
-            {runningStr && (
-              <View style={styles.tcSlaRow}>
-                <Ionicons name="time-outline" size={11} color="#F87171" />
-                <Text style={[styles.tcSlaText, { color: '#F87171' }]}>
-                  {runningStr}
-                </Text>
-              </View>
-            )}
           </View>
+          <View style={{ flex: 1 }} />
           <TouchableOpacity style={styles.tcViewBtn} onPress={onView} activeOpacity={0.8}>
             <Text style={styles.tcViewBtnText}>View</Text>
           </TouchableOpacity>
         </View>
       </View>
-    </GeminiCardBorder>
   );
 });
 
@@ -683,13 +719,11 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     );
 
     try {
-      await serverApi.query({
-        table: 'resolver_stats',
-        action: 'upsert',
-        values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
-        mutationOptions: { onConflict: 'user_id,property_id' },
+      // Use the dedicated API endpoint like Staff dashboard does
+      await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
+        is_checked_in: newStatus
       });
-      
+
       try {
         const { sound } = await Audio.Sound.createAsync({
           uri: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'
@@ -1124,22 +1158,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
           {activeTab === 'profile' && renderProfile()}
         </View>
       </ScrollView>
-
-      <MobileFooter
-        activeTab="dashboard"
-        moreMenuItems={[
-          { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-          { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
-          { label: 'Live Flow Map', icon: 'git-branch-outline', action: () => setActiveTab('flow') },
-          { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
-          { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
-          { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
-          { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-          { label: 'Settings', icon: 'settings-outline', route: 'settings' },
-          { label: 'Profile', icon: 'person-outline', action: () => setActiveTab('profile') },
-          { label: 'Sign Out', icon: 'log-out-outline', action: () => setShowSignOut(true), color: '#EF4444' }
-        ]}
-      />
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />

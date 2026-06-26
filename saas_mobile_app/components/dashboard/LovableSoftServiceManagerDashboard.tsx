@@ -321,11 +321,9 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: { pro
     setIsTogglingShift(true);
     const newStatus = !isCheckedIn;
     try {
-      await serverApi.query({
-        table: 'resolver_stats',
-        action: 'upsert',
-        values: { property_id: propertyId, user_id: user.id, is_checked_in: newStatus },
-        mutationOptions: { onConflict: 'user_id,property_id' },
+      // Use the dedicated API endpoint like Staff dashboard does
+      await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
+        is_checked_in: newStatus
       });
       queryClient.setQueryData(
         queryKeys.property.softService(propertyId),

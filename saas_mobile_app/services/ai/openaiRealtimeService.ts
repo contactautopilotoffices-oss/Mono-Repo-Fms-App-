@@ -13,7 +13,7 @@
  */
 
 import { createClient } from '@/utils/supabase/client';
-import { WEB_API_BASE } from '@/utils/api/mobileApi';
+import { MOBILE_API_BASE } from '@/utils/api/mobileApi';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -414,7 +414,7 @@ export class OpenAIRealtimeService {
       throw new Error('Session expired. Please sign in again.');
     }
 
-    const url = `${WEB_API_BASE}/api/voice`;
+    const url = `${MOBILE_API_BASE}/api/voice`;
     const body = {
       audio: wavBase64,
       format: 'audio/wav',

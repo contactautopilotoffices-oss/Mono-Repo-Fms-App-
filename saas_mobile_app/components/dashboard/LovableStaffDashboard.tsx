@@ -68,7 +68,6 @@ import { ppmService } from '@/services/ppmService';
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import NotificationModal from '@/components/notifications/NotificationModal';
-import MobileFooter from '@/components/shared/MobileFooter';
 import Toast from '@/components/ui/Toast';
 import { Audio } from 'expo-av';
 
@@ -966,8 +965,6 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
           {activeTab === 'profile' && renderProfile()}
         </View>
       </ScrollView>
-
-      <MobileFooter activeTab="dashboard" onMorePress={() => setShowDrawer(true)} moreMenuItems={[{ label: "Overview", icon: "grid-outline", action: () => { setShowDrawer(false); setActiveTab("dashboard"); } },{ label: "Requests", icon: "ticket-outline", route: "tickets" },{ label: "Live Flow Map", icon: "git-branch-outline", route: "flow-map" },{ label: "Visitors", icon: "people-outline", route: "visitors" },{ label: "Diesel Logger", icon: "flame-outline", route: "diesel", color: "#F97316" },{ label: "Electricity Logger", icon: "flash-outline", route: "electricity", color: "#EAB308" },{ label: "Checklists", icon: "clipboard-outline", route: "checklist" },{ label: "Settings", icon: "settings-outline", route: "settings" },{ label: "Profile", icon: "person-outline", action: () => { setShowDrawer(false); setActiveTab("profile"); } },{ label: "Sign Out", icon: "log-out-outline", action: () => { setShowDrawer(false); setShowSignOut(true); }, color: "#EF4444" }]} />
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />

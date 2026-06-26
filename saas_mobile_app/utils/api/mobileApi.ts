@@ -1,27 +1,30 @@
 /**
- * Mobile API utility — calls web API routes with Bearer token auth.
- * Copy of the exact pattern from saas_development/frontend/utils/supabase/mobile-auth.ts
- *
- * Web API base: https://fms-dev-saas-one.vercel.app
+ * Mobile API utility — calls the dedicated mobile server API routes.
  */
 import { createClient } from '@/utils/supabase/client';
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import { serverApi } from '@/lib/serverApi';
 
 // ---------------------------------------------------------------------
 // Supabase client-with-token (used for server-side API calls)
 // ---------------------------------------------------------------------
-export {
-  createClientFromToken,
-  extractBearerToken,
-  getSupabaseToken,
-  getCurrentUserId,
+import {
+  createClientFromToken as _createClientFromToken,
+  extractBearerToken as _extractBearerToken,
+  getSupabaseToken as _getSupabaseToken,
+  getCurrentUserId as _getCurrentUserId,
 } from '@/utils/supabase/mobile-auth';
 
+export const createClientFromToken = _createClientFromToken;
+export const extractBearerToken = _extractBearerToken;
+export const getSupabaseToken = _getSupabaseToken;
+export const getCurrentUserId = _getCurrentUserId;
+
 // ---------------------------------------------------------------------
-// Web API base URL
+// Mobile API base URL
 // ---------------------------------------------------------------------
-export const WEB_API_BASE = process.env.EXPO_PUBLIC_WEB_API_URL ?? 'https://www.back2basiics.com';
+export const MOBILE_API_BASE = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://localhost:3001';
 // ---------------------------------------------------------------------
 // Typed API Response shapes
 // ---------------------------------------------------------------------
@@ -145,7 +148,7 @@ export async function apiFetch<T>(
     }
   }
 
-  const response = await fetch(`${WEB_API_BASE}${endpoint}`, {
+  const response = await fetch(`${MOBILE_API_BASE}${endpoint}`, {
     ...options,
     headers,
   });
@@ -905,38 +908,76 @@ export async function createTicketMaterialRequest(
 }
 
 /**
- * Upload a photo for a ticket.
- * Mirrors POST /api/tickets/[id]/photos from web app
+ * Upload a media file (photo or video) for a ticket.
+ * Mirrors POST /api/tickets/[id]/photos or videos from the server
  */
-export async function uploadTicketPhoto(
+export async function uploadTicketMedia(
   ticketId: string,
-  photoUri: string,
-  type: 'before' | 'after' = 'before'
-): Promise<{ success: boolean; url?: string; error?: string }> {
+  mediaUri: string,
+  type: 'before' | 'after' = 'before',
+  mediaType: 'image' | 'video' = 'image'
+): Promise<{ success: boolean; url?: string; type?: string; error?: string }> {
   const token = await getSupabaseToken();
-  const formData = new FormData();
-
-  // On mobile, we need to create a file-like object from the URI
-  // Ensure the URI is properly formatted for fetch/FormData
-  const cleanUri = Platform.OS === 'android' ? photoUri : photoUri.replace('file://', '');
-  
-  const filename = photoUri.split('/').pop() || 'photo.jpg';
+  const filename = mediaUri.split('/').pop() || (mediaType === 'image' ? 'photo.webp' : 'video.mp4');
   const match = /\.(\w+)$/.exec(filename);
-  const fileType = match ? `image/${match[1]}` : `image/jpeg`;
+  const ext = match ? match[1].toLowerCase() : (mediaType === 'image' ? 'webp' : 'mp4');
+  
+  let fileType = '';
+  if (mediaType === 'image') {
+    fileType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+  } else {
+    fileType = ext === 'mov' ? 'video/quicktime' : `video/${ext}`;
+  }
 
-  formData.append('file', {
-    uri: photoUri, // Keep original URI for React Native FormData
-    name: filename,
-    type: fileType,
-  } as any);
-  formData.append('type', type);
-
-  console.log(`[uploadTicketPhoto] Uploading to ${WEB_API_BASE}/api/tickets/${ticketId}/photos`);
+  const endpoint = mediaType === 'image' ? 'photos' : 'videos';
+  const url = `${MOBILE_API_BASE}/api/tickets/${ticketId}/${endpoint}`;
+  console.log(`[uploadTicketMedia] Uploading to ${url} with type ${fileType}`);
   
   try {
-    const response = await fetch(`${WEB_API_BASE}/api/tickets/${ticketId}/photos`, {
-      method: 'POST',
-      body: formData,
+    const uploadResult = await FileSystem.uploadAsync(url, mediaUri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: fileType,
+      parameters: {
+        type: type,
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+      console.error('[uploadTicketMedia] Server error:', uploadResult.status, uploadResult.body);
+      return { success: false, error: uploadResult.body || 'Server Error' };
+    }
+
+    const json = JSON.parse(uploadResult.body);
+    console.log('[uploadTicketMedia] Success:', json);
+    return json;
+  } catch (err) {
+    console.error('[uploadTicketMedia] Network error:', err);
+    return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+  }
+}
+
+/**
+ * Deletes a media file for a ticket via API.
+ */
+export async function deleteTicketMedia(
+  ticketId: string,
+  type: 'before' | 'after',
+  mediaType: 'image' | 'video'
+): Promise<{ success: boolean; error?: string }> {
+  const token = await getSupabaseToken();
+  const endpoint = mediaType === 'image' ? 'photos' : 'videos';
+
+  console.log(`[deleteTicketMedia] Deleting ${MOBILE_API_BASE}/api/tickets/${ticketId}/${endpoint}?type=${type}`);
+
+  try {
+    const response = await fetch(`${MOBILE_API_BASE}/api/tickets/${ticketId}/${endpoint}?type=${type}`, {
+      method: 'DELETE',
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -944,15 +985,13 @@ export async function uploadTicketPhoto(
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      console.error('[uploadTicketPhoto] Server error:', response.status, body);
+      console.error('[deleteTicketMedia] Server error:', response.status, body);
       return { success: false, error: body || response.statusText };
     }
 
-    const json = await response.json();
-    console.log('[uploadTicketPhoto] Success:', json);
-    return json;
+    return await response.json();
   } catch (err) {
-    console.error('[uploadTicketPhoto] Network error:', err);
+    console.error('[deleteTicketMedia] Network error:', err);
     return { success: false, error: err instanceof Error ? err.message : 'Network error' };
   }
 }
@@ -1356,7 +1395,7 @@ export async function uploadMeetingRoomPhoto(photoUri: string): Promise<{ succes
   } as any);
 
   try {
-    const response = await fetch(`${WEB_API_BASE}/api/meeting-rooms/photos`, {
+    const response = await fetch(`${MOBILE_API_BASE}/api/meeting-rooms/photos`, {
       method: 'POST',
       body: formData,
       headers: {

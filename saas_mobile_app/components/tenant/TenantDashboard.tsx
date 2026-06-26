@@ -23,7 +23,6 @@ import SignOutModal from '@/components/ui/SignOutModal';
 import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
 import NotificationModal from '@/components/notifications/NotificationModal';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
-import DashboardBackground from '@/components/dashboard/DashboardBackground';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { TicketCreateModal } from '../tickets/TicketCreateModal';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
@@ -135,7 +134,6 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <DashboardBackground />
         <SkeletonLoader />
       </View>
     );
@@ -155,7 +153,6 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <DashboardBackground />
       {weather && <WeatherBackground condition={weather.condition} />}
 
       <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>

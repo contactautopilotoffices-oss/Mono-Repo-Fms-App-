@@ -74,6 +74,37 @@ export async function POST(request: NextRequest) {
       .single();
       
     if (error) return NextResponse.json({ error: "Failed to create multiplier" }, { status: 500 });
+
+    // Retroactive recalculation
+    const { data: readingsToUpdate } = await admin
+      .from("electricity_readings")
+      .select("*")
+      .eq("meter_id", meterId)
+      .gte("reading_date", effectiveFrom);
+
+    if (readingsToUpdate && readingsToUpdate.length > 0) {
+      for (const reading of readingsToUpdate) {
+        const rawUnits = Number(reading.closing_reading) - Number(reading.opening_reading);
+        const finalUnits = rawUnits * (body.meter_constant ?? 1);
+        
+        const { data: tariffData } = await admin.rpc("get_active_grid_tariff", { p_property_id: meter.property_id, p_date: reading.reading_date });
+        const tariffRate = (tariffData as any)?.[0]?.rate_per_unit ?? 0;
+        const computedCost = finalUnits * tariffRate;
+
+        await admin.from("electricity_readings").update({
+          multiplier_id: data.id,
+          multiplier_value_used: body.meter_constant ?? 1,
+          final_units: finalUnits,
+          computed_cost: computedCost
+        }).eq("id", reading.id);
+
+        await admin.from("facility_meter_readings").update({
+          consumption: finalUnits,
+          meter_constant_used: body.meter_constant ?? 1
+        }).eq("meter_id", meterId).eq("reading_date", reading.reading_date);
+      }
+    }
+
     return NextResponse.json({ success: true, data }, { status: 201 });
   } catch (error) {
     console.error("[saas-mobile-server] meter_multipliers POST error:", error);

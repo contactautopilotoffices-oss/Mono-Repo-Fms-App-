@@ -21,6 +21,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const { error } = await admin.from("electricity_readings").delete().eq("id", id);
     if (error) return NextResponse.json({ error: "Failed to delete reading" }, { status: 500 });
 
+    // Dual write: Delete from facility_meter_readings
+    await admin.from("facility_meter_readings")
+      .delete()
+      .eq("meter_id", reading.meter_id)
+      .eq("reading_date", reading.reading_date);
+
     const { data: remaining } = await admin
       .from("electricity_readings")
       .select("closing_reading")

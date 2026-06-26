@@ -60,6 +60,26 @@ export async function POST(request: NextRequest) {
       .select("*")
       .single();
     if (error) return NextResponse.json({ error: "Failed to create tariff" }, { status: 500 });
+
+    // Retroactive recalculation for tariffs
+    const { data: readingsToUpdate } = await admin
+      .from("electricity_readings")
+      .select("*")
+      .eq("property_id", propertyId)
+      .gte("reading_date", effectiveFrom);
+
+    if (readingsToUpdate && readingsToUpdate.length > 0) {
+      for (const reading of readingsToUpdate) {
+        const computedCost = Number(reading.final_units) * body.rate_per_unit;
+
+        await admin.from("electricity_readings").update({
+          tariff_id: data.id,
+          tariff_rate_used: body.rate_per_unit,
+          computed_cost: computedCost
+        }).eq("id", reading.id);
+      }
+    }
+
     return NextResponse.json({ success: true, tariff: data }, { status: 201 });
   } catch (error) {
     console.error("[saas-mobile-server] electricity tariffs POST error:", error);

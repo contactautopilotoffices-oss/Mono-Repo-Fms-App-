@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
       .from("electricity_meters")
       .select("*")
       .eq("property_id", propertyId)
+      .is("deleted_at", null)
       .order("name", { ascending: true });
 
     if (error) {
@@ -71,6 +72,19 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("[saas-mobile-server] electricity meters POST error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // DUAL WRITE: Sync to facility_meters
+    const { error: fwError } = await admin.from("facility_meters").insert({
+      id: data.id,
+      property_id: propertyId,
+      name: meterPayload.name,
+      meter_number: meterPayload.meter_number,
+      created_by: auth.user.id
+    });
+
+    if (fwError) {
+      console.warn("[saas-mobile-server] Dual write to facility_meters failed:", fwError);
     }
 
     if (initial_multiplier && data) {

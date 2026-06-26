@@ -42,6 +42,8 @@ import {
 import { Calendar } from "react-native-calendars";
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import { MobileElectricityLoggerCard } from "@/components/electricity/MobileElectricityLoggerCard";
+import { MeterEditModal } from "@/components/electricity/MeterEditModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1901,6 +1903,8 @@ export default function ElectricityScreen() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [showTariffModal, setShowTariffModal] = useState(false);
   const [showMeterModal, setShowMeterModal] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingMeter, setEditingMeter] = useState<ElectricityMeter | null>(null);
 
   const handleDeleteReading = async (id: string) => {
     Alert.alert(
@@ -1936,6 +1940,29 @@ export default function ElectricityScreen() {
     );
   };
 
+  const handleDeleteMeter = async (meterId: string) => {
+    Alert.alert(
+      "Delete Meter",
+      "Are you sure you want to delete this meter? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const delRes = await electricityService.deleteMeter(meterId);
+              if (!delRes.success) throw new Error(String(delRes.error || 'Could not delete meter'));
+              await refetch();
+            } catch (e: any) {
+              Alert.alert("Delete Failed", e.message || "Could not delete meter");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const fetchHistoryReadings = async () => {
     if (!propertyId) return;
     setIsLoadingHistory(true);
@@ -1964,17 +1991,50 @@ export default function ElectricityScreen() {
   }, [mode]);
 
   const fetchData = useCallback(async () => {
-    if (!propertyId) return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null };
+    if (!propertyId) return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null, multipliers: {} as Record<string, any[]>, spreadsheets: [] as any[], meterIdsBySpreadsheet: {} as Record<string, string[]> };
     try {
-      const [metersRes, readingsRes, tariffsRes] = await Promise.all([
+      const [metersRes, readingsRes, tariffsRes, categoriesRes, groupsRes, facilityMetersRes] = await Promise.all([
         electricityService.fetchMeters(propertyId),
         electricityService.fetchReadings(propertyId),
         electricityService.fetchTariffs(propertyId),
+        serverApi.query<any[]>({ table: 'facility_meter_categories', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }], orders: [{ column: 'order_index', ascending: true }] }),
+        serverApi.query<any[]>({ table: 'facility_meter_groups', action: 'select', select: '*' }),
+        serverApi.query<any[]>({ table: 'facility_meters', action: 'select', select: '*' })
       ]);
 
       const metersData = (metersRes.success ? metersRes.data : []) ?? [];
       const readingsData = (readingsRes.success ? readingsRes.data : []) ?? [];
       const tariffsData = (tariffsRes.success ? tariffsRes.data : []) ?? [];
+
+      const spreadsheets = categoriesRes.data || [];
+      const spreadsheetGroups = groupsRes.data || [];
+      const spreadsheetMeters = facilityMetersRes.data || [];
+
+      const meterIdsBySpreadsheet: Record<string, string[]> = {};
+      spreadsheets.forEach(sheet => {
+        const groupIds = spreadsheetGroups.filter(g => g.category_id === sheet.id).map(g => g.id);
+        const mIds = spreadsheetMeters.filter(m => groupIds.includes(m.group_id)).map(m => m.id);
+        meterIdsBySpreadsheet[sheet.id] = mIds;
+      });
+
+      let allMultipliers: any[] = [];
+      if (metersData.length > 0) {
+        const multRes = await serverApi.query<any[]>({
+          table: "meter_multipliers",
+          action: "select",
+          select: "*",
+          filters: [{ op: "in", column: "meter_id", value: metersData.map(m => m.id) }],
+          orders: [{ column: "effective_from", ascending: false }]
+        });
+        if (multRes.data) {
+          allMultipliers = multRes.data;
+        }
+      }
+
+      const multipliersByMeter: Record<string, any[]> = {};
+      metersData.forEach(m => {
+        multipliersByMeter[m.id] = allMultipliers.filter(mult => mult.meter_id === m.id);
+      });
 
       // Fetch previous closings
       const closings: Record<string, number> = {};
@@ -1999,11 +2059,14 @@ export default function ElectricityScreen() {
         meters: metersData as ElectricityMeter[],
         readings: readingsData as ElectricityReading[],
         previousClosings: closings,
-        activeTariff: currentTariff as GridTariff | null
+        activeTariff: currentTariff as GridTariff | null,
+        multipliers: multipliersByMeter,
+        spreadsheets,
+        meterIdsBySpreadsheet
       };
     } catch (e) {
       console.error("Electricity fetch error:", e);
-      return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null };
+      return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null, multipliers: {} as Record<string, any[]>, spreadsheets: [] as any[], meterIdsBySpreadsheet: {} as Record<string, string[]> };
     }
   }, [propertyId]);
 
@@ -2013,10 +2076,21 @@ export default function ElectricityScreen() {
     { staleTime: 1000 * 60 * 5 }
   );
 
-  const meters = data?.meters ?? [];
+  const [selectedSpreadsheetId, setSelectedSpreadsheetId] = useState<string | null>(null);
+
+  const rawMeters = data?.meters ?? [];
   const readings = data?.readings ?? [];
   const previousClosings = data?.previousClosings ?? {};
+  const multipliers = data?.multipliers ?? {};
   const activeTariff = data?.activeTariff ?? null;
+  const spreadsheets = data?.spreadsheets ?? [];
+  const meterIdsBySpreadsheet = data?.meterIdsBySpreadsheet ?? {};
+
+  const meters = useMemo(() => {
+    if (!selectedSpreadsheetId) return rawMeters;
+    const allowedIds = meterIdsBySpreadsheet[selectedSpreadsheetId] || [];
+    return rawMeters.filter(m => allowedIds.includes(m.id));
+  }, [rawMeters, selectedSpreadsheetId, meterIdsBySpreadsheet]);
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -2109,7 +2183,7 @@ const totalUnits = filteredReadings.reduce(
         >
           <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
+        <View style={[styles.headerTitleContainer, { flexShrink: 1 }]}>
           <Text
             style={styles.headerTitleLine1}
             numberOfLines={1}
@@ -2117,9 +2191,15 @@ const totalUnits = filteredReadings.reduce(
           >
             Electricity
           </Text>
-          <Text style={styles.headerTitleLine2}>Logger</Text>
+          <Text
+            style={styles.headerTitleLine2}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+          >
+            Logger
+          </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}>
           {canManage && (
             <TouchableOpacity
               style={styles.headerCircularBtn}
@@ -2164,64 +2244,95 @@ const totalUnits = filteredReadings.reduce(
         </View>
       </SafeBlurView>
 
-      {/* Parameters Card */}
-      <View
-        style={[
-          styles.paramCard,
-          {
-            backgroundColor: "rgba(255, 255, 255, 0.05)",
-            borderColor: "rgba(255, 255, 255, 0.08)",
-            borderWidth: 1,
-          },
-        ]}
-      >
-        <View style={styles.paramHeader}>
-          <Ionicons
-            name="options-outline"
-            size={14}
-            color="rgba(255, 255, 255, 0.4)"
-          />
-          <Text style={styles.paramTitle}>Parameters</Text>
-        </View>
-
-        {/* Period Selector Pill */}
-        <View style={styles.paramSelectorContainer}>
-          {PERIODS.map((p) => {
-            const isActive = period === p.value;
-            return (
-              <TouchableOpacity
-                key={p.value}
-                style={[
-                  styles.paramSelectorBtn,
-                  isActive && styles.paramSelectorBtnActive,
-                ]}
-                onPress={() => setPeriod(p.value)}
-              >
+      {spreadsheets.length > 0 && (
+        <View style={styles.tabStripWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabStripScrollContent}
+          >
+            {/* All Loggers tab */}
+            <TouchableOpacity
+              style={[
+                styles.tabStripBtn,
+                !selectedSpreadsheetId && styles.tabStripBtnActive,
+              ]}
+              onPress={() => setSelectedSpreadsheetId(null)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.tabStripBtnInner}>
+                <Ionicons
+                  name="flash"
+                  size={13}
+                  color={!selectedSpreadsheetId ? '#FFFFFF' : 'rgba(255,255,255,0.45)'}
+                />
                 <Text
                   style={[
-                    styles.paramSelectorBtnText,
-                    isActive && styles.paramSelectorBtnTextActive,
+                    styles.tabStripBtnText,
+                    !selectedSpreadsheetId && styles.tabStripBtnTextActive,
                   ]}
                 >
-                  {p.label}
+                  All Loggers
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                <View style={[
+                  styles.tabStripBadge,
+                  !selectedSpreadsheetId && styles.tabStripBadgeActive,
+                ]}>
+                  <Text style={[
+                    styles.tabStripBadgeText,
+                    !selectedSpreadsheetId && styles.tabStripBadgeTextActive,
+                  ]}>{rawMeters.length}</Text>
+                </View>
+              </View>
+              {!selectedSpreadsheetId && <View style={styles.tabStripActiveBar} />}
+            </TouchableOpacity>
 
-        <View style={styles.oilUsedRow}>
-          <Text style={styles.oilUsedLabel}>Energy Used :</Text>
-          <Text style={styles.oilUsedValue}>{totalUnits.toFixed(1)}kVAh</Text>
+            {spreadsheets.map((sheet: any) => {
+              const isActive = selectedSpreadsheetId === sheet.id;
+              const sheetCount = (meterIdsBySpreadsheet[sheet.id] || []).length;
+              return (
+                <TouchableOpacity
+                  key={sheet.id}
+                  style={[
+                    styles.tabStripBtn,
+                    isActive && styles.tabStripBtnActive,
+                  ]}
+                  onPress={() => setSelectedSpreadsheetId(sheet.id)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.tabStripBtnInner}>
+                    <Ionicons
+                      name="layers"
+                      size={13}
+                      color={isActive ? '#FFFFFF' : 'rgba(255,255,255,0.45)'}
+                    />
+                    <Text
+                      style={[
+                        styles.tabStripBtnText,
+                        isActive && styles.tabStripBtnTextActive,
+                      ]}
+                    >
+                      {sheet.name}
+                    </Text>
+                    {sheetCount > 0 && (
+                      <View style={[
+                        styles.tabStripBadge,
+                        isActive && styles.tabStripBadgeActive,
+                      ]}>
+                        <Text style={[
+                          styles.tabStripBadgeText,
+                          isActive && styles.tabStripBadgeTextActive,
+                        ]}>{sheetCount}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {isActive && <View style={styles.tabStripActiveBar} />}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
-
-        <View style={styles.liveRankRow}>
-          <Ionicons name="flash-outline" size={14} color="#FBBF24" />
-          <Text style={styles.liveRankText}>
-            Live Rank in {meters.map((m) => m.name).join("-")}
-          </Text>
-        </View>
-      </View>
+      )}
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -2318,17 +2429,27 @@ const totalUnits = filteredReadings.reduce(
           }
           renderItem={({ item: m }) => (
             <View style={{ marginBottom: 12 }}>
-              <MeterCard
+              <MobileElectricityLoggerCard
                 meter={m}
-                latestReading={latestGenReadings[m.id] ?? null}
-                units={periodMeterStats[m.id]?.units ?? 0}
-                cost={periodMeterStats[m.id]?.cost ?? 0}
-                tariffRate={tariffRate}
+                readings={readings}
+                multipliers={multipliers[m.id] || []}
                 colors={colors}
-                onPress={canManage ? () => {
-                  setSelectedMeterForLogging(m.id);
-                  setShowSheet(true);
+                isDark={isDark}
+                onSaveReading={async (payload) => {
+                  const res = await electricityService.submitReading(propertyId as string, payload);
+                  if (!res.success) throw new Error(String(res.error || 'Failed to save reading'));
+                  await refetch();
+                }}
+                onMultiplierSave={async (meterId, payload) => {
+                  const res = await electricityService.createMultiplier(payload);
+                  if (!res.success) throw new Error(String(res.error || 'Failed to save multiplier'));
+                  await refetch();
+                }}
+                onEdit={canManage ? () => {
+                  setEditingMeter(m);
+                  setEditModalVisible(true);
                 } : undefined}
+                onDelete={canManage ? handleDeleteMeter : undefined}
               />
             </View>
           )}
@@ -2481,21 +2602,17 @@ const totalUnits = filteredReadings.reduce(
         propertyId={propertyId!}
       />
 
-      {showSheet && (
-        <LogReadingModal
-          visible={showSheet}
-          onClose={() => {
-            setShowSheet(false);
-            setSelectedMeterForLogging(null);
-          }}
-          meters={meters}
-          propertyId={propertyId!}
-          colors={colors}
-          onSuccess={fetchData}
-          initialMeterId={selectedMeterForLogging}
-          readings={readings}
-        />
-      )}
+      <MeterEditModal
+        visible={editModalVisible}
+        onClose={() => setEditModalVisible(false)}
+        meter={editingMeter}
+        colors={colors}
+        onSave={async (meterId, updates) => {
+          const res = await electricityService.updateMeter(meterId, updates);
+          if (!res.success) throw new Error(String(res.error || 'Failed to update meter'));
+          await refetch();
+        }}
+      />
 
       {/* Tariff Modal */}
       <TariffModal
@@ -3063,8 +3180,11 @@ const styles = StyleSheet.create({
   },
   headerTitleContainer: {
     flex: 1,
+    flexShrink: 1,
     marginLeft: 12,
+    marginRight: 8,
     justifyContent: "center",
+    overflow: "hidden",
   },
   headerTitleLine1: {
     fontSize: 14,
@@ -3111,30 +3231,74 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  paramSelectorContainer: {
-    flexDirection: "row",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  // ── Tab Strip ────────────────────────────────────────────────────────────────
+  tabStripWrapper: {
+    marginTop: 4,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+  tabStripScrollContent: {
+    flexDirection: 'row',
+    gap: 4,
+    alignItems: 'stretch',
+  },
+  tabStripBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 12,
-    padding: 4,
-    marginBottom: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    position: 'relative',
+    overflow: 'hidden',
   },
-  paramSelectorBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: "center",
+  tabStripBtnActive: {
+    backgroundColor: 'rgba(99,102,241,0.18)',
+    borderColor: 'rgba(99,102,241,0.45)',
   },
-  paramSelectorBtnActive: {
-    backgroundColor: "#FFFFFF",
+  tabStripBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  paramSelectorBtnText: {
+  tabStripBtnText: {
     fontSize: 13,
-    fontFamily: "Urbanist-Bold",
-    color: "rgba(255, 255, 255, 0.6)",
+    fontFamily: 'Urbanist-Bold',
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 0.1,
   },
-  paramSelectorBtnTextActive: {
-    color: "#0F1521",
+  tabStripBtnTextActive: {
+    color: '#FFFFFF',
   },
+  tabStripBadge: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 20,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  tabStripBadgeActive: {
+    backgroundColor: 'rgba(99,102,241,0.35)',
+  },
+  tabStripBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-Bold',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  tabStripBadgeTextActive: {
+    color: '#FFFFFF',
+  },
+  tabStripActiveBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 8,
+    right: 8,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(99,102,241,0.9)',
+  },
+  // ── Param Selector (kept for other uses) ────────────────────────────────────
   oilUsedRow: {
     flexDirection: "row",
     alignItems: "center",

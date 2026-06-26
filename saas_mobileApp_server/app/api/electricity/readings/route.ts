@@ -134,8 +134,35 @@ export async function POST(request: NextRequest) {
       result = data;
     }
 
-    // 4. Update meter last_reading
-    await admin.from("electricity_meters").update({ last_reading: body.closing_reading }).eq("id", body.meter_id);
+    // 4. Dual write to facility_meter_readings
+    const { error: fwError } = await admin.from("facility_meter_readings").upsert({
+      meter_id: body.meter_id,
+      reading_date: body.reading_date,
+      property_id: propertyId,
+      initial_reading: body.opening_reading,
+      final_reading: body.closing_reading,
+      consumption: finalUnits,
+      meter_constant_used: multiplierValue,
+    }, {
+      onConflict: "meter_id,reading_date"
+    });
+    
+    if (fwError) {
+      console.warn("[saas-mobile-server] Dual write to facility_meter_readings failed:", fwError);
+    }
+
+    // 5. Update meter last_reading chronologically
+    const { data: latestReading } = await admin
+      .from("electricity_readings")
+      .select("closing_reading")
+      .eq("meter_id", body.meter_id)
+      .eq("property_id", propertyId)
+      .order("reading_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    await admin.from("electricity_meters").update({ last_reading: latestReading?.closing_reading ?? body.closing_reading }).eq("id", body.meter_id);
 
     return NextResponse.json({ success: true, reading: result }, { status: existing?.id ? 200 : 201 });
   } catch (error) {

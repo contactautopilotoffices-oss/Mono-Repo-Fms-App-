@@ -55,7 +55,7 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
       requestCameraPermission();
       requestMicPermission();
       // Delay camera mount to allow modal slide animation to finish without stuttering
-      const t = setTimeout(() => setIsCameraReady(true), 50);
+      const t = setTimeout(() => setIsCameraReady(true), 350);
       return () => clearTimeout(t);
     } else {
       setIsCameraReady(false);

@@ -56,15 +56,15 @@ export async function readFileAsArrayBuffer(uri: string): Promise<ArrayBuffer> {
 }
 
 /**
- * Compresses an image to be under ~1MB and limits dimensions to 1200px.
+ * Compresses an image to match the web app: max 1280px width, WEBP format, 0.8 quality.
  * Returns the local URI of the compressed image.
  */
 export async function compressImage(uri: string): Promise<string> {
   try {
     const result = await ImageManipulator.manipulateAsync(
       uri,
-      [{ resize: { width: 1200 } }], // Resize width to 1200px (keeps aspect ratio)
-      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG } // 70% quality JPEG
+      [{ resize: { width: 1280 } }], // Resize width to 1280px (keeps aspect ratio)
+      { compress: 0.8, format: ImageManipulator.SaveFormat.WEBP } // 80% quality WEBP
     );
     return result.uri;
   } catch (err) {
@@ -74,9 +74,9 @@ export async function compressImage(uri: string): Promise<string> {
 }
 
 /**
- * Gets a clean, consistent path for storage.
- * Uses a FIXED filename per slot so replacements overwrite the old file directly.
- * The extension must match the ACTUAL file type being stored.
+ * Gets a FIXED path for storage (no timestamp).
+ * Always uses the same filename per slot so uploads always overwrite the previous file.
+ * Extension must match the ACTUAL file type being stored.
  */
 export function getStoragePath(
   propertyId: string,
@@ -84,12 +84,12 @@ export function getStoragePath(
   type: 'before' | 'after',
   extension: 'jpg' | 'mp4'
 ): string {
-  return `${propertyId}/${ticketId}/${type}_${Date.now()}.${extension}`;
+  return `${propertyId}/${ticketId}/${type}.${extension}`;
 }
 
 /**
  * Gets the storage path for a specific media type (photo or video) for a slot.
- * Used to find and delete the old file before uploading a replacement.
+ * Matches getStoragePath — uses the same fixed naming so old files CAN be deleted.
  */
 export function getStoragePathForSlot(
   propertyId: string,

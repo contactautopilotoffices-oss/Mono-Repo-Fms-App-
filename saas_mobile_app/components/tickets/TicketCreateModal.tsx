@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiFetch } from '@/utils/api/mobileApi';
-import { createTicket, uploadTicketPhoto, fetchUsersList } from '@/utils/api/mobileApi';
+import { createTicket, uploadTicketMedia, fetchUsersList } from '@/utils/api/mobileApi';
 import MediaCaptureModal, { MediaFile } from '../shared/MediaCaptureModal';
 import { useTheme } from '@/context';
 import { enhancePrompt } from '@/utils/ai/promptEnhancer';
@@ -86,9 +86,9 @@ export function TicketCreateModal({
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [taggedUser, setTaggedUser] = useState<{ id: string; full_name: string } | null>(null);
 
-  // Enhancer & Voice
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordDuration, setRecordDuration] = useState(0);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -224,7 +224,7 @@ export function TicketCreateModal({
           let uriToUpload = media.uri;
           if (media.type === 'image') uriToUpload = await compressImage(media.uri);
           
-          await uploadTicketPhoto(newTicketId, uriToUpload, 'before');
+          await uploadTicketMedia(newTicketId, uriToUpload, 'before', media.type);
         } catch (uploadError) {
           console.error('Failed to upload media:', uploadError);
         }
@@ -252,6 +252,7 @@ export function TicketCreateModal({
     setShowMentionDropdown(false);
     setIsEnhancing(false);
     setIsRecording(false);
+    setIsTranscribing(false);
     setRecordDuration(0);
     if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
   };
@@ -269,13 +270,17 @@ export function TicketCreateModal({
   const handleMicPress = async () => {
     if (isRecording) {
       setIsRecording(false);
+      setIsTranscribing(true);
       if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
       const uri = await stopRecording();
       setRecordDuration(0);
       if (uri) {
         const text = await transcribeAudio(uri);
+        setIsTranscribing(false);
         if (text) { setDescription((prev) => (prev ? prev + ' ' + text : text)); }
         else { setError('Could not transcribe audio.'); setTimeout(() => setError(null), 3000); }
+      } else {
+        setIsTranscribing(false);
       }
     } else {
       const started = await startRecording();
@@ -479,6 +484,20 @@ export function TicketCreateModal({
                       </View>
                     )}
 
+                    {/* Listening/Transcribing Indicator */}
+                    {(isRecording || isTranscribing) && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingHorizontal: 4 }}>
+                        {isTranscribing ? (
+                           <ActivityIndicator size="small" color="#A5B4FC" />
+                        ) : (
+                           <Ionicons name="mic" size={14} color="#F87171" />
+                        )}
+                        <Text style={{ color: isTranscribing ? '#A5B4FC' : '#F87171', fontSize: 12, fontStyle: 'italic', fontWeight: '600' }}>
+                          {isTranscribing ? 'Processing voice...' : `Listening... (${recordDuration}s)`}
+                        </Text>
+                      </View>
+                    )}
+
                     {/* Toolbar */}
                     <View style={styles.toolbar}>
                       <View style={styles.toolbarLeft}>
@@ -503,17 +522,22 @@ export function TicketCreateModal({
                         </TouchableOpacity>
 
                         <TouchableOpacity
-                          style={[styles.pillBtn, isRecording && styles.pillBtnRecording]}
+                          style={[styles.pillBtn, (isRecording || isTranscribing) && styles.pillBtnRecording]}
                           onPress={handleMicPress}
+                          disabled={isTranscribing}
                           activeOpacity={0.7}
                         >
-                          <Ionicons
-                            name={isRecording ? 'stop-circle' : 'mic-outline'}
-                            size={13}
-                            color={isRecording ? '#F87171' : 'rgba(255,255,255,0.7)'}
-                          />
-                          <Text style={[styles.pillBtnText, isRecording && { color: '#F87171' }]}>
-                            {isRecording ? `${recordDuration}s` : 'Voice'}
+                          {isTranscribing ? (
+                             <ActivityIndicator size="small" color="#A5B4FC" />
+                          ) : (
+                            <Ionicons
+                              name={isRecording ? 'stop-circle' : 'mic-outline'}
+                              size={13}
+                              color={isRecording ? '#F87171' : 'rgba(255,255,255,0.7)'}
+                            />
+                          )}
+                          <Text style={[styles.pillBtnText, isRecording && { color: '#F87171' }, isTranscribing && { color: '#A5B4FC' }]}>
+                            {isTranscribing ? 'Parsing' : isRecording ? `${recordDuration}s` : 'Voice'}
                           </Text>
                         </TouchableOpacity>
                       </View>

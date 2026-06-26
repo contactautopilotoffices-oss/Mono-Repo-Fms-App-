@@ -104,6 +104,12 @@ export const electricityService = {
     return { success: !res.error, data: null, error: res.error };
   },
 
+  // ── Update Meter ──────────────────────────────────────────────────────────
+  async updateMeter(meterId: string, payload: Partial<ElectricityMeter>) {
+    const res = await serverApi.patch<{ meter: ElectricityMeter }>(`/api/electricity/meters/${meterId}`, payload);
+    return { success: !res.error, data: res.data?.meter ?? null, error: res.error };
+  },
+
   // ── Fetch Readings ────────────────────────────────────────────────────────
   async fetchReadings(propertyId: string, filters?: { meterId?: string; fromDate?: string; toDate?: string }) {
     const query: Record<string, string> = { propertyId };

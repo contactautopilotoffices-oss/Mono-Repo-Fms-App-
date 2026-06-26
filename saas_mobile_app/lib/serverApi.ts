@@ -60,6 +60,19 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
       'Content-Type': 'application/json',
     };
 
+    const { createClient } = require('@/utils/supabase/client');
+    const supabase = createClient();
+    
+    // If no token was provided, try to fetch it directly from the local client session
+    if (!authToken) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        authToken = data?.session?.access_token || null;
+      } catch (e) {
+        console.warn('[serverApi] Failed to get session for auth token:', e);
+      }
+    }
+
     if (authToken) {
       headers['Authorization'] = `Bearer ${authToken}`;
       
@@ -71,11 +84,8 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
       if (projectIdMatch) {
         const projectId = projectIdMatch[1];
         const cookieName = `sb-${projectId}-auth-token`;
-        // Since we only have the access token from getSupabaseToken(), we can't fully rebuild the session.
-        // However, we can use the local createClient to get the full session.
-        const { createClient } = require('@/utils/supabase/client');
-        const supabase = createClient();
-        supabase.auth.getSession().then(({ data }: any) => {
+        try {
+          const { data } = await supabase.auth.getSession();
           if (data?.session) {
             const cookieValue = JSON.stringify([
               data.session.access_token,
@@ -86,7 +96,9 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
             ]);
             headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
           }
-        }).catch(() => {});
+        } catch (e) {
+          console.warn('[serverApi] Failed to synthesize cookie:', e);
+        }
       }
     }
 
@@ -102,6 +114,16 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
 
   // Retry once on 401 — force-refresh the session to get a fresh access token
   if (response.status === 401) {
+    token = await getSupabaseToken(true);
+    if (token) {
+      response = await doFetch(token);
+    }
+  }
+
+  // Retry once on 403 — property-switching race: prefetch fires before the
+  // session token is updated; a force-refresh gets the correct fresh token
+  // which lets the server re-evaluate the user's property_membership.
+  if (response.status === 403) {
     token = await getSupabaseToken(true);
     if (token) {
       response = await doFetch(token);
@@ -171,6 +193,14 @@ async function serverGet(
 
   // Retry once on 401 — force-refresh the session to get a fresh access token
   if (response.status === 401) {
+    token = await getSupabaseToken(true);
+    if (token) {
+      response = await doFetch(token);
+    }
+  }
+
+  // Retry once on 403 — property-switching race (same as serverFetch above)
+  if (response.status === 403) {
     token = await getSupabaseToken(true);
     if (token) {
       response = await doFetch(token);
@@ -311,10 +341,25 @@ export const serverApi = {
   },
 
   async request(endpoint: string, method: string, body?: unknown): Promise<unknown> {
-    const doFetch = async (authToken: string | null) => {
+    const doFetch = async (tokenParam: string | null) => {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
+      
+      const { createClient } = require('@/utils/supabase/client');
+      const supabase = createClient();
+      let authToken = tokenParam;
+      
+      // If no token was provided, try to fetch it directly from the local client session
+      if (!authToken) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          authToken = data?.session?.access_token || null;
+        } catch (e) {
+          console.warn('[serverApi] Failed to get session for auth token:', e);
+        }
+      }
+
       if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`;
         const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
@@ -322,8 +367,6 @@ export const serverApi = {
         if (projectIdMatch) {
           const projectId = projectIdMatch[1];
           const cookieName = `sb-${projectId}-auth-token`;
-          const { createClient } = require('@/utils/supabase/client');
-          const supabase = createClient();
           try {
             const { data } = await supabase.auth.getSession();
             if (data?.session) {
@@ -336,7 +379,9 @@ export const serverApi = {
               ]);
               headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('[serverApi] Failed to synthesize cookie:', e);
+          }
         }
       }
       return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {

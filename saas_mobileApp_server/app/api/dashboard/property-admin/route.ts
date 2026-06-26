@@ -103,27 +103,34 @@ export async function GET(request: NextRequest) {
         .select('revenue_amount, vendor_id')
         .in('property_id', propIds),
         
-      // Total Tickets Count
-      admin.from('tickets')
-        .select('id', { count: 'exact', head: true })
-        .in('property_id', propIds),
-        
-      // Open Tickets Count
-      admin.from('tickets')
-        .select('id', { count: 'exact', head: true })
-        .in('property_id', propIds)
-        .in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
-        
-      // Closed Tickets Count
-      admin.from('tickets')
-        .select('id', { count: 'exact', head: true })
-        .in('property_id', propIds)
-        .in('status', ['resolved', 'closed']),
+      // Total Tickets Count (All)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds),
+      // Open Tickets Count (All)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
+      // Closed Tickets Count (All)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).in('status', ['resolved', 'closed']),
+      
+      // Total Tickets Count (Month)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+      // Open Tickets Count (Month)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
+      // Closed Tickets Count (Month)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).in('status', ['resolved', 'closed']),
+
+      // Total Tickets Count (Today)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr),
+      // Open Tickets Count (Today)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr).in('status', ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked']),
+      // Closed Tickets Count (Today)
+      admin.from('tickets').select('id', { count: 'exact', head: true }).in('property_id', propIds).gte('created_at', todayStr).in('status', ['resolved', 'closed']),
+
+      // Tenant Users
+      admin.from('property_memberships').select('user_id').in('property_id', propIds).in('role', ['tenant', 'super_tenant']),
     ]);
 
     // Build the per-property parallel queries
     const perPropQueries = Promise.all(propIds.map(async (pid) => {
-      const [elec, diesel, health, attention, funnel, ppm] = await Promise.all([
+      const [elec, diesel, health, attention, funnel, ppm, ppmSchedules] = await Promise.all([
         admin.from('electricity_readings')
           .select('final_units, created_at')
           .eq('property_id', pid)
@@ -138,9 +145,13 @@ export async function GET(request: NextRequest) {
         admin.rpc('get_property_health_score', { p_property_id: pid }),
         admin.rpc('get_attention_items', { p_property_id: pid, p_limit: 10 }),
         admin.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }),
-        admin.rpc("get_ppm_stats", { prop_id: pid })
+        admin.rpc("get_ppm_stats", { prop_id: pid }),
+        admin.from('ppm_schedules')
+          .select('id, system_name, detail_name, planned_date, status, frequency')
+          .eq('property_id', pid)
+          .order('planned_date', { ascending: true })
       ]);
-      return { elec, diesel, health, attention, funnel, ppm };
+      return { elec, diesel, health, attention, funnel, ppm, ppmSchedules };
     }));
 
     // Wait for all queries to execute
@@ -152,9 +163,10 @@ export async function GET(request: NextRequest) {
         sopCompletionsRes, 
         vmsRes, 
         revRes, 
-        countTotalRes, 
-        countOpenRes, 
-        countClosedRes
+        countTotalAllRes, countOpenAllRes, countClosedAllRes,
+        countTotalMonthRes, countOpenMonthRes, countClosedMonthRes,
+        countTotalTodayRes, countOpenTodayRes, countClosedTodayRes,
+        tenantUsersRes
       ], 
       perPropResults
     ] = await Promise.all([bulkQueries, perPropQueries]);
@@ -223,6 +235,9 @@ export async function GET(request: NextRequest) {
       }
     });
 
+    // Collect PPM schedules from all properties
+    const ppmSchedulesArr = perPropResults.flatMap(res => res.ppmSchedules?.data ?? []);
+
     // Derive final fields
     const healthScore = propIds.length > 0 ? Math.round(healthSum / propIds.length) : 100;
     const sortedAttention = attentionArr.sort((a, b) => {
@@ -230,14 +245,19 @@ export async function GET(request: NextRequest) {
       return score(b.severity) - score(a.severity);
     }).slice(0, 10);
     const ticketFunnel = Object.entries(funnelCounts).map(([status_label, ticket_count]) => ({ status_label, ticket_count }));
+    const tenantData = tenantUsersRes?.data || [];
+    const tenantUserIds = tenantData.map((t: any) => t.user_id).filter(Boolean);
 
+    // --- RETURN PAYLOAD ---
     const dashboardData = {
+      propertyId,
       propertyName: propRes?.data?.name ?? "",
+      propertyLogoUrl: propRes?.data?.image_url ?? null,
       tickets: ticketRes.data ?? [],
       ticketCounts: {
-        total: countTotalRes?.count ?? 0,
-        open: countOpenRes?.count ?? 0,
-        closed: countClosedRes?.count ?? 0,
+        all: { total: countTotalAllRes?.count ?? 0, open: countOpenAllRes?.count ?? 0, closed: countClosedAllRes?.count ?? 0 },
+        month: { total: countTotalMonthRes?.count ?? 0, open: countOpenMonthRes?.count ?? 0, closed: countClosedMonthRes?.count ?? 0 },
+        today: { total: countTotalTodayRes?.count ?? 0, open: countOpenTodayRes?.count ?? 0, closed: countClosedTodayRes?.count ?? 0 },
       },
       sopTotal: sopTemplatesRes.count ?? 0,
       sopCount: sopCompletionsRes.count ?? 0,
@@ -252,15 +272,17 @@ export async function GET(request: NextRequest) {
         level: dieselCount > 0 ? Math.round(totalDieselLevel / dieselCount) : 0,
         consumption: Math.round(totalDieselConsumption),
       },
-      ppmStats: {
+      ppm: {
         total: pTotal,
         done: pDone,
         pending: pPending,
         overdue: pOverdue,
         postponed: pPostponed
       },
+      ppmSchedules: ppmSchedulesArr,
+      tenantUserIds,
       loadedPropertyId: propertyId,
-      lastUpdatedAt: Date.now(),
+      fetchedAt: Date.now(),
     };
 
     // 3. Store in Redis

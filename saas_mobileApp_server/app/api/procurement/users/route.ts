@@ -7,18 +7,29 @@ export async function GET(request: NextRequest) {
         const auth = await getAuthenticatedUser(request);
         if (auth.response || !auth.user) return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+        const { searchParams } = new URL(request.url);
+        const organizationId = searchParams.get('organizationId');
+
         const adminSupabase = createAdminClient();
 
-        // Fetch users from organization_memberships with procurement/org_admin role
-        const { data: orgMemberships, error: orgError } = await adminSupabase
+        // Build query for organization_memberships with procurement role only
+        let query = adminSupabase
             .from('organization_memberships')
             .select(`
                 user_id,
+                organization_id,
                 user:users!user_id(id, full_name, email, user_photo_url),
                 role
             `)
-            .in('role', ['procurement', 'org_super_admin', 'master_admin'])
+            .eq('role', 'procurement')
             .eq('is_active', true);
+
+        // Filter by organization if provided
+        if (organizationId) {
+            query = query.eq('organization_id', organizationId);
+        }
+
+        const { data: orgMemberships, error: orgError } = await query;
 
         if (orgError) {
             console.error('Error fetching procurement users:', orgError);

@@ -7,15 +7,14 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   Share,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
-// @ts-ignore
 import * as MediaLibrary from 'expo-media-library';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
@@ -29,6 +28,7 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 export default function ImagePreviewModal({ isOpen, onClose, imageUrl, title }: ImagePreviewModalProps) {
   const [loading, setLoading] = useState(false);
   const [loadingLabel, setLoadingLabel] = useState('');
+  const insets = useSafeAreaInsets();
 
   const handleDownload = async () => {
     if (!imageUrl) return;
@@ -40,9 +40,12 @@ export default function ImagePreviewModal({ isOpen, onClose, imageUrl, title }: 
         Alert.alert('Permission Required', 'Please allow access to save photos in your device settings.');
         return;
       }
-      const ext = imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
-      const localUri = `${(FileSystem as any).cacheDirectory}download_${Date.now()}.${ext}`;
-      const { uri } = await (FileSystem as any).downloadAsync(imageUrl, localUri);
+      let ext = imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
+      if (!['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext.toLowerCase())) {
+        ext = 'jpg';
+      }
+      const localUri = `${FileSystem.cacheDirectory}download_${Date.now()}.${ext}`;
+      const { uri } = await FileSystem.downloadAsync(imageUrl, localUri);
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Saved', 'Image saved to your photo library.');
     } catch (err) {
@@ -59,9 +62,12 @@ export default function ImagePreviewModal({ isOpen, onClose, imageUrl, title }: 
       setLoading(true);
       setLoadingLabel('Preparing photo...');
       // Download image to local cache first so we share the actual file, not just a URL
-      const ext = imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
-      const localUri = `${(FileSystem as any).cacheDirectory}share_${Date.now()}.${ext}`;
-      const { uri: localPath } = await (FileSystem as any).downloadAsync(imageUrl, localUri);
+      let ext = imageUrl.split('.').pop()?.split('?')[0] || 'jpg';
+      if (!['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext.toLowerCase())) {
+        ext = 'jpg';
+      }
+      const localUri = `${FileSystem.cacheDirectory}share_${Date.now()}.${ext}`;
+      const { uri: localPath } = await FileSystem.downloadAsync(imageUrl, localUri);
 
       await Share.share({
         url: `file://${localPath}`,
@@ -77,7 +83,7 @@ export default function ImagePreviewModal({ isOpen, onClose, imageUrl, title }: 
 
   return (
     <Modal visible={isOpen} animationType="fade" transparent onRequestClose={onClose}>
-      <SafeAreaView style={styles.overlay}>
+      <View style={[styles.overlay, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         {/* Header */}
         <View style={styles.header}>
           <View>
@@ -136,7 +142,7 @@ export default function ImagePreviewModal({ isOpen, onClose, imageUrl, title }: 
             <Text style={styles.closeBtnText}>Close Preview</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

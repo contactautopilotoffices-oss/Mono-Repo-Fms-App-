@@ -44,6 +44,7 @@ import { SPACING, STATUS_COLORS } from '@/constants/designSystem';
 import { GlassTile, MiniBarChart, AttentionCard } from './DashboardComponents';
 import { useDashboardQuery, invalidateDashboard } from '@/hooks/useDashboardQuery';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import PPMDashboardTile from './PPMDashboardTile';
 
 interface Props {
   propertyId: string;
@@ -81,8 +82,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const healthScore = data?.healthScore ?? 100;
   const attentionItems = data?.attentionItems ?? [];
   const tenantUserIds = data?.tenantUserIds ?? [];
-  const ppm = data?.ppm ?? { total: 0, done: 0, pending: 0, overdue: 0, postponed: 0 };
   const propertyPhoto = data?.propertyLogoUrl ?? null;
+  const ppmSchedules = data?.ppmSchedules ?? [];
 
   // ─── UI State (ephemeral) ───
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -398,13 +399,20 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           {/* Checklist */}
           <ChecklistProgressCard completed={sopCount} total={sopTotal} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
 
+          {/* PPM Calendar with dots and upcoming tasks */}
+          <PPMDashboardTile
+            propertyId={propertyId}
+            delay={220}
+            schedules={ppmSchedules}
+            loading={isLoading}
+          />
 
           {/* Energy */}
-          <GlassTile label="Energy Usage" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
+          <GlassTile label="Main Meter" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
             <View style={styles.tileTopRow}>
               <View>
-                <Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>kWh</Text></Text>
-                <Text style={styles.tileSubtext}>Grid + DG consumption today</Text>
+                <Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>Units</Text></Text>
+                <Text style={styles.tileSubtext}>Main meter consumption</Text>
               </View>
               <View style={styles.trendChip}>
                 <Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" />
@@ -449,14 +457,18 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Diesel */}
-          <GlassTile label="Diesel Status" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
+          <GlassTile label="Diesel Stock" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
             <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
               <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 2, borderColor: 'rgba(245,158,11,0.3)', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '800' }}>{dieselStats.level}%</Text>
+                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '800' }}>{dieselStats.level}%</Text>
               </View>
-              <View>
-                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>Current Level</Text>
-                <Text style={styles.tileSubtext}>Tank A + Tank B summary</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{dieselStats.consumption} L</Text>
+                <Text style={styles.tileSubtext}>Current stock level</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Level</Text>
+                <Text style={{ color: '#F59E0B', fontSize: 16, fontWeight: '800' }}>{dieselStats.level}%</Text>
               </View>
             </View>
           </GlassTile>

@@ -2,7 +2,7 @@
 import { useMemo, useEffect } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/utils/supabase/client';
-import { listTickets } from '@/utils/api/mobileApi';
+import { serverApi } from '@/lib/serverApi';
 
 export interface Ticket {
   id: string;
@@ -42,22 +42,36 @@ export function useTenantTickets(propertyId: string | undefined, userId: string 
     queryKey: ['tenant_tickets', propertyId, filters],
     queryFn: async ({ pageParam = 0 }) => {
       if (!propertyId) return [];
-      console.log('[useTenantTickets] Fetching via API (Infinite) for propertyId:', propertyId, 'offset:', pageParam, 'filters:', filters);
+      console.log('[useTenantTickets] Fetching directly from DB (Infinite) for propertyId:', propertyId, 'offset:', pageParam, 'filters:', filters);
       
-      const res = await listTickets({ 
-        propertyId,
+      const filtersArr: any[] = [
+        { op: 'eq', column: 'property_id', value: propertyId },
+        { op: 'eq', column: 'internal', value: false } // only fetch tenant/external tickets
+      ];
+      
+      if (filters?.status && filters.status !== 'all') {
+        filtersArr.push({ op: 'eq', column: 'status', value: filters.status });
+      }
+      if (filters?.search) {
+        filtersArr.push({ op: 'ilike', column: 'title', value: `%${filters.search}%` });
+      }
+
+      const res = await serverApi.query<{ data: Ticket[] }>({
+        table: 'tickets',
+        action: 'select',
+        select: 'id, ticket_number, title, description, status, priority, created_at, raised_by, assigned_to, assignee:users!assigned_to(full_name, user_photo_url)',
+        filters: filtersArr,
         limit: LIMIT,
         offset: pageParam,
-        status: filters?.status === 'all' ? undefined : filters?.status,
-        dateFrom: filters?.dateFrom,
-        dateTo: filters?.dateTo,
-        search: filters?.search,
-        excludeInternal: true,
+        orderBy: { column: 'created_at', ascending: false }
       });
       
-      // Filter out internal tickets as this is the tenant view
-      const tenantTickets = (res.tickets || []).filter((t: any) => !t.internal);
-      return tenantTickets as Ticket[];
+      if (res.error) {
+        console.error('[useTenantTickets] Error fetching tickets:', res.error);
+        return [];
+      }
+      
+      return res.data || [];
     },
     getNextPageParam: (lastPage: Ticket[], allPages: Ticket[][]) => {
       // If we got fewer items than the limit, we're at the end

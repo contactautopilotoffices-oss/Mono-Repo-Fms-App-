@@ -22,6 +22,7 @@ import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/context';
 import TicketListItem from '@/components/tickets/TicketListItem';
+import TicketListItemSkeleton from '@/components/tickets/TicketListItemSkeleton';
 import MediaCaptureModal, { MediaFile } from '@/components/shared/MediaCaptureModal';
 import { GlassCard } from '@/constants/designSystem';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -589,9 +590,11 @@ const onRefresh = () => {
 
         {/* Ticket List */}
         {isLoading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color="#7CB9A8" />
-          </View>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <TicketListItemSkeleton key={i} />
+            ))}
+          </ScrollView>
         ) : displayedTickets.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="ticket-outline" size={64} color={isDark ? '#4B5563' : '#CBD5E1'} />

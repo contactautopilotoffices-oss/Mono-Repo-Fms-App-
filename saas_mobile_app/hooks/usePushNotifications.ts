@@ -23,9 +23,10 @@ async function initializeFirebaseApp(): Promise<boolean> {
     // at NATIVE BUILD TIME via the com.google.gms.google-services gradle plugin.
     // It is NOT possible to initialize it from JS at runtime.
     // If getApp() throws, the APK was built WITHOUT the google-services plugin.
-    const app = rnfbApp.default ? rnfbApp.default.getApp() : rnfbApp.getApp();
-    console.log('[Push] ✅ Firebase native app ready:', app.name);
-    firebaseApp = rnfbApp.default || rnfbApp;
+    // Use modular getApp if available, otherwise fallback to default namespace
+    const app = typeof rnfbApp.getApp === 'function' ? rnfbApp.getApp() : (rnfbApp.default ? rnfbApp.default.app() : rnfbApp.app());
+    console.log('[Push] ✅ Firebase native app ready:', app?.name || 'default');
+    firebaseApp = rnfbApp;
     firebaseInitialized = true;
     return true;
   } catch (err: any) {
@@ -127,10 +128,19 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (firebaseInitialized && tryLoadFirebaseNative()) {
     try {
       console.log('[Push] Trying @react-native-firebase/messaging...');
-      // messaging is a factory function: messaging() returns the instance
-      const messagingFactory = firebaseMessaging.default || firebaseMessaging;
-      const messagingInstance = messagingFactory();
-      const fcmToken = await messagingInstance.getToken();
+      let fcmToken;
+      const getToken = firebaseMessaging.getToken || firebaseMessaging.default?.getToken;
+      if (typeof getToken === 'function') {
+        // V22+ Modular API
+        fcmToken = await getToken();
+      } else {
+        // V21 and below
+        const factory = firebaseMessaging.default || firebaseMessaging;
+        const instance = factory();
+        if (instance) {
+          fcmToken = await instance.getToken();
+        }
+      }
       if (fcmToken) {
         token = fcmToken;
         console.log('[Push] ✅ FCM Token (native):', token?.substring(0, 20) + '...');
@@ -142,26 +152,18 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     console.log('[Push] Skipping native FCM — Firebase app not initialized in this build');
   }
 
-  // Fallback: Try expo-notifications (works with Expo EAS builds if FCM configured)
-  if (!token) {
+  // Exponent push token fallback removed because the backend exclusively uses raw FCM tokens.
+  // Expo Push tokens ("ExponentPushToken[...]") are incompatible with direct Firebase Admin SDK sending.
+  if (!token && Platform.OS !== 'web') {
+    console.log('[Push] Falling back to expo-notifications getDevicePushTokenAsync (raw FCM/APNs token)...');
     try {
-      console.log('[Push] Trying expo-notifications push token...');
-
-      // Get project ID for EAS builds
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      if (projectId) {
-        const tokenResult = await Notifications.getExpoPushTokenAsync({
-          projectId,
-        });
-        if (tokenResult?.data) {
-          token = tokenResult.data;
-          console.log('[Push] ✅ Expo Push Token:', token?.substring(0, 40) + '...');
-        }
-      } else {
-        console.log('[Push] ℹ️ No EAS projectId configured - skipping expo push token');
+      const deviceTokenResult = await Notifications.getDevicePushTokenAsync();
+      if (deviceTokenResult?.data) {
+        token = deviceTokenResult.data;
+        console.log('[Push] ✅ Device Push Token (raw):', token?.substring(0, 40) + '...');
       }
     } catch (err: any) {
-      console.warn('[Push] Expo push token error:', err.message);
+      console.warn('[Push] Device push token error:', err.message);
     }
   }
 
@@ -233,7 +235,11 @@ async function storePushToken(
       );
 
       if (fallbackError) {
-        console.error('[Push] ❌ Mobile server store failed:', fallbackError.message);
+        if (fallbackError.message?.includes('401') || fallbackError.message?.includes('Missing bearer token')) {
+          console.warn('[Push] Mobile server store failed (unauthenticated):', fallbackError.message);
+        } else {
+          console.error('[Push] ❌ Mobile server store failed:', fallbackError.message);
+        }
         return false;
       }
     }
@@ -381,15 +387,30 @@ export function usePushNotifications() {
     (async () => {
       try {
         if (firebaseInitialized && tryLoadFirebaseNative()) {
-          const messagingFactory = firebaseMessaging.default || firebaseMessaging;
-          const messagingInstance = messagingFactory();
-          unsubscribe = messagingInstance.onTokenRefresh(async (newToken: string) => {
-            console.log('[Push] Token refreshed via Firebase:', newToken);
-            if (user?.id) {
-              storePushToken(user.id, newToken, propertyId, organizationId);
-              tokenRef.current = newToken;
+          const onTokenRefresh = firebaseMessaging.onTokenRefresh || firebaseMessaging.default?.onTokenRefresh;
+          if (typeof onTokenRefresh === 'function') {
+            // V22+ Modular API
+            unsubscribe = onTokenRefresh(async (newToken: string) => {
+              console.log('[Push] Token refreshed via Firebase:', newToken);
+              if (user?.id) {
+                storePushToken(user.id, newToken, propertyId, organizationId);
+                tokenRef.current = newToken;
+              }
+            });
+          } else {
+            // V21 and below
+            const factory = firebaseMessaging.default || firebaseMessaging;
+            const instance = factory();
+            if (instance) {
+              unsubscribe = instance.onTokenRefresh(async (newToken: string) => {
+                console.log('[Push] Token refreshed via Firebase:', newToken);
+                if (user?.id) {
+                  storePushToken(user.id, newToken, propertyId, organizationId);
+                  tokenRef.current = newToken;
+                }
+              });
             }
-          });
+          }
         }
       } catch (err) {
         console.warn('[Push] Failed to subscribe to token refresh:', err);
@@ -425,7 +446,13 @@ export function usePushNotifications() {
           tokenRef.current = null;
           registeredRef.current = false;
         })
-        .catch((err: any) => console.error('[Push] Token deactivation error:', err));
+        .catch((err: any) => {
+          if (err.message?.includes('401') || err.message?.includes('Missing bearer token')) {
+            console.warn('[Push] Token deactivation skipped (no session)');
+          } else {
+            console.error('[Push] Token deactivation error:', err);
+          }
+        });
     }
   }, [user]);
 

@@ -129,13 +129,14 @@ const TicketCard = memo(function TicketCard({
         styles.card,
         {
           backgroundColor: glass 
-            ? (isDark ? 'rgba(30, 41, 59, 0.55)' : 'rgba(255, 255, 255, 0.75)')
-            : (isDark ? '#1E293B' : '#FFFFFF'),
+            ? (isDark ? 'rgba(18, 18, 18, 0.55)' : 'rgba(255, 255, 255, 0.75)')
+            : (isDark ? '#121212' : '#FFFFFF'),
           borderColor: glass
             ? (isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.05)')
             : (isDark ? 'rgba(255, 255, 255, 0.1)' : '#E2E8F0'),
           padding: compact ? 12 : 16, 
           gap: compact ? 8 : 12,
+          borderWidth: 1.5,
         },
         isCritical && { borderWidth: 2, borderColor: '#EF4444' },
         raisedByTenant && !isCritical && { borderWidth: 2, borderColor: '#F59E0B' },

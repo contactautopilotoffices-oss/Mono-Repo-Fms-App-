@@ -26,11 +26,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     const { data: members, error } = await admin
       .from("property_memberships")
       .select(`
-        id,
         role,
         is_active,
         created_at,
-        user:users!raised_by(
+        user:users(
           id,
           full_name,
           email,
@@ -49,7 +48,6 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
     // Transform to flat structure
     const users = (members ?? []).map((m: any) => ({
-      membership_id: m.id,
       role: m.role,
       is_active: m.is_active,
       created_at: m.created_at,
@@ -69,3 +67,4 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
