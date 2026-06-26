@@ -1268,6 +1268,16 @@ export default function DieselScreen() {
   >(undefined);
   const [showTariffModal, setShowTariffModal] = useState(false);
 
+  const [historyPeriod, setHistoryPeriod] = useState<Period | "all" | "custom">("all");
+  const [historyStartDateStr, setHistoryStartDateStr] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [historyEndDateStr, setHistoryEndDateStr] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [historyGenFilter, setHistoryGenFilter] = useState<string>("all");
+  const [showHistoryStartDatePicker, setShowHistoryStartDatePicker] = useState(false);
+  const [showHistoryEndDatePicker, setShowHistoryEndDatePicker] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [isFetchingMoreHistory, setIsFetchingMoreHistory] = useState(false);
+
   const handleDeleteGenerator = async (id: string) => {
     Alert.alert(
       "Delete Generator",
@@ -1329,25 +1339,71 @@ export default function DieselScreen() {
     if (mode === "history") setShowHistoryModal(true);
   }, [mode]);
 
-  const fetchHistoryReadings = async () => {
+  useEffect(() => {
+    if (showHistoryModal) {
+      setHistoryOffset(0);
+      setHasMoreHistory(true);
+      fetchHistoryReadings(true, 0);
+    }
+  }, [historyPeriod, historyStartDateStr, historyEndDateStr, historyGenFilter, showHistoryModal]);
+
+  const fetchHistoryReadings = async (isReset = false, currentOffset = 0) => {
     if (!propertyId) return;
-    setIsLoadingHistory(true);
+
+    if (isReset) {
+      setIsLoadingHistory(true);
+    } else {
+      setIsFetchingMoreHistory(true);
+    }
+
     try {
+      const filters: any[] = [{ op: 'eq', column: 'property_id', value: propertyId }];
+      
+      if (historyGenFilter !== 'all') {
+        filters.push({ op: 'eq', column: 'generator_id', value: historyGenFilter });
+      }
+      if (historyPeriod !== 'all') {
+        if (historyPeriod === 'custom') {
+          filters.push({ op: 'gte', column: 'reading_date', value: historyStartDateStr });
+          filters.push({ op: 'lte', column: 'reading_date', value: historyEndDateStr });
+        } else {
+          const { start, end } = getPeriodDates(historyPeriod as Period);
+          filters.push({ op: 'gte', column: 'reading_date', value: start });
+          filters.push({ op: 'lte', column: 'reading_date', value: end });
+        }
+      }
+
       const { data } = await serverApi.query<DieselReading[]>({
         table: 'diesel_readings',
         action: 'select',
         select: '*',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        filters,
+        limit: 30,
+        offset: currentOffset,
         orders: [
           { column: 'reading_date', ascending: false },
           { column: 'created_at', ascending: false },
         ],
       });
-      setHistoryReadings((data as DieselReading[]) || []);
+      
+      const newReadings = (data as DieselReading[]) || [];
+      if (newReadings.length < 30) {
+        setHasMoreHistory(false);
+      }
+      if (isReset) {
+        setHistoryReadings(newReadings);
+      } else {
+        setHistoryReadings(prev => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const uniqueNewReadings = newReadings.filter(r => !existingIds.has(r.id));
+          return [...prev, ...uniqueNewReadings];
+        });
+      }
     } catch (e) {
       console.error("Error fetching history:", e);
     } finally {
       setIsLoadingHistory(false);
+      setIsFetchingMoreHistory(false);
     }
   };
 
@@ -1546,66 +1602,6 @@ export default function DieselScreen() {
         </View>
       </SafeBlurView>
 
-      {/* Parameters Card */}
-      <View
-        style={[
-          styles.paramCard,
-          {
-            backgroundColor: "rgba(255, 255, 255, 0.05)",
-            borderColor: "rgba(255, 255, 255, 0.08)",
-            borderWidth: 1,
-          },
-        ]}
-      >
-        <View style={styles.paramHeader}>
-          <Ionicons
-            name="options-outline"
-            size={14}
-            color="rgba(255, 255, 255, 0.4)"
-          />
-          <Text style={styles.paramTitle}>Parameters</Text>
-        </View>
-
-        {/* Period Selector Pill */}
-        <View style={styles.paramSelectorContainer}>
-          {PERIODS.map((p) => {
-            const isActive = period === p.value;
-            return (
-              <TouchableOpacity
-                key={p.value}
-                style={[
-                  styles.paramSelectorBtn,
-                  isActive && styles.paramSelectorBtnActive,
-                ]}
-                onPress={() => setPeriod(p.value)}
-              >
-                <Text
-                  style={[
-                    styles.paramSelectorBtnText,
-                    isActive && styles.paramSelectorBtnTextActive,
-                  ]}
-                >
-                  {p.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <View style={styles.oilUsedRow}>
-          <Text style={styles.oilUsedLabel}>IS Oil Used :</Text>
-          <Text style={styles.oilUsedValue}>
-            {totalConsumption.toFixed(2)}Ltrs
-          </Text>
-        </View>
-
-        <View style={styles.liveRankRow}>
-          <Ionicons name="water-outline" size={14} color="#FBBF24" />
-          <Text style={styles.liveRankText}>
-            Live Rank in {generators.map((g) => g.name).join("-")}
-          </Text>
-        </View>
-      </View>
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -1725,24 +1721,124 @@ export default function DieselScreen() {
             </TouchableOpacity>
           </SafeBlurView>
 
+          {/* History Filters */}
+          <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {['all', 'today', 'week', 'month', 'custom'].map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => {
+                    setHistoryPeriod(p as any);
+                    if (p === 'custom') setShowHistoryStartDatePicker(true);
+                  }}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: historyPeriod === p ? colors.primary : 'rgba(255,255,255,0.05)',
+                    borderWidth: 1,
+                    borderColor: historyPeriod === p ? colors.primary : 'rgba(255,255,255,0.1)'
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: historyPeriod === p ? '#FFF' : colors.textSecondary, textTransform: 'capitalize' }}>
+                    {p === 'all' ? 'All Time' : p}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            {historyPeriod === 'custom' && (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setShowHistoryStartDatePicker(true)}
+                  style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
+                >
+                  <Text style={{ fontSize: 11, color: colors.textSecondary }}>From</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 2 }}>{historyStartDateStr}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowHistoryEndDatePicker(true)}
+                  style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
+                >
+                  <Text style={{ fontSize: 11, color: colors.textSecondary }}>To</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 2 }}>{historyEndDateStr}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={{ height: 12 }} />
+            
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => setHistoryGenFilter('all')}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 20,
+                  backgroundColor: historyGenFilter === 'all' ? '#10B981' : 'rgba(255,255,255,0.05)',
+                  borderWidth: 1,
+                  borderColor: historyGenFilter === 'all' ? '#10B981' : 'rgba(255,255,255,0.1)'
+                }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: historyGenFilter === 'all' ? '#FFF' : colors.textSecondary }}>All DGs</Text>
+              </TouchableOpacity>
+              {generators.map((g) => (
+                <TouchableOpacity
+                  key={g.id}
+                  onPress={() => setHistoryGenFilter(g.id)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: historyGenFilter === g.id ? '#10B981' : 'rgba(255,255,255,0.05)',
+                    borderWidth: 1,
+                    borderColor: historyGenFilter === g.id ? '#10B981' : 'rgba(255,255,255,0.1)'
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: historyGenFilter === g.id ? '#FFF' : colors.textSecondary }}>{g.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
           {isLoadingHistory ? (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} showsVerticalScrollIndicator={false}>
-              {historyReadings.length === 0 ? (
-                <View style={{ alignItems: 'center', paddingTop: 80, gap: 14 }}>
-                  <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center' }}>
-                    <Fuel size={36} color={colors.textTertiary} />
-                  </View>
-                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No readings yet</Text>
-                  <Text style={{ fontSize: 13, fontFamily: 'Urbanist-Medium', color: colors.textTertiary, textAlign: 'center' }}>
-                    Log your first reading using the + button
-                  </Text>
-                </View>
-              ) : (
-                Object.entries(
+            <ScrollView 
+              style={{ flex: 1 }} 
+              contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} 
+              showsVerticalScrollIndicator={false}
+              scrollEventThrottle={400}
+              onScroll={(event) => {
+                const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+                const paddingToBottom = 50;
+                if (layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom) {
+                  if (hasMoreHistory && !isFetchingMoreHistory && !isLoadingHistory) {
+                    const nextOffset = historyOffset + 30;
+                    setHistoryOffset(nextOffset);
+                    fetchHistoryReadings(false, nextOffset);
+                  }
+                }
+              }}
+            >
+              {(() => {
+                if (historyReadings.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', paddingTop: 80, gap: 14 }}>
+                      <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center' }}>
+                        <Fuel size={36} color={colors.textTertiary} />
+                      </View>
+                      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No readings yet</Text>
+                      <Text style={{ fontSize: 13, fontFamily: 'Urbanist-Medium', color: colors.textTertiary, textAlign: 'center' }}>
+                        Adjust filters or log your first reading
+                      </Text>
+                    </View>
+                  );
+                }
+
+                return Object.entries(
                   historyReadings.reduce((groups: any, r) => {
                     const month = r.reading_date
                       ? new Date(r.reading_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -1840,10 +1936,37 @@ export default function DieselScreen() {
                       );
                     })}
                   </View>
-                ))
+                ));
+              })()}
+              {isFetchingMoreHistory && (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
               )}
             </ScrollView>
           )}
+          <CustomDatePicker
+            visible={showHistoryStartDatePicker}
+            selectedDate={historyStartDateStr}
+            colors={colors}
+            onClose={() => setShowHistoryStartDatePicker(false)}
+            onSelect={(date) => {
+              setHistoryStartDateStr(date);
+              setHistoryPeriod('custom');
+              setShowHistoryStartDatePicker(false);
+            }}
+          />
+          <CustomDatePicker
+            visible={showHistoryEndDatePicker}
+            selectedDate={historyEndDateStr}
+            colors={colors}
+            onClose={() => setShowHistoryEndDatePicker(false)}
+            onSelect={(date) => {
+              setHistoryEndDateStr(date);
+              setHistoryPeriod('custom');
+              setShowHistoryEndDatePicker(false);
+            }}
+          />
         </View>
       </Modal>
 

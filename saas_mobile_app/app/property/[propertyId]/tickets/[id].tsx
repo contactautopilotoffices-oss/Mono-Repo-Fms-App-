@@ -1976,7 +1976,7 @@ export default function TicketDetailScreen() {
                 <Ionicons name="water" size={20} color="#3B82F6" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: textPrimary }}>Diesel Logger</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: textPrimary }}>Diesel</Text>
                 <Text style={{ fontSize: 12, color: textSecondary }}>Log fuel refills & generator levels</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={textTertiary} />

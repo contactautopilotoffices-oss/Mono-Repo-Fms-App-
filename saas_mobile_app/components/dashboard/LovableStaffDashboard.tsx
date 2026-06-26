@@ -766,7 +766,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
                 <View style={styles.flowTileHeader}>
                   <Ionicons name="water" size={20} color="#FBBF24" />
                 </View>
-                <Text style={styles.flowTileName}>Diesel Logger</Text>
+                <Text style={styles.flowTileName}>Diesel</Text>
                 <View style={styles.flowTileStatus}>
                   <Text style={styles.flowTileStatusText}>Record Readings</Text>
                 </View>
@@ -996,7 +996,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
                 { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
                 { label: 'Live Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
                 { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
-                { label: 'Diesel Logger', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
+                { label: 'Diesel', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
                 { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
                 { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
               ].map((item) => (

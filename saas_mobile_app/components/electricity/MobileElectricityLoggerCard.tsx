@@ -14,6 +14,8 @@ interface MobileElectricityLoggerCardProps {
   onMultiplierSave?: (meterId: string, payload: any) => Promise<void>;
   onDelete?: (meterId: string) => void;
   onEdit?: (meter: ElectricityMeter) => void;
+  sheetName?: string;
+  locationName?: string;
   colors: typeof Colors.light;
   isDark?: boolean;
 }
@@ -26,6 +28,8 @@ export function MobileElectricityLoggerCard({
   onMultiplierSave,
   onDelete,
   onEdit,
+  sheetName,
+  locationName,
   colors,
   isDark
 }: MobileElectricityLoggerCardProps) {
@@ -55,22 +59,24 @@ export function MobileElectricityLoggerCard({
         { perspective: 1000 },
         { rotateY: `${rotateY}deg` }
       ],
-      opacity: flipValue.value >= 0.5 ? 0 : 1,
-      zIndex: flipValue.value >= 0.5 ? 0 : 1,
-      position: flipValue.value >= 0.5 ? 'absolute' : 'relative',
+      backfaceVisibility: 'hidden',
+      position: flipValue.value > 0.5 ? 'absolute' : 'relative',
+      opacity: flipValue.value > 0.5 ? 0 : 1,
+      width: '100%',
     };
   });
 
   const backAnimatedStyle = useAnimatedStyle(() => {
-    const rotateY = interpolate(flipValue.value, [0, 1], [-180, 0]);
+    const rotateY = interpolate(flipValue.value, [0, 1], [180, 360]);
     return {
       transform: [
         { perspective: 1000 },
         { rotateY: `${rotateY}deg` }
       ],
-      opacity: flipValue.value >= 0.5 ? 1 : 0,
-      zIndex: flipValue.value >= 0.5 ? 1 : 0,
-      position: flipValue.value < 0.5 ? 'absolute' : 'relative',
+      backfaceVisibility: 'hidden',
+      position: flipValue.value <= 0.5 ? 'absolute' : 'relative',
+      opacity: flipValue.value <= 0.5 ? 0 : 1,
+      width: '100%',
     };
   });
 
@@ -199,9 +205,11 @@ export function MobileElectricityLoggerCard({
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={styles.headerTitleContainer}>
-              <Text style={[styles.meterName, { color: colors.text }]} numberOfLines={1}>{meter.name}</Text>
+              <Text style={[styles.meterName, { color: colors.text }]} numberOfLines={1}>
+                {locationName ? `${locationName} · ${meter.name}` : meter.name}
+              </Text>
               <Text style={[styles.meterMeta, { color: colors.textTertiary }]} numberOfLines={1}>
-                {meter.meter_type === 'main' ? 'Main Grid' : meter.meter_type || 'Meter'} · {meter.meter_number || 'No #'}
+                {sheetName ? `${sheetName} · ` : ''}{meter.meter_type === 'main' ? 'Main Grid' : meter.meter_type || 'Meter'} · {meter.meter_number || 'No #'}
               </Text>
             </View>
             <View style={styles.actionButtons}>

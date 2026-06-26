@@ -57,7 +57,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
     { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
     { label: 'Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
     { label: 'Stock', icon: 'business-outline', route: 'stock' },
-    { label: 'Diesel Logger', icon: 'water-outline', route: 'diesel', color: '#F97316' },
+    { label: 'Diesel', icon: 'water-outline', route: 'diesel', color: '#F97316' },
     { label: 'Electricity', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
     // Security section
     { label: 'Security', icon: 'shield-checkmark-outline', route: 'security', color: '#3B82F6' },

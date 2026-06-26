@@ -1906,6 +1906,16 @@ export default function ElectricityScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingMeter, setEditingMeter] = useState<ElectricityMeter | null>(null);
 
+  const [historyPeriod, setHistoryPeriod] = useState<Period | "all" | "custom">("all");
+  const [historyStartDateStr, setHistoryStartDateStr] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [historyEndDateStr, setHistoryEndDateStr] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [historyMeterFilter, setHistoryMeterFilter] = useState<string>("all");
+  const [showHistoryStartDatePicker, setShowHistoryStartDatePicker] = useState(false);
+  const [showHistoryEndDatePicker, setShowHistoryEndDatePicker] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [isFetchingMoreHistory, setIsFetchingMoreHistory] = useState(false);
+
   const handleDeleteReading = async (id: string) => {
     Alert.alert(
       "Delete Reading",
@@ -1963,32 +1973,78 @@ export default function ElectricityScreen() {
     );
   };
 
-  const fetchHistoryReadings = async () => {
+  useEffect(() => {
+    if (mode === "history") setShowHistoryModal(true);
+    if (mode === "tariffs") setShowTariffModal(true);
+  }, [mode]);
+
+  useEffect(() => {
+    if (showHistoryModal) {
+      setHistoryOffset(0);
+      setHasMoreHistory(true);
+      fetchHistoryReadings(true, 0);
+    }
+  }, [historyPeriod, historyStartDateStr, historyEndDateStr, historyMeterFilter, showHistoryModal]);
+
+  const fetchHistoryReadings = async (isReset = false, currentOffset = 0) => {
     if (!propertyId) return;
-    setIsLoadingHistory(true);
+
+    if (isReset) {
+      setIsLoadingHistory(true);
+    } else {
+      setIsFetchingMoreHistory(true);
+    }
+
     try {
+      const filters: any[] = [{ op: 'eq', column: 'property_id', value: propertyId }];
+      
+      if (historyMeterFilter !== 'all') {
+        filters.push({ op: 'eq', column: 'meter_id', value: historyMeterFilter });
+      }
+      if (historyPeriod !== 'all') {
+        if (historyPeriod === 'custom') {
+          filters.push({ op: 'gte', column: 'reading_date', value: historyStartDateStr });
+          filters.push({ op: 'lte', column: 'reading_date', value: historyEndDateStr });
+        } else {
+          const { start, end } = getPeriodDates(historyPeriod as Period);
+          filters.push({ op: 'gte', column: 'reading_date', value: start });
+          filters.push({ op: 'lte', column: 'reading_date', value: end });
+        }
+      }
+
       const { data } = await serverApi.query<ElectricityReading[]>({
         table: 'electricity_readings',
         action: 'select',
         select: '*',
-        filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+        filters,
+        limit: 30,
+        offset: currentOffset,
         orders: [
           { column: 'reading_date', ascending: false },
           { column: 'created_at', ascending: false },
         ],
       });
-      setHistoryReadings((data as ElectricityReading[]) || []);
+
+      const newReadings = (data as ElectricityReading[]) || [];
+      if (newReadings.length < 30) {
+        setHasMoreHistory(false);
+      }
+      if (isReset) {
+        setHistoryReadings(newReadings);
+      } else {
+        setHistoryReadings(prev => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const uniqueNewReadings = newReadings.filter(r => !existingIds.has(r.id));
+          return [...prev, ...uniqueNewReadings];
+        });
+      }
     } catch (e) {
       console.error("Error fetching history:", e);
     } finally {
       setIsLoadingHistory(false);
+      setIsFetchingMoreHistory(false);
     }
   };
-
-  useEffect(() => {
-    if (mode === "history") setShowHistoryModal(true);
-    if (mode === "tariffs") setShowTariffModal(true);
-  }, [mode]);
 
   const fetchData = useCallback(async () => {
     if (!propertyId) return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null, multipliers: {} as Record<string, any[]>, spreadsheets: [] as any[], meterIdsBySpreadsheet: {} as Record<string, string[]> };
@@ -2015,6 +2071,18 @@ export default function ElectricityScreen() {
         const groupIds = spreadsheetGroups.filter(g => g.category_id === sheet.id).map(g => g.id);
         const mIds = spreadsheetMeters.filter(m => groupIds.includes(m.group_id)).map(m => m.id);
         meterIdsBySpreadsheet[sheet.id] = mIds;
+      });
+
+      const meterLocations: Record<string, string> = {};
+      const meterSheets: Record<string, string> = {};
+      spreadsheetMeters.forEach(m => {
+        const group = spreadsheetGroups.find(g => g.id === m.group_id);
+        if (group) {
+          const eId = m.meter_id || m.id;
+          meterLocations[eId] = group.name;
+          const sheet = spreadsheets.find(s => s.id === group.category_id);
+          if (sheet) meterSheets[eId] = sheet.name;
+        }
       });
 
       let allMultipliers: any[] = [];
@@ -2062,11 +2130,13 @@ export default function ElectricityScreen() {
         activeTariff: currentTariff as GridTariff | null,
         multipliers: multipliersByMeter,
         spreadsheets,
-        meterIdsBySpreadsheet
+        meterIdsBySpreadsheet,
+        meterLocations,
+        meterSheets
       };
     } catch (e) {
       console.error("Electricity fetch error:", e);
-      return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null, multipliers: {} as Record<string, any[]>, spreadsheets: [] as any[], meterIdsBySpreadsheet: {} as Record<string, string[]> };
+      return { meters: [] as ElectricityMeter[], readings: [] as ElectricityReading[], previousClosings: {} as Record<string, number>, activeTariff: null as GridTariff | null, multipliers: {} as Record<string, any[]>, spreadsheets: [] as any[], meterIdsBySpreadsheet: {} as Record<string, string[]>, meterLocations: {} as Record<string, string>, meterSheets: {} as Record<string, string> };
     }
   }, [propertyId]);
 
@@ -2435,6 +2505,8 @@ const totalUnits = filteredReadings.reduce(
                 multipliers={multipliers[m.id] || []}
                 colors={colors}
                 isDark={isDark}
+                locationName={data?.meterLocations?.[m.id]}
+                sheetName={data?.meterSheets?.[m.id]}
                 onSaveReading={async (payload) => {
                   const res = await electricityService.submitReading(propertyId as string, payload);
                   if (!res.success) throw new Error(String(res.error || 'Failed to save reading'));
@@ -2475,24 +2547,124 @@ const totalUnits = filteredReadings.reduce(
             </TouchableOpacity>
           </SafeBlurView>
 
+          {/* History Filters */}
+          <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {['all', 'today', 'week', 'month', 'custom'].map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => {
+                    setHistoryPeriod(p as any);
+                    if (p === 'custom') setShowHistoryStartDatePicker(true);
+                  }}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: historyPeriod === p ? colors.primary : 'rgba(255,255,255,0.05)',
+                    borderWidth: 1,
+                    borderColor: historyPeriod === p ? colors.primary : 'rgba(255,255,255,0.1)'
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: historyPeriod === p ? '#FFF' : colors.textSecondary, textTransform: 'capitalize' }}>
+                    {p === 'all' ? 'All Time' : p}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            {historyPeriod === 'custom' && (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setShowHistoryStartDatePicker(true)}
+                  style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
+                >
+                  <Text style={{ fontSize: 11, color: colors.textSecondary }}>From</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 2 }}>{historyStartDateStr}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowHistoryEndDatePicker(true)}
+                  style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
+                >
+                  <Text style={{ fontSize: 11, color: colors.textSecondary }}>To</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 2 }}>{historyEndDateStr}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={{ height: 12 }} />
+            
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => setHistoryMeterFilter('all')}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 20,
+                  backgroundColor: historyMeterFilter === 'all' ? '#10B981' : 'rgba(255,255,255,0.05)',
+                  borderWidth: 1,
+                  borderColor: historyMeterFilter === 'all' ? '#10B981' : 'rgba(255,255,255,0.1)'
+                }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: historyMeterFilter === 'all' ? '#FFF' : colors.textSecondary }}>All Meters</Text>
+              </TouchableOpacity>
+              {meters.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  onPress={() => setHistoryMeterFilter(m.id)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    backgroundColor: historyMeterFilter === m.id ? '#10B981' : 'rgba(255,255,255,0.05)',
+                    borderWidth: 1,
+                    borderColor: historyMeterFilter === m.id ? '#10B981' : 'rgba(255,255,255,0.1)'
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: historyMeterFilter === m.id ? '#FFF' : colors.textSecondary }}>{m.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
           {isLoadingHistory ? (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
           ) : (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} showsVerticalScrollIndicator={false}>
-              {historyReadings.length === 0 ? (
-                <View style={{ alignItems: 'center', paddingTop: 80, gap: 14 }}>
-                  <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center' }}>
-                    <Zap size={36} color={colors.textTertiary} />
-                  </View>
-                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No readings yet</Text>
-                  <Text style={{ fontSize: 13, fontFamily: 'Urbanist-Medium', color: colors.textTertiary, textAlign: 'center' }}>
-                    Log your first reading using the + button
-                  </Text>
-                </View>
-              ) : (
-                Object.entries(
+            <ScrollView 
+              style={{ flex: 1 }} 
+              contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }} 
+              showsVerticalScrollIndicator={false}
+              scrollEventThrottle={400}
+              onScroll={(event) => {
+                const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+                const paddingToBottom = 50;
+                if (layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom) {
+                  if (hasMoreHistory && !isFetchingMoreHistory && !isLoadingHistory) {
+                    const nextOffset = historyOffset + 30;
+                    setHistoryOffset(nextOffset);
+                    fetchHistoryReadings(false, nextOffset);
+                  }
+                }
+              }}
+            >
+              {(() => {
+                if (historyReadings.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', paddingTop: 80, gap: 14 }}>
+                      <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center' }}>
+                        <Zap size={36} color={colors.textTertiary} />
+                      </View>
+                      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No readings yet</Text>
+                      <Text style={{ fontSize: 13, fontFamily: 'Urbanist-Medium', color: colors.textTertiary, textAlign: 'center' }}>
+                        Adjust filters or log your first reading
+                      </Text>
+                    </View>
+                  );
+                }
+
+                return Object.entries(
                   historyReadings.reduce((groups: any, r) => {
                     const meter = meters.find((m) => m.id === r.meter_id);
                     const meterName = meter?.name ?? 'Unknown Meter';
@@ -2589,10 +2761,37 @@ const totalUnits = filteredReadings.reduce(
                       );
                     })}
                   </View>
-                ))
+                ));
+              })()}
+              {isFetchingMoreHistory && (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
               )}
             </ScrollView>
           )}
+          <CustomDatePicker
+            visible={showHistoryStartDatePicker}
+            selectedDate={historyStartDateStr}
+            colors={colors}
+            onClose={() => setShowHistoryStartDatePicker(false)}
+            onSelect={(date) => {
+              setHistoryStartDateStr(date);
+              setHistoryPeriod('custom');
+              setShowHistoryStartDatePicker(false);
+            }}
+          />
+          <CustomDatePicker
+            visible={showHistoryEndDatePicker}
+            selectedDate={historyEndDateStr}
+            colors={colors}
+            onClose={() => setShowHistoryEndDatePicker(false)}
+            onSelect={(date) => {
+              setHistoryEndDateStr(date);
+              setHistoryPeriod('custom');
+              setShowHistoryEndDatePicker(false);
+            }}
+          />
         </View>
       </Modal>
 
