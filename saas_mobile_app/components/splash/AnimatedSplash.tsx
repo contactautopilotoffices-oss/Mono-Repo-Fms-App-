@@ -22,11 +22,11 @@ import { useDashboardStore } from '@/stores/dashboardStore';
 import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
 
 const MIN_DISPLAY_MS = 2200; // Minimum time logo is visible
-const ENTRANCE_DURATION = 1300; // Zoom-in duration
+const ENTRANCE_DURATION = 1600; // Smooth zoom-in duration
 const EXIT_DURATION = 700;      // Fade-up duration
-const SCALE_INITIAL = 0.35;     // Start small
-const SCALE_FINAL = 2.5;        // Camera ends inside the logo
-const EXIT_SCALE = 2.8;         // Slight extra zoom while fading up
+const SCALE_INITIAL = 0.15;     // Start far away
+const SCALE_FINAL = 2.8;        // Logo comes right up to the screen
+const EXIT_SCALE = 3.0;         // Keep moving forward while fading up
 const EXIT_TRANSLATE_Y = -60;   // Float upward while fading out
 
 interface AnimatedSplashProps {
@@ -86,7 +86,7 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
 
     scale.value = withTiming(SCALE_FINAL, {
       duration: ENTRANCE_DURATION,
-      easing: Easing.in(Easing.cubic),
+      easing: Easing.out(Easing.cubic),
     }, (finished) => {
       if (finished) {
         runOnJS(setPhase)('holding');

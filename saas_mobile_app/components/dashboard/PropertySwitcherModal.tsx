@@ -41,15 +41,11 @@ export default function PropertySwitcherModal({
     });
   }, [membership]);
 
-  // Only show "All Properties" for org admins or property admins with multiple properties
+  // Only show "All Properties" for org-level admins
   const canViewAllProperties = React.useMemo(() => {
     if (!membership) return false;
     const orgRole = (membership.org_role || '').toLowerCase();
-    if (['org_super_admin', 'org_admin', 'owner'].includes(orgRole)) return true;
-    const hasAdminRole = membership.properties?.some(p =>
-      ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager', 'spoc', 'administrator'].includes((p.role || '').toLowerCase())
-    );
-    return hasAdminRole && (membership.properties?.length ?? 0) > 1;
+    return ['org_super_admin', 'org_admin', 'owner', 'master_admin'].includes(orgRole);
   }, [membership]);
 
   const handleSelectProperty = (id: string) => {
