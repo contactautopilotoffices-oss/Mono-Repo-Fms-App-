@@ -1,41 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createAnonClient } from "@/lib/supabase/client";
-import { getAuthenticatedUser } from "@/lib/auth";
+import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 
 function bucketForType(type: string) {
-  return type === "video" ? "sop_videos" : "sop_photos";
+  return type === "video" ? "sop-videos" : "sop-photos";
 }
 
 export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
-    if (auth.response || !auth.user || !auth.token) {
+    if (auth.response || !auth.user) {
       return auth.response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const propertyId = String(formData.get("propertyId") || "");
-    const completionId = String(formData.get("completionId") || "");
-    const itemId = String(formData.get("itemId") || "");
-    const type = String(formData.get("type") || "photo");
+    const contentType = request.headers.get("content-type") || "";
+    const admin = createAdminClient();
+    let file: File | null = null;
+    let propertyId = "";
+    let completionId = "";
+    let itemId = "";
+    let type = "photo";
+
+    if (contentType.includes("multipart/form-data")) {
+      // FormData upload (from mobile or web)
+      const formData = await request.formData();
+      file = formData.get("file") as File | null;
+      propertyId = String(formData.get("propertyId") || "");
+      completionId = String(formData.get("completionId") || "");
+      itemId = String(formData.get("itemId") || "");
+      type = String(formData.get("type") || "photo");
+    } else {
+      // JSON upload with base64 (from mobile serverApi.uploadFile)
+      const body = await request.json();
+      propertyId = body.propertyId || "";
+      completionId = body.completionId || "";
+      itemId = body.itemId || "";
+      type = body.type || "photo";
+
+      if (body.fileBase64) {
+        const buffer = Buffer.from(body.fileBase64, "base64");
+        const ext = type === "video" ? "mp4" : "jpg";
+        const blob = new Blob([buffer], { type: type === "video" ? "video/mp4" : "image/jpeg" });
+        file = new File([blob], `${itemId}-${Date.now()}.${ext}`, { type: blob.type });
+      }
+    }
+
     if (!file || !propertyId || !completionId || !itemId) {
-      return NextResponse.json({ error: "Missing media fields" }, { status: 400 });
+      return NextResponse.json({ error: "Missing required fields: file, propertyId, completionId, itemId" }, { status: 400 });
+    }
+
+    // Verify property access
+    const access = await getPropertyAccess(auth.user.id, propertyId);
+    if (!access.authorized) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const bucket = bucketForType(type);
-    const fileExt = file.name.split(".").pop() || (type === "video" ? "mp4" : "webp");
-    const fileName = `${propertyId}/${completionId}/${itemId}-${Date.now()}.${fileExt}`;
-    const supabase = createAnonClient(auth.token);
-    const { error } = await supabase.storage.from(bucket).upload(fileName, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || (type === "video" ? "video/mp4" : "image/webp"),
-    });
-    if (error) return NextResponse.json({ error: "Failed to upload media" }, { status: 500 });
+    const fileExt = file.name.split(".").pop() || (type === "video" ? "mp4" : "jpg");
+    const fileName = `sop-${type === "video" ? "videos" : "photos"}/${propertyId}/${completionId}/${itemId}-${Date.now()}.${fileExt}`;
 
-    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const { error } = await admin.storage.from(bucket).upload(fileName, buffer, {
+      cacheControl: "3600",
+      upsert: true,
+      contentType: file.type || (type === "video" ? "video/mp4" : "image/jpeg"),
+    });
+
+    if (error) {
+      console.error("[checklist/media] upload error:", error);
+      return NextResponse.json({ error: "Failed to upload media: " + error.message }, { status: 500 });
+    }
+
+    const { data } = admin.storage.from(bucket).getPublicUrl(fileName);
     return NextResponse.json({ success: true, url: data.publicUrl, bucket, filePath: fileName });
   } catch (error) {
     console.error("[saas-mobile-server] checklist media POST error:", error);
@@ -67,3 +105,4 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+

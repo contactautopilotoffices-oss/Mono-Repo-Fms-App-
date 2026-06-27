@@ -412,7 +412,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
             <View style={styles.tileTopRow}>
               <View>
                 <Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>Units</Text></Text>
-                <Text style={styles.tileSubtext}>Main meter consumption</Text>
+                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
               </View>
               <View style={styles.trendChip}>
                 <Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" />
@@ -464,7 +464,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{dieselStats.consumption} L</Text>
-                <Text style={styles.tileSubtext}>Current stock level</Text>
+                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Level</Text>

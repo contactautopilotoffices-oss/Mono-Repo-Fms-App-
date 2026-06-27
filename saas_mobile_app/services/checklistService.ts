@@ -181,43 +181,56 @@ export const checklistService = {
 
   // ── Upload media ──────────────────────────────────────────────────────────
   async uploadMedia(formData: FormData) {
-    // Extract file from FormData
+    // Extract fields from FormData (React Native FormData has _parts)
     const file = (formData as any).get?.('file') ?? (formData as any)._parts?.[0]?.[1];
+    const propertyId = (formData as any).get?.('propertyId') ?? (formData as any)._parts?.find((p: any) => p[0] === 'propertyId')?.[1] ?? '';
+    const completionId = (formData as any).get?.('completionId') ?? (formData as any)._parts?.find((p: any) => p[0] === 'completionId')?.[1] ?? '';
+    const itemId = (formData as any).get?.('itemId') ?? (formData as any)._parts?.find((p: any) => p[0] === 'itemId')?.[1] ?? '';
+    const type = (formData as any).get?.('type') ?? (formData as any)._parts?.find((p: any) => p[0] === 'type')?.[1] ?? 'photo';
+
     if (!file) throw new Error('No file in FormData');
 
-    const typeStr = (file.type as string) ?? 'image/jpeg';
-    const isVideo = typeStr.startsWith('video/');
-    const bucket = isVideo ? 'sop-videos' : 'sop-photos';
-    const ext = typeStr.split('/')[1] || (isVideo ? 'mp4' : 'jpg');
-    const path = `${Date.now()}.${ext}`;
-
-    let blob: Blob;
-    if (file instanceof Blob) {
-      blob = file;
-    } else {
-      const fetched = await fetch(file.uri);
-      blob = await fetched.blob();
+    // Convert file to base64 for JSON upload
+    let fileBase64 = '';
+    if (file.uri) {
+      // React Native file object with uri
+      const FileSystem = require('expo-file-system');
+      fileBase64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+    } else if (file instanceof Blob) {
+      const reader = new FileReader();
+      fileBase64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64 = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
     }
 
-    const { error: uploadError } = await serverApi.upload(bucket, path, blob, typeStr);
+    // Call the dedicated checklist media endpoint on the mobile server
+    const res = await apiFetch<{ success: boolean; url: string; bucket: string; filePath: string }>('/api/checklist/media', {
+      method: 'POST',
+      body: JSON.stringify({
+        fileBase64,
+        propertyId,
+        completionId,
+        itemId,
+        type,
+      }),
+    });
 
-    if (uploadError) throw new Error(uploadError.message);
-
-    const { data: urlData } = await serverApi.getPublicUrl(bucket, path);
-    return { url: urlData?.publicUrl ?? '' };
+    if (res.error) throw new Error(res.error);
+    return { url: res.url || '' };
   },
 
   // ── Delete media ──────────────────────────────────────────────────────────
   async deleteMedia(type: string, url: string, _completionId?: string) {
-    const bucket = type === 'video' ? 'sop-videos' : 'sop-photos';
-
-    // Extract path from public URL
-    const parts = url.split(`/${bucket}/`);
-    const path = parts[1];
-    if (!path) throw new Error('Could not determine storage path from URL');
-
-    const { error } = await serverApi.removeFile(bucket, path);
-    if (error) throw new Error(error.message);
+    const res = await apiFetch<{ success: boolean }>(`/api/checklist/media?url=${encodeURIComponent(url)}&type=${type}`, {
+      method: 'DELETE',
+    });
+    if (res.error) throw new Error(res.error);
     return { success: true };
   },
 };

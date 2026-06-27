@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
       .from("stock_movements")
       .insert({
         property_id: propertyId,
+        organization_id: item.organization_id,
         item_id: itemId,
         action: normalizedAction,
         quantity_change: signedChange,

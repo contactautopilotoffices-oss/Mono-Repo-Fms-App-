@@ -78,24 +78,28 @@ const STATUS_LABELS: Record<string, string> = {
   checked_out: 'Checked Out',
 };
 
-const DATE_FILTER_LABELS: Record<DateFilter, string> = {
+const DATE_FILTER_LABELS: Record<string, string> = {
   today: 'Today',
   yesterday: 'Yesterday',
   week: 'This Week',
   month: 'This Month',
-  custom: 'Custom',
+  custom: 'Custom Date',
+  all_time: 'All Time',
 };
 
+type DateFilterExtended = DateFilter | 'all_time';
+
+// Define category icons inline to avoid module-level Color references
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  visitor: <User size={12} color={Colors.light.primary} />,
-  vendor: <Truck size={12} color={Colors.light.warning} />,
-  delivery: <Building2 size={12} color={Colors.light.textSecondary} />,
+  visitor: <User size={12} color="#708F96" />,
+  vendor: <Truck size={12} color="#FF9F0A" />,
+  delivery: <Building2 size={12} color="#6B7280" />,
 };
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
-  visitor: { bg: Colors.light.primaryLight, text: Colors.light.primary },
-  vendor: { bg: Colors.light.secondaryLight, text: Colors.light.secondary },
-  delivery: { bg: Colors.light.surface, text: Colors.light.textSecondary },
+  visitor: { bg: 'rgba(112,143,150,0.15)', text: '#708F96' },
+  vendor: { bg: 'rgba(255,159,10,0.15)', text: '#FF9F0A' },
+  delivery: { bg: 'rgba(255,255,255,0.08)', text: '#6B7280' },
 };
 
 function getDuration(checkin: string, checkout: string | null): string {
@@ -122,13 +126,36 @@ function DateFilterDropdown({
   value,
   onChange,
   colors,
+  fromDate,
+  toDate,
+  onFromDateChange,
+  onToDateChange,
 }: {
-  value: DateFilter;
-  onChange: (v: DateFilter) => void;
+  value: DateFilter | 'all_time';
+  onChange: (v: DateFilter | 'all_time') => void;
   colors: typeof Colors.light;
+  fromDate: Date;
+  toDate: Date;
+  onFromDateChange: (d: Date) => void;
+  onToDateChange: (d: Date) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const options: DateFilter[] = ['today', 'yesterday', 'week', 'month'];
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const options: { key: DateFilter | 'all_time'; label: string }[] = [
+    { key: 'all_time', label: 'All Time' },
+    { key: 'today', label: 'Today' },
+    { key: 'yesterday', label: 'Yesterday' },
+    { key: 'week', label: 'Last 7 Days' },
+    { key: 'month', label: 'Last 30 Days' },
+    { key: 'custom', label: 'Custom Date' },
+  ];
+
+  const currentLabel = options.find((o) => o.key === value)?.label || 'Select';
+
+  const formatDisplayDate = (d: Date) => {
+    return `${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`;
+  };
 
   return (
     <View style={{ position: 'relative', zIndex: 10 }}>
@@ -145,8 +172,13 @@ function DateFilterDropdown({
       >
         <Calendar size={14} color={colors.textSecondary} />
         <Text style={[styles.dateFilterText, { color: '#fff' }]}>
-          {DATE_FILTER_LABELS[value]}
+          {currentLabel}
         </Text>
+        {value === 'custom' && (
+          <Text style={styles.dateRangeText}>
+            {formatDisplayDate(fromDate)} - {formatDisplayDate(toDate)}
+          </Text>
+        )}
         <ChevronDown size={14} color={colors.textSecondary} />
       </TouchableOpacity>
 
@@ -164,25 +196,28 @@ function DateFilterDropdown({
             <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(0,0,0,0.1)']} style={StyleSheet.absoluteFillObject} />
             {options.map((opt) => (
               <TouchableOpacity
-                key={opt}
+                key={opt.key}
                 style={[
                   styles.dateFilterOption,
-                  value === opt && { backgroundColor: colors.primary + '22' },
+                  value === opt.key && { backgroundColor: colors.primary + '22' },
                 ]}
                 onPress={() => {
-                  onChange(opt);
+                  onChange(opt.key);
                   setOpen(false);
+                  if (opt.key === 'custom') {
+                    setTimeout(() => setShowDatePicker(true), 150);
+                  }
                 }}
               >
                 <Text
                   style={[
                     styles.dateFilterOptionText,
-                    { color: value === opt ? colors.primary : colors.text },
+                    { color: value === opt.key ? colors.primary : colors.text },
                   ]}
                 >
-                  {DATE_FILTER_LABELS[opt]}
+                  {opt.label}
                 </Text>
-                {value === opt && (
+                {value === opt.key && (
                   <Ionicons name="checkmark" size={16} color={colors.primary} />
                 )}
               </TouchableOpacity>
@@ -190,6 +225,136 @@ function DateFilterDropdown({
           </SafeBlurView>
         </>
       )}
+
+      {/* Custom Date Range Modal */}
+      <Modal visible={showDatePicker} transparent animationType="slide">
+        <Pressable style={styles.dateModalOverlay} onPress={() => setShowDatePicker(false)}>
+          <View
+            style={[styles.dateModalContainer, { backgroundColor: colors.background }]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.dateModalHeader}>
+              <Text style={[styles.dateModalTitle, { color: colors.text }]}>Select Date Range</Text>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                <X size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.dateModalContent}>
+              <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>FROM</Text>
+              <View style={styles.dateAdjustRow}>
+                <TouchableOpacity
+                  style={[styles.dateAdjustBtn, { backgroundColor: colors.card }]}
+                  onPress={() => onFromDateChange(new Date(fromDate.getTime() - 86400000))}
+                >
+                  <Ionicons name="remove" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dateInputDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => {
+                    // Quick cycle: from 1st to 15th to last day
+                    const day = fromDate.getDate();
+                    let newDate: Date;
+                    if (day <= 15) {
+                      newDate = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
+                    } else if (day <= 28) {
+                      newDate = new Date(fromDate.getFullYear(), fromDate.getMonth(), 15);
+                    } else {
+                      newDate = new Date(fromDate.getFullYear(), fromDate.getMonth() + 1, 0);
+                    }
+                    onFromDateChange(newDate);
+                  }}
+                >
+                  <Text style={[styles.dateInputText, { color: colors.text }]}>
+                    {fromDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dateAdjustBtn, { backgroundColor: colors.card }]}
+                  onPress={() => onFromDateChange(new Date(fromDate.getTime() + 86400000))}
+                >
+                  <Ionicons name="add" size={20} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.dateInputLabel, { color: colors.textSecondary, marginTop: 16 }]}>TO</Text>
+              <View style={styles.dateAdjustRow}>
+                <TouchableOpacity
+                  style={[styles.dateAdjustBtn, { backgroundColor: colors.card }]}
+                  onPress={() => {
+                    const newDate = new Date(toDate.getTime() - 86400000);
+                    if (newDate >= fromDate) onToDateChange(newDate);
+                  }}
+                >
+                  <Ionicons name="remove" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dateInputDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => {
+                    // Quick cycle: from 1st to 15th to last day
+                    const day = toDate.getDate();
+                    let newDate: Date;
+                    if (day <= 15) {
+                      newDate = new Date(toDate.getFullYear(), toDate.getMonth(), 1);
+                    } else if (day <= 28) {
+                      newDate = new Date(toDate.getFullYear(), toDate.getMonth(), 15);
+                    } else {
+                      newDate = new Date(toDate.getFullYear(), toDate.getMonth() + 1, 0);
+                    }
+                    if (newDate >= fromDate) onToDateChange(newDate);
+                  }}
+                >
+                  <Text style={[styles.dateInputText, { color: colors.text }]}>
+                    {toDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dateAdjustBtn, { backgroundColor: colors.card }]}
+                  onPress={() => onToDateChange(new Date(toDate.getTime() + 86400000))}
+                >
+                  <Ionicons name="add" size={20} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.quickSelectLabel, { color: colors.textSecondary }]}>QUICK SELECT</Text>
+              <View style={styles.quickSelectRow}>
+                {[
+                  { label: 'Yesterday', days: 1 },
+                  { label: 'Last 7 Days', days: 7 },
+                  { label: 'Last 30 Days', days: 30 },
+                  { label: 'This Month', days: -1 },
+                ].map((q) => (
+                  <TouchableOpacity
+                    key={q.label}
+                    style={[styles.quickSelectBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={() => {
+                      if (q.days === -1) {
+                        // This month: from 1st to today
+                        const today = new Date();
+                        onFromDateChange(new Date(today.getFullYear(), today.getMonth(), 1));
+                        onToDateChange(today);
+                      } else {
+                        const today = new Date();
+                        onFromDateChange(new Date(today.getTime() - q.days * 86400000));
+                        onToDateChange(today);
+                      }
+                    }}
+                  >
+                    <Text style={[styles.quickSelectBtnText, { color: colors.primary }]}>{q.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity
+                style={[styles.applyDateBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={styles.applyDateBtnText}>Apply Date Range</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -1020,13 +1185,19 @@ export default function VisitorsScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
-  const isDark = theme === 'dark';
   const colors = Colors[theme];
+  const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [dateFilter, setDateFilter] = useState<DateFilter | 'all_time'>('today');
+  const [customFromDate, setCustomFromDate] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d;
+  });
+  const [customToDate, setCustomToDate] = useState<Date>(new Date());
 
   const [selectedVisitor, setSelectedVisitor] = useState<VisitorLog | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<boolean>(false);
@@ -1040,7 +1211,10 @@ export default function VisitorsScreen() {
     if (!propertyId) return { visitors: [] as VisitorLog[], stats: { total: 0, checked_in: 0, checked_out: 0 } };
     try {
       const res = await vmsService.fetchVisitors(propertyId, {
-        dateFilter,
+        dateFilter: dateFilter === 'all_time' ? 'custom' : dateFilter,
+        customDate: dateFilter === 'all_time' ? 'all_time' : dateFilter === 'custom'
+          ? `${customFromDate.toISOString().split('T')[0]},${customToDate.toISOString().split('T')[0]}`
+          : undefined,
         status: statusFilter,
         search: searchQuery,
       });
@@ -1063,7 +1237,7 @@ export default function VisitorsScreen() {
   }, [propertyId, statusFilter, searchQuery, dateFilter]);
 
   const { data, isLoading, isFetching, refetch } = useServerQuery(
-    [...queryKeys.property.visitors(propertyId), statusFilter, dateFilter],
+    [...queryKeys.property.visitors(propertyId), statusFilter, dateFilter, customFromDate.toISOString(), customToDate.toISOString()],
     fetchVisitors,
     { staleTime: 1000 * 60 * 5 }
   );
@@ -1252,7 +1426,15 @@ export default function VisitorsScreen() {
 
           {/* Date Filter */}
           <View style={{ paddingHorizontal: 12, marginBottom: 12 }}>
-            <DateFilterDropdown value={dateFilter} onChange={setDateFilter} colors={colors} />
+            <DateFilterDropdown
+              value={dateFilter}
+              onChange={setDateFilter}
+              colors={colors}
+              fromDate={customFromDate}
+              toDate={customToDate}
+              onFromDateChange={setCustomFromDate}
+              onToDateChange={setCustomToDate}
+            />
           </View>
 
           {/* Visitor List */}
@@ -1625,4 +1807,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Urbanist-Medium',
   },
+  // Date filter
+  dateRangeText: { fontSize: 10, color: 'rgba(230,235,238,0.5)', marginLeft: 6 },
+  // Date picker modal
+  dateModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  dateModalContainer: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 40,
+  },
+  dateModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.12)',
+  },
+  dateModalTitle: { fontSize: 18, fontFamily: 'Poppins-Bold' },
+  dateModalContent: { padding: 20 },
+  dateInputLabel: { fontSize: 11, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  dateAdjustRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  dateAdjustBtn: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  dateInputDisplay: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateInputText: { fontSize: 15, fontFamily: 'Urbanist-Medium' },
+  quickSelectLabel: { fontSize: 11, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase', letterSpacing: 1, marginTop: 16, marginBottom: 10 },
+  quickSelectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  quickSelectBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  quickSelectBtnText: { fontSize: 12, fontFamily: 'Urbanist-Bold' },
+  applyDateBtn: { paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  applyDateBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Poppins-Bold' },
 });

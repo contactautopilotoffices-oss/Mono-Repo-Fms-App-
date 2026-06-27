@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from './client';
+import { mmkvAsyncStorage } from '../storage';
 
 /**
  * Creates a Supabase client authenticated with a Bearer token from the Authorization header.
@@ -59,9 +60,27 @@ export async function getSupabaseToken(forceRefresh = false): Promise<string | n
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) return sessionData.session.access_token;
 
+    // Fallback: forcefully read from MMKV storage directly
+    const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+    const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
+    if (projectIdMatch) {
+      const cookieName = `sb-${projectIdMatch[1]}-auth-token`;
+      const stored = await mmkvAsyncStorage.getItem(cookieName);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.access_token) return parsed.access_token; // v2 storage format
+          if (Array.isArray(parsed) && parsed[0]) return parsed[0]; // old v1 storage format
+        } catch (e) {
+          console.warn('[mobile-auth] Failed to parse raw storage token');
+        }
+      }
+    }
+
     // Fallback: no session available
     return null;
-  } catch {
+  } catch (err) {
+    console.warn('[mobile-auth] getSupabaseToken error:', err);
     return null;
   }
 }

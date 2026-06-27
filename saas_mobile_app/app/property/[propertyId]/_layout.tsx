@@ -63,7 +63,7 @@ const FULL_DASHBOARD_ROLES: string[] = [];
 const FULL_SCREEN_ROUTES = [
   'staff', 'soft_service_manager',
   'property_admin', 'lovable-admin', 'lovable-super-admin', 'settings', 'profile', 'tickets', 'index', 'stock',
-  'tenant', 'rooms', 'visitors', 'requests',
+  'tenant', 'rooms', 'visitors', 'requests', 'checklist', 'checklist/scan',
 ];
 
 // Sidebar context so child screens can toggle the layout sidebar

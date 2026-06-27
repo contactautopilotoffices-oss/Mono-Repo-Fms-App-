@@ -63,19 +63,20 @@ export const vmsService = {
     }
   ): Promise<ApiResponse<{ visitors: VisitorLog[]; stats: VisitorStats }>> {
     try {
-      const result = await serverApi.get<{ visitors: VisitorLog[]; stats: VisitorStats }>(
+      const result = await serverApi.get<{ visitors: VisitorLog[]; stats: VisitorStats; data?: { visitors: VisitorLog[]; stats: VisitorStats } }>(
         '/api/visitors',
         {
           propertyId: propertyId,
-          date: options?.dateFilter ?? 'today',
-          custom_date: options?.customDate,
+          date: options?.dateFilter === 'custom' ? options?.customDate : (options?.dateFilter ?? 'today'),
           status: options?.status ?? 'all',
           search: options?.search,
         }
       );
 
       if (result.error) throw new Error(result.error.message);
-      return { success: true, data: result.data!, status: 200 };
+      // Handle nested data structure from server
+      const data = result.data?.data ?? result.data;
+      return { success: true, data, status: 200 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
@@ -83,19 +84,22 @@ export const vmsService = {
 
   async fetchStats(propertyId: string): Promise<ApiResponse<VisitorStats>> {
     try {
-      const result = await serverApi.get<{ stats: VisitorStats }>('/api/visitors', {
+      const result = await serverApi.get<any>('/api/visitors', {
         propertyId: propertyId,
+        date: 'today',
       });
 
       if (result.error) throw new Error(result.error.message);
-      return { success: true, data: result.data!.stats, status: 200 };
+      // Handle nested data structure
+      const statsData = result.data?.stats ?? result.data?.data?.stats;
+      return { success: true, data: statsData as VisitorStats, status: 200 };
     } catch (err: any) {
       return { success: false, data: null as any, error: err.message, status: 500 };
     }
   },
 
   // ── Check In ────────────────────────────────────────────────────────────────
-  // POST /api/visitors — generates visitor_id server-side
+  // POST /api/vms/check-in — generates visitor_id server-side
   async checkIn(payload: {
     propertyId: string;
     name: string;
@@ -145,10 +149,10 @@ export const vmsService = {
   },
 
   // ── Check Out ──────────────────────────────────────────────────────────────
-  // PATCH /api/visitors/[visitorId]/checkout
+  // PATCH /api/vms/check-out
   async checkOut(visitorId: string, propertyId: string): Promise<ApiResponse<VisitorLog>> {
     try {
-      const result = await serverApi.patch<VisitorLog>(`/api/visitors/${visitorId}/checkout?propertyId=${propertyId}`);
+      const result = await serverApi.patch<VisitorLog>(`/api/visitors/${visitorId}/checkout?propertyId=${propertyId}`, {});
 
       if (result.error) throw new Error(result.error.message);
       return { success: true, data: result.data!, status: 200 };
@@ -214,36 +218,75 @@ export const vmsService = {
   async uploadPhoto(
     uri: string,
     visitorId: string,
-    _propertyId?: string
+    propertyId?: string
   ): Promise<ApiResponse<string>> {
     try {
-      const fileRes = await fetch(uri);
-      const blob = await fileRes.blob();
-      const path = `visitor-photos/${visitorId}.jpg`;
+      // Import media processor dynamically to avoid blocking app startup
+      const { compressImageForUpload } = require('@/utils/mediaProcessor');
 
-      const { error: uploadError } = await serverApi.upload(
-        'visitor-photos',
-        path,
-        blob,
-        'image/jpeg'
-      );
-
-      if (uploadError) throw new Error(uploadError.message);
-
-      const { data: urlData } = await serverApi.getPublicUrl('visitor-photos', path);
-      const publicUrl = urlData?.publicUrl ?? '';
-
-      // Update visitor record with photo URL
-      if (publicUrl) {
-        await serverApi.post('/api/vms/upload-photo', {
-          visitor_id: visitorId,
-          photo_url: publicUrl,
-        });
+      // Compress image before upload
+      const compressedUri = await compressImageForUpload(uri);
+      if (!compressedUri) {
+        throw new Error('Failed to compress image');
       }
 
-      return { success: true, data: publicUrl, status: 201 };
+      // Read compressed file and convert to base64
+      const response = await fetch(compressedUri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Remove data URL prefix if present
+          const base64 = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      // Check file size
+      const fileSizeKB = (base64Data.length * 3) / 4 / 1024;
+      console.log(`[uploadPhoto] File size: ${fileSizeKB.toFixed(1)} KB`);
+
+      if (fileSizeKB > 5000) {
+        throw new Error('Image still too large after compression');
+      }
+
+      // Use /api/visitors/photos endpoint with base64
+      const res = await serverApi.post<{ url?: string; success?: boolean }>(`/api/visitors/photos?propertyId=${propertyId}`, {
+        visitor_id: visitorId,
+        fileBase64: base64Data,
+        contentType: 'image/jpeg',
+      });
+
+      if (res.error) throw new Error(typeof res.error === 'string' ? res.error : JSON.stringify(res.error));
+
+      return { success: true, data: res.data?.url ?? '', status: 201 };
     } catch (err: any) {
+      console.error('[uploadPhoto] Error:', err);
       return { success: false, data: '', error: err.message, status: 500 };
+    }
+  },
+
+  // ── Update Visitor Photo URL ─────────────────────────────────────────────────
+  async updateVisitorPhoto(
+    visitorId: string,
+    propertyId: string,
+    photoUrl: string
+  ): Promise<ApiResponse<VisitorLog>> {
+    try {
+      const result = await serverApi.patch<VisitorLog>(
+        `/api/visitors/${visitorId}/photo?propertyId=${propertyId}`,
+        { photo_url: photoUrl }
+      );
+
+      if (result.error) throw new Error(result.error.message);
+
+      return { success: true, data: result.data!, status: 200 };
+    } catch (err: any) {
+      return { success: false, data: null as any, error: err.message, status: 500 };
     }
   },
 

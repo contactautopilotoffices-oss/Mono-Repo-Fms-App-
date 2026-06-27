@@ -74,24 +74,23 @@ export default function QRScannerModal({
               barcodeScannerSettings={{
                 barcodeTypes: ["qr"],
               }}
-            >
-              <View style={styles.overlay}>
+            />
+            <View style={[styles.overlay, StyleSheet.absoluteFillObject]} pointerEvents="box-none">
+              <View style={styles.unfocusedContainer}></View>
+              <View style={styles.middleContainer}>
                 <View style={styles.unfocusedContainer}></View>
-                <View style={styles.middleContainer}>
-                  <View style={styles.unfocusedContainer}></View>
-                  <View style={styles.focusedContainer}>
-                    <View style={[styles.corner, styles.topLeft]} />
-                    <View style={[styles.corner, styles.topRight]} />
-                    <View style={[styles.corner, styles.bottomLeft]} />
-                    <View style={[styles.corner, styles.bottomRight]} />
-                  </View>
-                  <View style={styles.unfocusedContainer}></View>
+                <View style={styles.focusedContainer}>
+                  <View style={[styles.corner, styles.topLeft]} />
+                  <View style={[styles.corner, styles.topRight]} />
+                  <View style={[styles.corner, styles.bottomLeft]} />
+                  <View style={[styles.corner, styles.bottomRight]} />
                 </View>
-                <View style={styles.unfocusedContainer}>
-                    <Text style={styles.instructionText}>{instruction}</Text>
-                </View>
+                <View style={styles.unfocusedContainer}></View>
               </View>
-            </CameraView>
+              <View style={styles.unfocusedContainer}>
+                  <Text style={styles.instructionText}>{instruction}</Text>
+              </View>
+            </View>
           </View>
         )}
       </SafeAreaView>

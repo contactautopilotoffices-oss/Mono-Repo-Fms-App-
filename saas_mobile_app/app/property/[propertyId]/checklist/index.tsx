@@ -35,6 +35,7 @@ import SafeBlurView from "@/components/ui/SafeBlurView";
 
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import { checklistService } from "@/services/checklistService";
+import { isDue, getCompletionSlot } from "@/utils/checklistTime";
 
 import {
   CheckSquare,
@@ -195,110 +196,13 @@ function getFrequencyLabel(freq: Frequency | undefined | null): string {
   );
 }
 
-function getHourlyInterval(freq: Frequency | undefined | null): number | null {
-  if (!freq) return null;
+function parseHourlyInterval(freq: string): number | null {
   const match = freq.match(/^every_(\d+)_hours?$/);
   return match ? parseInt(match[1]) : null;
 }
 
 function isHourlyFreq(freq: Frequency | undefined | null): boolean {
-  return getHourlyInterval(freq) !== null;
-}
-
-function parseHourlyInterval(frequency: string): number | null {
-  const m = frequency.match(/^every_(\d+)_hours?$/);
-  return m ? parseInt(m[1]) : null;
-}
-
-function frequencyLabel(frequency: string): string {
-  const hourly = parseHourlyInterval(frequency);
-  if (hourly) return hourly === 1 ? "Every 1 hr" : `Every ${hourly} hrs`;
-  const map: Record<string, string> = {
-    daily: "Daily",
-    weekly: "Weekly",
-    monthly: "Monthly",
-    on_demand: "On Demand",
-  };
-  return map[frequency] ?? frequency;
-}
-
-function fmt12h(hhmm: string | undefined | null): string {
-  if (!hhmm) return "—";
-  const [h, m] = hhmm.slice(0, 5).split(":").map(Number);
-  const ampm = h >= 12 ? "PM" : "AM";
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-}
-
-function computeSlotTime(
-  frequency: Frequency | undefined | null,
-  startTime: string | undefined,
-  endTime: string | undefined,
-  now: Date,
-): string | null {
-  const interval = getHourlyInterval(frequency);
-  if (!interval || !startTime) return null;
-  const [sH, sM] = (startTime || "00:00").slice(0, 5).split(":").map(Number);
-  const [eH, eM] = (endTime || "23:59").slice(0, 5).split(":").map(Number);
-  const startMins = sH * 60 + sM;
-  const endMins = eH * 60 + eM;
-  let nowMins = now.getHours() * 60 + now.getMinutes();
-
-  const isOvernight = endMins <= startMins;
-  if (isOvernight && nowMins < endMins) nowMins += 1440;
-
-  const elapsed = Math.max(0, nowMins - startMins);
-  const slotIndex = Math.floor(elapsed / (interval * 60));
-  const slotStartMins = startMins + slotIndex * interval * 60;
-  const h = Math.floor(slotStartMins / 60) % 24;
-  const mn = slotStartMins % 60;
-  return `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
-}
-
-function isWithinTimeWindow(nm: number, st: string, et: string): boolean {
-  const [sh, sm] = st.slice(0, 5).split(":").map(Number);
-  const [eh, em] = et.slice(0, 5).split(":").map(Number);
-  const smins = sh * 60 + sm;
-  const emins = eh * 60 + em;
-  if (emins <= smins) return nm >= smins || nm < emins;
-  return nm >= smins && nm <= emins;
-}
-
-function computeCurrentSlotStart(
-  frequency: string,
-  startTime: string | null,
-  now: Date,
-  endTime?: string | null,
-): string | null {
-  const intervalH = parseHourlyInterval(frequency);
-  if (!intervalH || !startTime) return null;
-  const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
-  const startMins = sH * 60 + sM;
-  const [eH, eM] = (endTime || "23:59").slice(0, 5).split(":").map(Number);
-  const endMins = eH * 60 + eM;
-  let nowMins = now.getHours() * 60 + now.getMinutes();
-
-  const isOvernight = endMins <= startMins;
-  if (isOvernight && nowMins < endMins) nowMins += 1440;
-
-  const elapsed = nowMins - startMins;
-  if (elapsed < 0) return null;
-  let slotStartMins =
-    startMins + Math.floor(elapsed / (intervalH * 60)) * intervalH * 60;
-  if (endTime && !isOvernight) {
-    const endMinsVal = eH * 60 + eM;
-    if (endMinsVal <= startMins) return null;
-    const lastValidSlotStart =
-      startMins +
-      Math.floor((endMinsVal - startMins - intervalH * 60) / (intervalH * 60)) *
-        intervalH *
-        60;
-    if (lastValidSlotStart < startMins) return null;
-    if (slotStartMins > lastValidSlotStart) return null;
-  }
-  const h = Math.floor(slotStartMins / 60) % 24;
-  const mn = slotStartMins % 60;
-  return `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
+  return parseHourlyInterval(freq || "") !== null;
 }
 
 type DueStatus = "due" | "missed" | "completed" | "upcoming" | "paused" | "";
@@ -313,212 +217,16 @@ function computeDueStatus(
   completions: SOPCompletion[],
   refDate: Date,
 ): { due: boolean; label: string; status: DueStatus } {
-  if (frequency === "on_demand") return { due: false, label: "", status: "" };
-
-  const nowMins = refDate.getHours() * 60 + refDate.getMinutes();
-  const today = new Date(
-    refDate.getFullYear(),
-    refDate.getMonth(),
-    refDate.getDate(),
+  const result = isDue(
+    frequency || "",
+    lastCompletionDate || null,
+    startTime || null,
+    endTime || null,
+    lastCompletedAt || null,
+    completions.find((c) => c.status === "pending")?.started_at,
+    refDate
   );
-  const intervalH = parseHourlyInterval(frequency ?? "");
-
-  // Hourly + time window
-  if (intervalH !== null && startTime && endTime) {
-    const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
-    const [eH, eM] = endTime.slice(0, 5).split(":").map(Number);
-    const startMins = sH * 60 + sM;
-    const endMins = eH * 60 + eM;
-    const isOvernight = endMins <= startMins;
-    let baselineDate = today;
-    if (isOvernight && nowMins < endMins)
-      baselineDate = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-    const windowDurationMins = isOvernight
-      ? 1440 - startMins + endMins
-      : endMins - startMins;
-    const todaySlots: Date[] = [];
-    for (
-      let t = 0;
-      t + intervalH * 60 <= windowDurationMins;
-      t += intervalH * 60
-    ) {
-      todaySlots.push(new Date(baselineDate.getTime() + t * 60 * 1000));
-    }
-    const passedSlots = todaySlots.filter((s) => s <= refDate);
-    const currentSlot =
-      passedSlots.length > 0 ? passedSlots[passedSlots.length - 1] : null;
-
-    const createdTime = new Date(template.created_at).getTime();
-    const intervalMs = intervalH * 3600000;
-    const currentSlotEnd = currentSlot ? currentSlot.getTime() + intervalMs : 0;
-
-    if (!currentSlot || currentSlotEnd < createdTime) {
-      if (!currentSlot)
-        return {
-          due: false,
-          label: `Starts at ${fmt12h(startTime)}`,
-          status: "upcoming",
-        };
-      // If the template was created AFTER this slot already finished, then it's upcoming
-      return { due: false, label: "Waiting for next slot", status: "upcoming" };
-    }
-
-    const currentSlotStr = computeCurrentSlotStart(
-      frequency ?? "",
-      startTime,
-      refDate,
-      endTime,
-    );
-    const safeDate = (dStr: string) =>
-      new Date(dStr.includes("T") ? dStr : dStr + "T00:00:00");
-    const lastDone = lastCompletedAt
-      ? new Date(lastCompletedAt)
-      : lastCompletionDate
-        ? safeDate(lastCompletionDate)
-        : null;
-    const isDone = lastDone && lastDone >= currentSlot;
-
-    if (isDone) {
-      const nextSlot = todaySlots.find((s) => s > refDate);
-      if (!nextSlot)
-        return { due: false, label: "All done today", status: "completed" };
-      const remainingMs = nextSlot.getTime() - refDate.getTime();
-      const remMin = Math.floor(remainingMs / 60000);
-      const label =
-        remMin >= 60
-          ? `Next in ${Math.floor(remMin / 60)}h`
-          : `Next in ${remMin}m`;
-      return { due: false, label, status: "completed" };
-    }
-
-    if (isWithinTimeWindow(nowMins, startTime, endTime)) {
-      const overdueMs = refDate.getTime() - currentSlot.getTime();
-      const overdueMin = Math.floor(overdueMs / 60000);
-      if (overdueMin < 2) return { due: true, label: "Due now", status: "due" };
-      const label =
-        overdueMin >= 60
-          ? `Overdue ${Math.floor(overdueMin / 60)}h`
-          : `Overdue ${overdueMin}m`;
-      return { due: true, label, status: "due" };
-    }
-
-    return { due: false, label: "Missed slot", status: "missed" };
-  }
-
-  // Hourly without time window
-  if (intervalH !== null) {
-    const safeDate = (dStr: string) =>
-      new Date(dStr.includes("T") ? dStr : dStr + "T00:00:00");
-    const lastTs = lastCompletedAt
-      ? new Date(lastCompletedAt)
-      : lastCompletionDate
-        ? safeDate(lastCompletionDate)
-        : null;
-    if (!lastTs) return { due: true, label: "Not started", status: "due" };
-    const diffMs = refDate.getTime() - lastTs.getTime();
-    const intervalMs = intervalH * 60 * 60 * 1000;
-    const remainingMs = intervalMs - diffMs;
-    if (remainingMs > 0) {
-      const remMin = Math.floor(remainingMs / 60000);
-      const label =
-        remMin >= 60
-          ? `Next in ${Math.floor(remMin / 60)}h`
-          : `Next in ${remMin}m`;
-      return { due: false, label, status: "upcoming" };
-    }
-    const overdueMin = Math.floor((diffMs - intervalMs) / 60000);
-    const label =
-      overdueMin >= 60
-        ? `Overdue ${Math.floor(overdueMin / 60)}h`
-        : `Overdue ${overdueMin}m`;
-    return { due: true, label, status: "due" };
-  }
-
-  // Daily / weekly / monthly
-  const [sH_d, sM_d] = (startTime || "00:00")
-    .slice(0, 5)
-    .split(":")
-    .map(Number);
-  const [eH_d, eM_d] = (endTime || "23:59").slice(0, 5).split(":").map(Number);
-  const startMins_d = sH_d * 60 + sM_d;
-  const endMins_d = eH_d * 60 + eM_d;
-
-  const overnightBaselineDate =
-    startTime && endTime && endMins_d <= startMins_d && nowMins < endMins_d
-      ? new Date(today.getTime() - 24 * 60 * 60 * 1000)
-      : today;
-  const baselineDateStr = overnightBaselineDate.toLocaleDateString("en-CA");
-
-  if (!lastCompletionDate) {
-    if (frequency === "daily" && startTime && endTime) {
-      if (isWithinTimeWindow(nowMins, startTime, endTime))
-        return { due: true, label: "Due now", status: "due" };
-      const [sh] = startTime.slice(0, 5).split(":").map(Number);
-      if (nowMins < sh * 60 && !(endMins_d <= sh * 60 && nowMins < endMins_d))
-        return {
-          due: false,
-          label: `Starts at ${fmt12h(startTime)}`,
-          status: "upcoming",
-        };
-      return { due: true, label: "Missed", status: "missed" };
-    }
-    return { due: true, label: "Not started", status: "due" };
-  }
-
-  if (frequency === "daily") {
-    const isDoneToday = lastCompletionDate === baselineDateStr;
-    if (isDoneToday)
-      return { due: false, label: "Done today", status: "completed" };
-    if (startTime && endTime) {
-      if (isWithinTimeWindow(nowMins, startTime, endTime))
-        return { due: true, label: "Due now", status: "due" };
-      const [sh] = startTime.slice(0, 5).split(":").map(Number);
-      if (nowMins < sh * 60 && !(endMins_d <= sh * 60 && nowMins < endMins_d))
-        return {
-          due: false,
-          label: `Starts at ${fmt12h(startTime)}`,
-          status: "upcoming",
-        };
-      return { due: true, label: "Missed", status: "missed" };
-    }
-    return { due: true, label: "Due today", status: "due" };
-  }
-
-  const safeDate = (dStr: string) =>
-    new Date(dStr.includes("T") ? dStr : dStr + "T00:00:00");
-  const last = safeDate(lastCompletionDate);
-  const diffDays = Math.floor(
-    (refDate.getTime() - last.getTime()) / (1000 * 60 * 60 * 24),
-  );
-
-  if (frequency === "weekly") {
-    if (diffDays < 7)
-      return {
-        due: false,
-        label: `Due in ${7 - diffDays}d`,
-        status: "upcoming",
-      };
-    return {
-      due: true,
-      label: diffDays === 7 ? "Due today" : `Overdue by ${diffDays - 7}d`,
-      status: "due",
-    };
-  }
-  if (frequency === "monthly") {
-    if (diffDays < 30)
-      return {
-        due: false,
-        label: `Due in ${30 - diffDays}d`,
-        status: "upcoming",
-      };
-    return {
-      due: true,
-      label: diffDays === 30 ? "Due today" : `Overdue by ${diffDays - 30}d`,
-      status: "due",
-    };
-  }
-
-  return { due: false, label: "", status: "" };
+  return result as { due: boolean; label: string; status: DueStatus };
 }
 
 function getTemplateGaps(
@@ -535,6 +243,10 @@ function getTemplateGaps(
     const d = new Date(refDate.getTime() - i * 24 * 60 * 60 * 1000);
     const dateStr = d.toLocaleDateString("en-CA");
     const isToday = i === 0;
+
+    // Do not generate missed gaps for dates prior to template creation
+    const createdDateStr = new Date(template.created_at).toLocaleDateString("en-CA");
+    if (dateStr < createdDateStr) continue;
 
     if (template.frequency === "daily" || isHourlyFreq(template.frequency)) {
       if (!template.start_time || !template.end_time) {
@@ -753,7 +465,7 @@ function CircularProgress({
 // ─── Main Screen ───────────────────────────────────────────────────────────────
 
 type SubView = "history" | "templates" | "runner" | "detail";
-type HistoryFilter = "all" | "due" | "upcoming" | "missed" | "completed" | "paused";
+type HistoryFilter = "all" | "due" | "missed" | "completed";
 type DueStatusEntry = { due: boolean; label: string; status: DueStatus };
 type HistoryItem =
   | { type: "template"; data: SOPTemplate }
@@ -763,14 +475,16 @@ type HistoryItem =
 // ─── Status Badge Component ────────────────────────────────────────────────────
 
 function StatusBadge({ status, label }: { status: DueStatus; label: string }) {
-  const colors: Record<string, { bg: string; text: string }> = {
-    due: { bg: "#3B82F620", text: "#3B82F6" },
-    missed: { bg: "#EF444420", text: "#EF4444" },
-    completed: { bg: "#10B98120", text: "#10B981" },
+  const { theme } = useTheme();
+  const sysColors = Colors[theme];
+  const badgeColors: Record<string, { bg: string; text: string }> = {
+    due: { bg: "#3B82F620", text: sysColors.primary },
+    missed: { bg: "#EF444420", text: sysColors.error || sysColors.warning },
+    completed: { bg: "#10B98120", text: sysColors.success },
     upcoming: { bg: "#F59E0B20", text: "#F59E0B" },
     paused: { bg: "#6B728020", text: "#6B7280" },
   };
-  const c = colors[status] || colors.upcoming;
+  const c = badgeColors[status] || badgeColors.upcoming;
   return (
     <View
       style={{
@@ -1261,11 +975,8 @@ export default function ChecklistScreen() {
     } = getHistoryGroups();
     if (historyFilter === "due")
       return dueTemplates.map((t) => ({ type: "template" as const, data: t }));
-    if (historyFilter === "upcoming")
-      return upcomingTemplates.map((t) => ({
-        type: "template" as const,
-        data: t,
-      }));
+    if (historyFilter === "upcoming") return [];
+    if (historyFilter === "paused") return [];
     if (historyFilter === "missed")
       return missedOccurrences.map((m) => ({
         type: "missed_occurrence" as const,
@@ -1276,20 +987,13 @@ export default function ChecklistScreen() {
         type: "completion" as const,
         data: c,
       }));
-    if (historyFilter === "paused")
-      return pausedTemplates.map((t) => ({
-        type: "template" as const,
-        data: t,
-      }));
-
-    // All: due first, then upcoming, then missed, then paused, then completed
+    
+    // All: due first, then missed, then completed
     const items: HistoryItem[] = [];
     dueTemplates.forEach((t) => items.push({ type: "template", data: t }));
-    upcomingTemplates.forEach((t) => items.push({ type: "template", data: t }));
     missedOccurrences.forEach((m) =>
       items.push({ type: "missed_occurrence", data: m }),
     );
-    pausedTemplates.forEach((t) => items.push({ type: "template", data: t }));
     allCompletedCompletions.forEach((c) =>
       items.push({ type: "completion", data: c }),
     );
@@ -1597,8 +1301,20 @@ export default function ChecklistScreen() {
     uri: string,
     type: "photo" | "video",
   ) => {
-    const bucket = type === "photo" ? "sop_photos" : "sop_videos";
     const stateKey = type === "photo" ? "photoUploading" : "videoUploading";
+
+    if (!activeCompletion || !propertyId) {
+      Alert.alert("Error", "Missing completion or property data.");
+      return;
+    }
+
+    const compItem = activeCompletion?.items?.find(
+      (ci) => ci.checklist_item_id === item.id,
+    );
+    if (!compItem) {
+      Alert.alert("Error", "Completion item not found.");
+      return;
+    }
 
     setItemStates((prev) => ({
       ...prev,
@@ -1606,25 +1322,35 @@ export default function ChecklistScreen() {
     }));
 
     try {
-      const ext = type === "photo" ? "webp" : "mp4";
+      const ext = type === "photo" ? "jpg" : "mp4";
       const fileName = `${item.id}-${Date.now()}.${ext}`;
 
-      // Read file and create FormData
-      const fileInfo = await FileSystem.getInfoAsync(uri);
       const formData = new FormData();
       formData.append("file", {
         uri,
         name: fileName,
-        type: type === "photo" ? "image/webp" : "video/mp4",
+        type: type === "photo" ? "image/jpeg" : "video/mp4",
       } as any);
       formData.append("propertyId", propertyId as string);
-      formData.append("completionId", activeCompletion?.id || "");
+      formData.append("completionId", activeCompletion.id);
       formData.append("itemId", item.id);
       formData.append("type", type);
 
       const res = await checklistService.uploadMedia(formData);
       const publicUrl = res.url;
       const checkedAt = new Date().toISOString();
+
+      const updateData: any = { checked_at: checkedAt };
+      if (type === "photo") updateData.photo_url = publicUrl;
+      else updateData.video_url = publicUrl;
+
+      await checklistService.updateCompletion(activeCompletion.id, {
+        item: {
+          completionItemId: compItem.id,
+          checklist_item_id: item.id,
+          ...updateData,
+        } as any,
+      });
 
       setItemStates((prev) => ({
         ...prev,
@@ -1635,18 +1361,14 @@ export default function ChecklistScreen() {
         },
       }));
 
-      const compItem = activeCompletion?.items?.find(
-        (ci) => ci.checklist_item_id === item.id,
-      );
-      if (compItem && activeCompletion) {
-        const updateData: any = { checked_at: checkedAt };
-        if (type === "photo") updateData.photo_url = publicUrl;
-        else updateData.video_url = publicUrl;
-
-        await checklistService.updateCompletion(activeCompletion.id, {
-          item: { completionItemId: compItem.id, ...updateData },
+      setActiveCompletion((prev) => {
+        if (!prev) return prev;
+        const newItems = prev.items.map((ci) => {
+          if (ci.id === compItem.id) return { ...ci, ...updateData };
+          return ci;
         });
-      }
+        return { ...prev, items: newItems };
+      });
     } catch (err: any) {
       setItemStates((prev) => ({
         ...prev,
@@ -2130,16 +1852,36 @@ export default function ChecklistScreen() {
                 <View style={runnerStyles.metaItem}>
                   <Clock size={11} color="rgba(255,255,255,0.7)" />
                   <Text style={runnerStyles.metaText}>
-                    {fmt12h(activeTemplate.start_time)} –{" "}
-                    {fmt12h(activeTemplate.end_time)}
+                    {parseHourlyInterval(activeTemplate.frequency) 
+                      ? getCompletionSlot(
+                          activeCompletion?.created_at || new Date().toISOString(), 
+                          activeTemplate.frequency, 
+                          activeTemplate.start_time, 
+                          activeCompletion?.slot_time
+                        ) 
+                      : `${fmt12h(activeTemplate.start_time)} – ${fmt12h(activeTemplate.end_time)}`
+                    }
                   </Text>
                 </View>
               )}
               <View style={runnerStyles.metaItem}>
                 <Repeat size={11} color="rgba(255,255,255,0.7)" />
                 <Text style={runnerStyles.metaText}>
-                  {frequencyLabel(activeTemplate.frequency)}
+                  {activeTemplate.frequency}
                 </Text>
+              </View>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: "600" }}>Progress</Text>
+                <Text style={{ fontSize: 11, color: "white", fontWeight: "bold" }}>
+                  {Math.round(progress * 100)}%
+                </Text>
+              </View>
+              <View style={{ height: 6, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 3, overflow: "hidden" }}>
+                <View style={{ width: `${progress * 100}%`, height: "100%", backgroundColor: "#4ADE80", borderRadius: 3 }} />
               </View>
             </View>
 
@@ -2642,7 +2384,7 @@ export default function ChecklistScreen() {
                                 height: 75,
                                 borderRadius: 8,
                                 overflow: "hidden",
-                                backgroundColor: "#1e293b",
+                                backgroundColor: colors.card,
                                 borderWidth: 1,
                                 borderColor: colors.border,
                                 justifyContent: "center",
@@ -2861,17 +2603,32 @@ export default function ChecklistScreen() {
             <View style={runnerStyles.headerTitle}>
               <Text style={runnerStyles.headerTitleText}>Audit Details</Text>
               <Text style={runnerStyles.headerSubtitle}>
-                {template?.title || "Checklist"} ·{" "}
-                {historyCompletion.completion_date
-                  ? new Date(
-                      historyCompletion.completion_date,
-                    ).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })
-                  : ""}
+                {template?.title || "Checklist"}
+                {historyCompletion.slot_time ? ` · ${fmt12h(historyCompletion.slot_time)}` : ""}
               </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <User size={12} color="#9CA3AF" />
+                  <Text style={{ fontSize: 12, color: "#9CA3AF" }}>
+                    {(historyCompletion as any).user?.full_name || (historyCompletion as any).completed_by_user?.full_name || "Unknown"}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: "#9CA3AF" }}>•</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Calendar size={12} color="#9CA3AF" />
+                  <Text style={{ fontSize: 12, color: "#9CA3AF" }}>
+                    {historyCompletion.completion_date
+                      ? new Date(historyCompletion.completion_date).toLocaleString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "Unknown date"}
+                  </Text>
+                </View>
+              </View>
             </View>
             <View style={{ alignItems: "flex-end", gap: 4 }}>
               <View
@@ -2880,7 +2637,7 @@ export default function ChecklistScreen() {
                   {
                     backgroundColor:
                       historyCompletion.status === "completed"
-                        ? (colors.success || "#10B981") + "30"
+                        ? (colors.success || colors.success) + "30"
                         : "#3B82F630",
                   },
                 ]}
@@ -2892,7 +2649,7 @@ export default function ChecklistScreen() {
                       color:
                         historyCompletion.status === "completed"
                           ? colors.success
-                          : "#3B82F6",
+                          : colors.primary,
                     },
                   ]}
                 >
@@ -3036,7 +2793,7 @@ export default function ChecklistScreen() {
                       marginBottom: 12,
                       height: 120,
                       borderRadius: 12,
-                      backgroundColor: "#1e293b",
+                      backgroundColor: colors.card,
                       justifyContent: "center",
                       alignItems: "center",
                       borderWidth: 1,
@@ -3119,7 +2876,7 @@ export default function ChecklistScreen() {
 
   // ── Main View ──
   return (
-    <LinearGradient colors={["#0a0f1e", "#12182b"]} style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Top nav */}
@@ -3293,7 +3050,7 @@ export default function ChecklistScreen() {
                         <TouchableOpacity
                           onPress={() => handleDeleteTemplate(template)}
                         >
-                          <Trash2 size={16} color="#EF4444" />
+                          <Trash2 size={16} color={colors.error || colors.warning} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -3379,11 +3136,9 @@ export default function ChecklistScreen() {
                 {(
                   [
                     "all",
-                    "due",
-                    "upcoming",
-                    "paused",
-                    "completed",
                     "missed",
+                    "due",
+                    "completed",
                   ] as HistoryFilter[]
                 ).map((f) => (
                   <TouchableOpacity
@@ -3447,7 +3202,7 @@ export default function ChecklistScreen() {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={{ flex: 1 }}
         >
-          <View style={modalStyles.overlay}>
+          <View style={[modalStyles.overlay, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
             <View style={[modalStyles.sheet, { backgroundColor: colors.card }]}>
               <View style={modalStyles.handle} />
               <View style={modalStyles.modalHeader}>
@@ -3699,14 +3454,24 @@ export default function ChecklistScreen() {
                 {tplItems.map((item, idx) => (
                   <View
                     key={idx}
-                    style={[
-                      modalStyles.itemRow,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.border,
-                      },
-                    ]}
+                    style={{
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                      borderWidth: 1,
+                      borderRadius: 12,
+                      marginBottom: 10,
+                      overflow: 'hidden'
+                    }}
                   >
+                    <View
+                      style={[
+                        modalStyles.itemRow,
+                        {
+                          borderWidth: 0,
+                          marginBottom: 0
+                        },
+                      ]}
+                    >
                     <View style={modalStyles.itemInputs}>
                       <TextInput
                         style={[
@@ -3811,10 +3576,10 @@ export default function ChecklistScreen() {
                             modalStyles.optionToggle,
                             {
                               backgroundColor: item.requires_comment
-                                ? (colors.info || "#3B82F6") + "18"
+                                ? (colors.info || colors.primary) + "18"
                                 : "transparent",
                               borderColor: item.requires_comment
-                                ? colors.info || "#3B82F6"
+                                ? colors.info || colors.primary
                                 : colors.border,
                             },
                           ]}
@@ -3830,7 +3595,7 @@ export default function ChecklistScreen() {
                             size={10}
                             color={
                               item.requires_comment
-                                ? colors.info || "#3B82F6"
+                                ? colors.info || colors.primary
                                 : colors.textTertiary
                             }
                           />
@@ -3839,7 +3604,7 @@ export default function ChecklistScreen() {
                               modalStyles.optionToggleText,
                               {
                                 color: item.requires_comment
-                                  ? colors.info || "#3B82F6"
+                                  ? colors.info || colors.primary
                                   : colors.textTertiary,
                               },
                             ]}
@@ -3882,9 +3647,32 @@ export default function ChecklistScreen() {
                       style={{ padding: 4 }}
                       onPress={() => removeTemplateItem(idx)}
                     >
-                      <X size={16} color={colors.error || "#EF4444"} />
+                      <X size={16} color={colors.error || colors.error || colors.warning} />
                     </TouchableOpacity>
                   </View>
+                  <View style={[modalStyles.timeRow, { marginTop: 8, paddingHorizontal: 10 }]}>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[modalStyles.subLabel, { color: colors.textTertiary, marginBottom: 0 }]}>Start</Text>
+                      <TextInput
+                        style={[modalStyles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text, paddingVertical: 4 }]}
+                        placeholder="09:00"
+                        placeholderTextColor={colors.textTertiary}
+                        value={item.start_time || ""}
+                        onChangeText={(v) => updateTplItem(idx, "start_time", v)}
+                      />
+                    </View>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[modalStyles.subLabel, { color: colors.textTertiary, marginBottom: 0 }]}>End</Text>
+                      <TextInput
+                        style={[modalStyles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.text, paddingVertical: 4 }]}
+                        placeholder="17:00"
+                        placeholderTextColor={colors.textTertiary}
+                        value={item.end_time || ""}
+                        onChangeText={(v) => updateTplItem(idx, "end_time", v)}
+                      />
+                    </View>
+                  </View>
+                </View>
                 ))}
 
                 {tplItems.length === 0 && (
@@ -3929,7 +3717,7 @@ export default function ChecklistScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -4049,7 +3837,7 @@ const styles = StyleSheet.create({
   },
   filterChipActive: {
     backgroundColor: "rgba(59, 130, 246, 0.2)",
-    borderColor: "#3B82F6",
+    borderColor: "#708F96",
   },
   filterChipText: {
     fontSize: 12,

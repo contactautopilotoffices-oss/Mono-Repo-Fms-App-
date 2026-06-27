@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 
+// Bucket name - visitor-photos (with hyphen, matching Supabase bucket)
 const BUCKET_NAME = "visitor-photos";
+
+// Max file size: 5MB (Supabase free tier limit)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 /**
  * POST /api/visitors/photos?propertyId=...
@@ -36,16 +40,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "visitor_id required" }, { status: 400 });
     }
 
-    // Validate file size (max 2MB before compression)
-    if (file.size > 2 * 1024 * 1024) {
-      return NextResponse.json({ error: "File too large. Max 2MB" }, { status: 400 });
+    // Validate file type - only images allowed for photos
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"];
+    if (!allowedTypes.includes(file.type)) {
+      return NextResponse.json({ error: "Only image files allowed." }, { status: 400 });
     }
 
-    // Generate path: {propertyId}/{visitorId}.webp
-    const fileExt = file.type === "image/webp" ? "webp" : "jpg";
+    // Validate file size (max 5MB)
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: `File too large. Max 5MB allowed.` }, { status: 400 });
+    }
+
+    // Generate path: {propertyId}/{visitorId}.{ext}
+    const fileExt = file.name.split(".").pop() || "jpg";
     const filePath = `${propertyId}/${visitorId}.${fileExt}`;
 
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage - pass File object directly
     const { data: uploadData, error: uploadError } = await admin.storage
       .from(BUCKET_NAME)
       .upload(filePath, file, {
@@ -55,34 +65,27 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error("Upload error:", uploadError);
-      return NextResponse.json({ error: "Failed to upload photo" }, { status: 500 });
+      console.error("[visitors/photos] Upload error:", uploadError);
+      return NextResponse.json({ error: `Upload failed: ${uploadError.message}` }, { status: 500 });
     }
 
     // Get public URL
-    const {
-      data: { publicUrl },
-    } = admin.storage.from(BUCKET_NAME).getPublicUrl(filePath);
+    const { data: urlData } = admin.storage.from(BUCKET_NAME).getPublicUrl(uploadData.path);
 
     // Update visitor_logs with photo URL
-    const { error: updateError } = await admin
+    await admin
       .from("visitor_logs")
-      .update({ photo_url: publicUrl })
+      .update({ photo_url: urlData.publicUrl })
       .eq("visitor_id", visitorId)
       .eq("property_id", propertyId);
 
-    if (updateError) {
-      console.error("Update error:", updateError);
-      // Photo uploaded but DB not updated - still return success with URL
-    }
-
     return NextResponse.json({
       success: true,
-      url: publicUrl,
-      path: filePath,
+      url: urlData.publicUrl,
+      path: uploadData.path,
     });
-  } catch (error) {
-    console.error("Photo upload error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } catch (error: any) {
+    console.error("[visitors/photos] Photo upload error:", error);
+    return NextResponse.json({ error: `Internal error: ${error.message}` }, { status: 500 });
   }
 }

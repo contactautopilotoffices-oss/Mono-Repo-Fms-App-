@@ -54,7 +54,7 @@ const ForceCheckoutSchema = z.object({
 
 const FetchVisitorsSchema = z.object({
   property_id: z.string().min(1),
-  date_filter: z.enum(['today', 'yesterday', 'week', 'month', 'custom']).default('today'),
+  date_filter: z.enum(['today', 'yesterday', 'week', 'month', 'custom', 'all_time']).default('today'),
   custom_date: z.string().optional(),
   status: z.enum(['checked_in', 'checked_out', 'all']).default('all'),
   search: z.string().optional(),
@@ -94,11 +94,24 @@ function getDateRange(dateFilter: string, customDate?: string): { from: string; 
       m.setMonth(m.getMonth() - 1);
       return { from: m.toISOString(), to: now.toISOString() };
     }
-    case 'custom':
+    case 'custom': {
+      // customDate format: "YYYY-MM-DD,YYYY-MM-DD" (from,to)
+      if (customDate && customDate.includes(',')) {
+        const [fromDate, toDate] = customDate.split(',');
+        return {
+          from: `${fromDate}T00:00:00.000Z`,
+          to: `${toDate}T23:59:59.999Z`,
+        };
+      }
+      // Single date fallback
       return {
-        from: `${customDate}T00:00:00.000Z`,
-        to: `${customDate}T23:59:59.999Z`,
+        from: `${customDate || todayStr}T00:00:00.000Z`,
+        to: `${customDate || todayStr}T23:59:59.999Z`,
       };
+    }
+    case 'all_time':
+      // Return a very wide date range for all-time
+      return { from: '2000-01-01T00:00:00.000Z', to: '2100-01-01T00:00:00.000Z' };
     default:
       return { from: `${todayStr}T00:00:00.000Z`, to: endOfDay };
   }
@@ -437,4 +450,79 @@ export const vmsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       }
     }
   );
+
+  // POST /api/visitors/photos
+  fastify.post('/api/visitors/photos', async (request, reply) => {
+    if (!requireSupabase(request, reply)) return;
+
+    try {
+      const { propertyId } = request.query as { propertyId?: string };
+
+      if (!propertyId) {
+        reply.status(400);
+        return { error: 'Missing propertyId query param' };
+      }
+
+      // Parse JSON body with base64 file data
+      const body = request.body as { visitor_id?: string; fileBase64?: string; contentType?: string };
+
+      if (!body.visitor_id) {
+        reply.status(400);
+        return { error: 'Missing visitor_id' };
+      }
+      if (!body.fileBase64) {
+        reply.status(400);
+        return { error: 'Missing fileBase64' };
+      }
+
+      // Decode base64 to buffer
+      const fileBuffer = Buffer.from(body.fileBase64, 'base64');
+      const visitor_id = body.visitor_id;
+      const contentType = body.contentType || 'image/jpeg';
+
+      // Check file size (max 5MB)
+      if (fileBuffer.length > 5 * 1024 * 1024) {
+        reply.status(400);
+        return { error: `File too large. ${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB exceeds 5MB limit.` };
+      }
+
+      // Upload to Supabase Storage
+      const BUCKET_NAME = 'visitor-photos';
+      const filePath = `${propertyId}/${visitor_id}.jpg`;
+
+      const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+        .from(BUCKET_NAME)
+        .upload(filePath, fileBuffer, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType,
+        });
+
+      if (uploadError) {
+        fastify.log.error(`[visitors/photos] Upload error:`, uploadError);
+        reply.status(500);
+        return { error: `Upload failed: ${uploadError.message}` };
+      }
+
+      // Get public URL
+      const { data: urlData } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(uploadData.path);
+
+      // Update visitor_logs with photo URL
+      await supabaseAdmin
+        .from('visitor_logs')
+        .update({ photo_url: urlData.publicUrl })
+        .eq('visitor_id', visitor_id)
+        .eq('property_id', propertyId);
+
+      return {
+        success: true,
+        url: urlData.publicUrl,
+        path: uploadData.path,
+      };
+    } catch (err) {
+      fastify.log.error('[visitors/photos] Error:', err);
+      reply.status(500);
+      return { error: wrapError(err) };
+    }
+  });
 };

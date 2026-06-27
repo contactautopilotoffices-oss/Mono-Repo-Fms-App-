@@ -33,6 +33,8 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         procurement: ['view', 'approve'],
+        visitors: ['view', 'create', 'update', 'delete'],
+        security: ['view', 'create', 'update', 'delete'],
         dashboards: ['view'],
         reports: ['view'],
         sop: ['view', 'create', 'update', 'delete']
@@ -43,6 +45,8 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         procurement: ['view', 'approve'],
+        visitors: ['view', 'create', 'update', 'delete'],
+        security: ['view', 'create', 'update', 'delete'],
         dashboards: ['view'],
         reports: ['view'],
         sop: ['view', 'create', 'update', 'delete']
@@ -53,6 +57,8 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         procurement: ['view', 'approve'],
+        visitors: ['view', 'create', 'update', 'delete'],
+        security: ['view', 'create', 'update', 'delete'],
         dashboards: ['view'],
         reports: ['view'],
         sop: ['view', 'create', 'update', 'delete']

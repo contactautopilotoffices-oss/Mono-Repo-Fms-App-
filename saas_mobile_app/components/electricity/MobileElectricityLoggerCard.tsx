@@ -54,28 +54,34 @@ export function MobileElectricityLoggerCard({
 
   const frontAnimatedStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipValue.value, [0, 1], [0, 180]);
+    // Avoid layout shifts by not toggling position. Use opacity for smooth hiding.
+    const opacity = interpolate(flipValue.value, [0, 0.5, 0.5, 1], [1, 1, 0, 0]);
     return {
       transform: [
         { perspective: 1000 },
         { rotateY: `${rotateY}deg` }
       ],
       backfaceVisibility: 'hidden',
-      position: flipValue.value > 0.5 ? 'absolute' : 'relative',
-      opacity: flipValue.value > 0.5 ? 0 : 1,
+      opacity,
       width: '100%',
     };
   });
 
   const backAnimatedStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipValue.value, [0, 1], [180, 360]);
+    const opacity = interpolate(flipValue.value, [0, 0.5, 0.5, 1], [0, 0, 1, 1]);
     return {
       transform: [
         { perspective: 1000 },
         { rotateY: `${rotateY}deg` }
       ],
       backfaceVisibility: 'hidden',
-      position: flipValue.value <= 0.5 ? 'absolute' : 'relative',
-      opacity: flipValue.value <= 0.5 ? 0 : 1,
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      opacity,
       width: '100%',
     };
   });

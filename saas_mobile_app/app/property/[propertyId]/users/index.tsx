@@ -1091,7 +1091,7 @@ export default function UsersScreen() {
   // Dynamically extract all unique roles present in the team
   const availableRoles = useMemo(() => {
     const unique = new Set<string>();
-    users.forEach((u) => {
+    (users || []).forEach((u) => {
       const r = u.propertyRole || u.role;
       if (r) unique.add(r);
     });

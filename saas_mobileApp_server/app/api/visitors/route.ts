@@ -25,16 +25,17 @@ export async function GET(request: NextRequest) {
       let filteredQ = q;
 
       // Apply date filter
-      if (date) {
-        let filterType = date as any;
+      if (date && date !== 'all_time') {
+        let filterType: 'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all_time' = date as any;
         let customStr = undefined;
-        if (!['today', 'yesterday', 'week', 'month'].includes(date)) {
+        if (!['today', 'yesterday', 'week', 'month', 'all_time'].includes(date)) {
           filterType = 'custom';
           customStr = date;
         }
         const bounds = getISTDateBounds(filterType, customStr);
         filteredQ = filteredQ.gte('checkin_time', bounds.start).lte('checkin_time', bounds.end);
       }
+      // If all_time, don't apply any date filter - fetch all visitors
 
       // Apply search filter
       if (search) {

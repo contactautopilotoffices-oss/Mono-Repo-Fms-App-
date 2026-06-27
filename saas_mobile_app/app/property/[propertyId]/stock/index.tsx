@@ -25,6 +25,8 @@ import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import BulkImportModal from "@/components/stock/BulkImportModal";
+import StockScannerModal from "@/components/stock/StockScannerModal";
+import { StockHistoryModal } from "@/components/stock/StockHistoryModal";
 
 import {
   STATUS_COLORS,
@@ -163,6 +165,8 @@ export default function StockScreen() {
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [showDetailSheet, setShowDetailSheet] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
   const [movementType, setMovementType] = useState<"add" | "remove">("add");
 
@@ -476,22 +480,21 @@ export default function StockScreen() {
             <ArrowLeft size={20} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.headerTitle}>Stock Management</Text>
+            <Text style={styles.headerTitle}>Stock</Text>
+            <Text style={[styles.headerTitle, { color: "#34D399", marginTop: -4 }]}>Management</Text>
             <Text style={styles.headerSubtitle}>Inventory Management</Text>
           </View>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() =>
-                router.push(`/property/${propertyId}/stock/scan` as any)
-              }
+              style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.35)", borderColor: "rgba(16,185,129,0.45)" }]}
+              onPress={() => setShowScannerModal(true)}
               activeOpacity={0.7}
             >
-              <Scan size={18} color="rgba(255,255,255,0.8)" />
+              <Scan size={18} color="#34D399" />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerIconBtn}
-              onPress={() => {}}
+              onPress={() => setShowHistoryModal(true)}
               activeOpacity={0.7}
             >
               <History size={18} color="rgba(255,255,255,0.8)" />
@@ -527,15 +530,17 @@ export default function StockScreen() {
       >
         <View style={styles.kpiRow}>
           <TintedGlassCard
-            label="Total items"
+            label="Total Items"
             value={stats.total}
+            subtitle="All Items"
             icon={<Package size={16} color="#60A5FA" />}
             tint="blue"
             delay={0}
           />
           <TintedGlassCard
-            label="Low stock"
+            label="Low Stock"
             value={stats.lowStock}
+            subtitle="Need Attention"
             icon={<AlertTriangle size={16} color="#FBBF24" />}
             tint="amber"
             delay={80}
@@ -543,15 +548,17 @@ export default function StockScreen() {
         </View>
         <View style={styles.kpiRow}>
           <TintedGlassCard
-            label="Out of stock"
+            label="Out Of Stock"
             value={stats.outOfStock}
+            subtitle="Not Available"
             icon={<TrendingDown size={16} color="#FCA5A5" />}
             tint="rose"
             delay={160}
           />
           <TintedGlassCard
-            label="Total value"
+            label="Total Value"
             value={formatCurrency(stats.totalValue).replace("₹", "₹")}
+            subtitle="Inventory Value"
             icon={<Package size={16} color="#6EE7B7" />}
             tint="green"
             isCurrency
@@ -1195,13 +1202,29 @@ export default function StockScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* ─── Bulk Import Modal ───────────────────────────────────────────────────────── */}
+{/* ─── Bulk Import Modal ───────────────────────────────────────────────────────── */}
       <BulkImportModal
         visible={showBulkImportModal}
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={handleBulkImportSuccess}
         propertyId={propertyId as string}
+      />
+
+      <StockHistoryModal
+        visible={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        movements={movements}
+      />
+
+      {/* ─── Stock Scanner Modal ───────────────────────────────────────────────── */}
+      <StockScannerModal
+        isOpen={showScannerModal}
+        onClose={() => {
+          setShowScannerModal(false);
+          refetch();
+        }}
+        propertyId={propertyId as string}
+        userId={user?.id}
       />
     </View>
   );
@@ -1271,6 +1294,7 @@ const StockItemCard = React.memo(function StockItemCard({
 function TintedGlassCard({
   label,
   value,
+  subtitle,
   icon,
   tint,
   isCurrency,
@@ -1278,12 +1302,22 @@ function TintedGlassCard({
 }: {
   label: string;
   value: string | number;
+  subtitle?: string;
   icon: React.ReactNode;
   tint: "blue" | "green" | "amber" | "rose";
   isCurrency?: boolean;
   delay?: number;
 }) {
   const tintDef = TOKENS.tint[tint];
+
+  // Sparkline points for each tint
+  const sparklineColors: Record<string, string> = {
+    blue: '#3B82F6',
+    green: '#10B981',
+    amber: '#F59E0B',
+    rose: '#EF4444',
+  };
+  const sparkColor = sparklineColors[tint] || '#3B82F6';
 
   return (
     <Animated.View
@@ -1307,6 +1341,7 @@ function TintedGlassCard({
           style={StyleSheet.absoluteFillObject}
         />
         <View style={styles.tintedCardInner}>
+          {/* Top: icon + label */}
           <View style={styles.tintedCardHeader}>
             <View
               style={[
@@ -1318,12 +1353,33 @@ function TintedGlassCard({
             </View>
             <Text style={styles.tintedLabel}>{label}</Text>
           </View>
-          <Text
-            style={[styles.tintedValue, isCurrency && { fontSize: 20 }]}
-            numberOfLines={1}
-          >
-            {value}
-          </Text>
+          {/* Bottom: value+subtitle left, sparkline right */}
+          <View style={styles.tintedCardBottom}>
+            <View style={styles.tintedCardValueCol}>
+              <Text
+                style={[styles.tintedValue, isCurrency && { fontSize: 22 }]}
+                numberOfLines={1}
+              >
+                {value}
+              </Text>
+              {subtitle && (
+                <Text style={styles.tintedSubtitle}>{subtitle}</Text>
+              )}
+            </View>
+            {/* Decorative sparkline */}
+            <View style={styles.sparklineWrap}>
+              <View style={[styles.sparklineLine, { backgroundColor: sparkColor + '30' }]}>
+                <View style={[
+                  styles.sparklineDot,
+                  { backgroundColor: sparkColor, left: tint === 'rose' ? '20%' : '80%' as any }
+                ]} />
+                <View style={[
+                  styles.sparklineGlow,
+                  { backgroundColor: sparkColor + '40' }
+                ]} />
+              </View>
+            </View>
+          </View>
         </View>
       </View>
     </Animated.View>
@@ -1380,14 +1436,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: TOKENS.glass.border,
     overflow: "hidden",
-    minHeight: 110,
+    minHeight: 130,
   },
-  tintedCardInner: { padding: 14, position: "relative", zIndex: 1 },
+  tintedCardInner: { padding: 14, position: "relative", zIndex: 1, flex: 1 },
   tintedCardHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   tintedIconWrap: {
     width: 30,
@@ -1403,11 +1459,56 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: "capitalize",
   },
+  tintedCardBottom: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    flex: 1,
+  },
+  tintedCardValueCol: {
+    flex: 1,
+  },
   tintedValue: {
     fontFamily: "Poppins-Bold",
     fontSize: 28,
     color: TOKENS.text.primary,
     letterSpacing: -0.5,
+    lineHeight: 34,
+  },
+  tintedSubtitle: {
+    fontFamily: "Urbanist-Medium",
+    fontSize: 11,
+    color: TOKENS.text.tertiary,
+    marginTop: 2,
+  },
+  sparklineWrap: {
+    width: 60,
+    height: 30,
+    justifyContent: "flex-end",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  sparklineLine: {
+    width: "100%",
+    height: 2,
+    borderRadius: 1,
+    position: "relative",
+  },
+  sparklineDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    position: "absolute",
+    top: -2,
+  },
+  sparklineGlow: {
+    width: 20,
+    height: 12,
+    borderRadius: 6,
+    position: "absolute",
+    top: -5,
+    right: 0,
+    opacity: 0.5,
   },
 
   // Search

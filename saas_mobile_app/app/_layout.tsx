@@ -1,4 +1,4 @@
-import React, { useEffect, Component, ReactNode, useState, useCallback, useRef } from 'react';
+import React, { useEffect, Component, ReactNode, useState, useCallback } from 'react';
 import { initSentry, Sentry } from '@/lib/sentry';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -12,8 +12,8 @@ import { useColorScheme, View, Text, StyleSheet } from 'react-native';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import NotificationBanner from '@/components/notifications/NotificationBanner';
 import { PersistGate } from '@/components/PersistGate';
-import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 import Toast from 'react-native-toast-message';
+import { AnimatedSplash } from '@/components/splash/AnimatedSplash';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();
@@ -73,7 +73,7 @@ const styles = StyleSheet.create({
 function RootLayoutInner() {
   const colorScheme = useColorScheme();
   const [appReady, setAppReady] = useState(false);
-  const appReadyRef = useRef(false);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   console.log('[RootLayout] Rendering...');
 
@@ -114,26 +114,34 @@ function RootLayoutInner() {
   useEffect(() => {
     if (fontsLoaded || fontError) {
       setAppReady(true);
-      appReadyRef.current = true;
-      // DON'T hide splash yet - wait for HydrationGate to be ready
     }
   }, [fontsLoaded, fontError]);
 
-  // Hide splash when HydrationGate signals ready
-  const handleSplashComplete = useCallback(() => {
+  // Track hydration completion from PersistGate
+  const handleHydrationComplete = useCallback(() => {
+    setIsHydrated(true);
+  }, []);
+
+  // Handle animated splash completion - this is when we finally hide the native splash
+  const handleAnimatedSplashComplete = useCallback(() => {
+    console.log('[RootLayout] Animated splash complete - hiding native splash');
     SplashScreen.hideAsync().catch(() => {});
   }, []);
 
-  if (!appReady) {
-    return null;
-  }
-
-  // Splash stays visible while HydrationGate resolves
-  // When HydrationGate is ready, it calls onReady which calls handleSplashComplete
+  // Show animated splash while app is initializing
+  const showAnimatedSplash = !appReady || !isHydrated;
 
   return (
     <ErrorBoundary>
-      <PersistGate onReady={handleSplashComplete}>
+      {/* Premium Animated Splash - renders over native splash until startup completes */}
+      {showAnimatedSplash && (
+        <AnimatedSplash
+          startupComplete={appReady && isHydrated}
+          onAnimationComplete={handleAnimatedSplashComplete}
+        />
+      )}
+
+      <PersistGate onReady={handleHydrationComplete}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <ThemeProvider>
@@ -152,9 +160,13 @@ function RootLayoutInner() {
 
 export default Sentry.wrap(RootLayoutInner);
 
+import { useOfflineMediaSync } from '@/hooks/useOfflineMediaSync';
+
 function AppContent({ colorScheme }: { colorScheme: any }) {
   // Register push notifications inside AuthProvider context
   usePushNotifications();
+  // Register offline media sync for checklists
+  useOfflineMediaSync();
 
   return (
     <>

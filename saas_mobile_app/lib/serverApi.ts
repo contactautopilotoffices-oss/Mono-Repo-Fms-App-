@@ -432,33 +432,48 @@ export const serverApi = {
   ): Promise<ServerApiResponse<{ path: string }>> {
     try {
       const token = await getSupabaseToken();
-      const formData = new FormData();
-      formData.append('bucket', bucket);
-      formData.append('path', path);
+      let fileBase64 = '';
 
       if (file instanceof File || file instanceof Blob) {
-        formData.append('file', file, (file as File).name || 'upload');
+        // Web: convert Blob to base64
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        fileBase64 = btoa(String.fromCharCode(...bytes));
       } else if (file instanceof ArrayBuffer) {
-        // Only possible in web, wrap in Blob
-        const blob = new Blob([file], { type: contentType || 'application/octet-stream' });
-        formData.append('file', blob, 'upload');
+        // Web ArrayBuffer: convert to base64
+        const bytes = new Uint8Array(file);
+        fileBase64 = btoa(String.fromCharCode(...bytes));
       } else if (file && 'uri' in file) {
-        // React Native uri object
-        formData.append('file', {
-          uri: file.uri,
-          name: file.name || path.split('/').pop() || 'upload',
-          type: file.type || contentType || 'application/octet-stream',
-        } as any);
+        // React Native: read file and convert to base64
+        const response = await fetch(file.uri);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        fileBase64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            // Remove data URL prefix if present
+            const base64 = result.includes(',') ? result.split(',')[1] : result;
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
 
       const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
         Accept: 'application/json',
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const response = await fetch(`${MOBILE_SERVER_URL}/api/upload`, {
+      const response = await fetch(`${MOBILE_SERVER_URL}/api/storage/upload`, {
         method: 'POST',
-        body: formData,
+        body: JSON.stringify({
+          bucket,
+          path,
+          fileBase64,
+          contentType: contentType || 'application/octet-stream',
+        }),
         headers,
       });
 
@@ -469,7 +484,7 @@ export const serverApi = {
 
       const json = await response.json();
       if (json.error) throw new Error(json.error);
-      
+
       return { data: { path: json.data?.path || json.path }, error: null };
     } catch (err) {
       return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };

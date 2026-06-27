@@ -14,6 +14,7 @@ import { QrCode, Download, Share2 } from 'lucide-react-native';
 
 interface QRCodeDisplayProps {
   data: QRCodeData;
+  barcode?: string; // The barcode string to encode in QR (matches web app format)
   size?: number;
   showLabel?: boolean;
   itemName?: string;
@@ -22,26 +23,24 @@ interface QRCodeDisplayProps {
 
 export default function QRCodeDisplay({
   data,
+  barcode,
   size = 200,
   showLabel = true,
   itemName,
   itemCode,
 }: QRCodeDisplayProps) {
-  // The QR code data - JSON stringified for web compatibility
-  const qrDataString = JSON.stringify(data);
+  // Encode the barcode string in QR code (matches web app's BarcodeDisplay format)
+  // Web app uses: <QRCodeSVG value={item.barcode} />
+  const qrValue = barcode || data.item_code || data.id || '';
 
   const handleDownload = async () => {
     try {
       if (Platform.OS === 'web') {
-        // Web: Create a downloadable link
-        const canvas = document.createElement('canvas');
-        // QR code would be rendered via a library
         Alert.alert('Download', 'QR Code download not available on web');
       } else {
         // Mobile: Use expo-sharing
         const fileUri = `${FileSystem.cacheDirectory}qr-${data.item_code}.png`;
-        // Note: For actual QR generation, use react-native-qrcode-svg
-        Alert.alert('Share QR', `QR data: ${qrDataString}`);
+        Alert.alert('Share QR', `QR data: ${qrValue}`);
       }
     } catch (error) {
       console.error('Error downloading QR:', error);
@@ -52,13 +51,11 @@ export default function QRCodeDisplay({
   const handleShare = async () => {
     try {
       if (Platform.OS === 'web') {
-        // Web: Copy to clipboard
         if (navigator.clipboard) {
-          await navigator.clipboard.writeText(qrDataString);
+          await navigator.clipboard.writeText(qrValue);
           Alert.alert('Copied!', 'QR data copied to clipboard');
         }
       } else {
-        // Mobile
         Alert.alert('Share QR', `Share QR code for ${itemName || data.name}`);
       }
     } catch (error) {
@@ -74,8 +71,6 @@ export default function QRCodeDisplay({
           <QrCode size={size * 0.6} color="#3B82F6" />
           <Text style={styles.qrDataHint}>Scan to view item</Text>
         </View>
-        {/* Hidden QR data for reference */}
-        <Text style={styles.hiddenQrData}>{qrDataString}</Text>
       </View>
 
       {/* Label */}
@@ -101,9 +96,9 @@ export default function QRCodeDisplay({
 
       {/* Data preview */}
       <View style={styles.dataPreview}>
-        <Text style={styles.dataPreviewLabel}>QR Code Data:</Text>
+        <Text style={styles.dataPreviewLabel}>QR Code Value:</Text>
         <Text style={styles.dataPreviewText} numberOfLines={2}>
-          {qrDataString}
+          {qrValue}
         </Text>
       </View>
     </View>
@@ -133,12 +128,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 10,
     color: '#94A3B8',
-  },
-  hiddenQrData: {
-    position: 'absolute',
-    opacity: 0,
-    height: 0,
-    width: 0,
   },
   labelContainer: {
     alignItems: 'center',

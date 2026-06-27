@@ -186,18 +186,26 @@ export const queryRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) 
 
       const fileData = Buffer.from(fileBase64, 'base64');
 
-      const { data, error } = await request.supabase!.storage
+      const { data: uploadData, error: uploadError } = await request.supabase!.storage
         .from(bucket)
         .upload(path, fileData, { contentType, upsert: true });
 
-      if (error) return { data: null, error: wrapError(error) };
-      return { data: { path: data.path }, error: null };
+      if (uploadError) {
+        reply.status(500);
+        return { error: 'upload_failed', message: uploadError.message };
+      }
+
+      // Get public URL
+      const { data: urlData } = request.supabase!.storage.from(bucket).getPublicUrl(path);
+
+      return { data: { path: uploadData.path, publicUrl: urlData.publicUrl }, error: null };
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.status(400);
         return { error: 'validation_error', message: err.errors.map(e => e.message).join(', ') };
       }
-      return { data: null, error: wrapError(err) };
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { data: null, error: { message } };
     }
   });
 

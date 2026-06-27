@@ -14,10 +14,14 @@ import {
   Platform,
   ScrollView,
   FlatList,
+  Animated,
+  PanResponder,
+  Dimensions,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { stockService } from '@/services/stockService';
 
 interface StockItem {
@@ -64,6 +68,7 @@ export default function StockScannerModal({
   propertyId,
   userId,
 }: StockScannerModalProps) {
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanMode, setScanMode] = useState<ScanMode>('camera');
   const [loading, setLoading] = useState(false);
@@ -72,6 +77,55 @@ export default function StockScannerModal({
   const [galleryUri, setGalleryUri] = useState<string | null>(null);
   const [galleryProcessing, setGalleryProcessing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+
+  // Screen dimensions for expandable panel
+  const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+  const HEADER_HEIGHT = 56 + insets.top; // header + safe area top
+  const COLLAPSED_QUEUE_HEIGHT = SCREEN_HEIGHT * 0.45;
+  const EXPANDED_QUEUE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT;
+
+  // Animation for queue panel height
+  const queueHeightAnim = useRef(new Animated.Value(COLLAPSED_QUEUE_HEIGHT)).current;
+
+  const toggleQueueExpanded = useCallback(() => {
+    const toExpanded = !queueExpanded;
+    setQueueExpanded(toExpanded);
+    Animated.spring(queueHeightAnim, {
+      toValue: toExpanded ? EXPANDED_QUEUE_HEIGHT : COLLAPSED_QUEUE_HEIGHT,
+      useNativeDriver: false,
+      friction: 12,
+      tension: 65,
+    }).start();
+  }, [queueExpanded, queueHeightAnim, EXPANDED_QUEUE_HEIGHT, COLLAPSED_QUEUE_HEIGHT]);
+
+  // PanResponder for drag handle
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderRelease: (_, gestureState) => {
+        // Swipe up = expand, swipe down = collapse
+        if (gestureState.dy < -50) {
+          setQueueExpanded(true);
+          Animated.spring(queueHeightAnim, {
+            toValue: EXPANDED_QUEUE_HEIGHT,
+            useNativeDriver: false,
+            friction: 12,
+            tension: 65,
+          }).start();
+        } else if (gestureState.dy > 50) {
+          setQueueExpanded(false);
+          Animated.spring(queueHeightAnim, {
+            toValue: COLLAPSED_QUEUE_HEIGHT,
+            useNativeDriver: false,
+            friction: 12,
+            tension: 65,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   // Batch queue
   const [queue, setQueue] = useState<QueuedItem[]>([]);
@@ -98,7 +152,7 @@ export default function StockScannerModal({
   // Fetch item by barcode
   const fetchItemByBarcode = useCallback(async (barcode: string): Promise<StockItem | null> => {
     try {
-      const res = await stockService.scanBarcode(barcode, propertyId);
+      const res = await stockService.scanBarcode(propertyId, barcode);
       if (res.success && res.data?.item) {
         return res.data.item as StockItem;
       }
@@ -270,8 +324,9 @@ export default function StockScannerModal({
 
           if (!res.success) throw new Error(res.error || 'Failed to record movement');
 
-          // Update queued item's quantity so the UI stays in sync
-          updateQueueItem(item.id, { quantity: quantityAfter });
+          // Update queued item's quantity from server-returned value
+          const serverQty = res.data?.quantityAfter ?? quantityAfter;
+          updateQueueItem(item.id, { quantity: serverQty });
 
           successCount++;
         } catch (err: any) {
@@ -321,25 +376,17 @@ export default function StockScannerModal({
     const accentColor = isIN ? '#10B981' : '#EF4444';
 
     return (
-      <View style={[
-        styles.queueItem,
-        {
-          backgroundColor: isIN ? '#052E164D' : '#3B0A0A4D',
-          borderColor: accentColor,
-          borderWidth: 1.5,
-        }
-      ]}>
-        {/* Top row: accent bar, index badge, item name, stock info, remove button */}
+      <View style={styles.queueItem}>
+        {/* Top row: index badge, item name, stock info, remove button */}
         <View style={styles.queueItemTop}>
-          <View style={[styles.queueItemAccent, { backgroundColor: accentColor }]} />
-          <View style={[styles.queueIndexBadge, { backgroundColor: accentColor + '25', borderColor: accentColor }]}>
-            <Text style={[styles.queueIndexBadgeText, { color: accentColor }]}>{index + 1}</Text>
+          <View style={styles.queueIndexBadge}>
+            <Text style={styles.queueIndexBadgeText}>{index + 1}</Text>
           </View>
           <View style={styles.queueItemNameGroup}>
-            <Text style={[styles.queueItemName, { color: '#FFFFFF' }]} numberOfLines={2}>
+            <Text style={styles.queueItemName} numberOfLines={1}>
               {item.name}
             </Text>
-            <Text style={[styles.queueItemMeta, { color: 'rgba(255,255,255,0.5)' }]}>
+            <Text style={styles.queueItemMeta}>
               {item.item_code || item.id.slice(0, 8)}
             </Text>
           </View>
@@ -347,101 +394,98 @@ export default function StockScannerModal({
             style={styles.queueRemoveBtn}
             onPress={() => removeFromQueue(item.id, item.barcode || item.item_code || item.id)}
           >
-            <Ionicons name="close-circle" size={22} color="rgba(255,255,255,0.3)" />
+            <Ionicons name="close" size={16} color="rgba(255,255,255,0.5)" />
           </TouchableOpacity>
         </View>
 
         {/* Stock info row — prominent */}
         <View style={styles.queueStockRow}>
-          <View style={[styles.queueStockBadge, { backgroundColor: stockColor + '20' }]}>
-            <Ionicons name="cube-outline" size={14} color={stockColor} />
+          <View style={[styles.queueStockBadge, { backgroundColor: stockColor + '15', borderColor: stockColor + '30', borderWidth: 1 }]}>
+            <Ionicons name="cube-outline" size={12} color={stockColor} />
             <Text style={[styles.queueStockBadgeText, { color: stockColor }]}>
-              {item.quantity} {item.unit || 'units'}
+              {item.quantity} {item.unit || 'Piece'}
             </Text>
-            <Text style={[styles.queueStockBadgeLabel, { color: 'rgba(255,255,255,0.4)' }]}>
+            <Text style={[styles.queueStockBadgeLabel, { color: stockColor + '80' }]}>
               in stock
             </Text>
           </View>
         </View>
 
-        {/* Action row: ADD STOCK and TAKE STOCK buttons — both always visible */}
-        <View style={styles.queueActionRow}>
-          <TouchableOpacity
-            style={[
-              styles.queueActionBtn,
-              isIN ? styles.queueActionBtnINActive : styles.queueActionBtnInactive,
-            ]}
-            onPress={() => updateQueueItem(item.id, { action: 'IN' })}
-          >
-            <Ionicons
-              name="arrow-up-circle"
-              size={22}
-              color={isIN ? '#FFF' : 'rgba(16,185,129,0.4)'}
-            />
-            <Text style={[
-              styles.queueActionBtnText,
-              { color: isIN ? '#FFF' : 'rgba(16,185,129,0.4)' }
-            ]}>
-              ADD STOCK
-            </Text>
-          </TouchableOpacity>
+        {/* Action row & Quantity row */}
+        <View style={styles.queueBottomRow}>
+          <View style={styles.queueActionRow}>
+            <TouchableOpacity
+              style={[
+                styles.queueActionBtn,
+                isIN ? styles.queueActionBtnINActive : styles.queueActionBtnInactive,
+              ]}
+              onPress={() => updateQueueItem(item.id, { action: 'IN' })}
+            >
+              <Ionicons
+                name="add-circle"
+                size={18}
+                color={isIN ? '#FFF' : '#10B981'}
+              />
+              <Text style={[
+                styles.queueActionBtnText,
+                { color: isIN ? '#FFF' : '#10B981' }
+              ]}>
+                ADD STOCK
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.queueActionBtn,
-              !isIN ? styles.queueActionBtnOUTActive : styles.queueActionBtnInactive,
-            ]}
-            onPress={() => updateQueueItem(item.id, { action: 'OUT' })}
-          >
-            <Ionicons
-              name="arrow-down-circle"
-              size={22}
-              color={!isIN ? '#FFF' : 'rgba(239,68,68,0.4)'}
-            />
-            <Text style={[
-              styles.queueActionBtnText,
-              { color: !isIN ? '#FFF' : 'rgba(239,68,68,0.4)' }
-            ]}>
-              TAKE STOCK
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Quantity row: label + big input */}
-        <View style={styles.queueQtyRow}>
-          <View style={styles.queueQtyLabelGroup}>
-            <Text style={[styles.queueQtyLabel, { color: accentColor }]}>QTY</Text>
-            <Text style={[styles.queueQtyUnit, { color: 'rgba(255,255,255,0.4)' }]}>
-              ({item.unit || 'units'})
-            </Text>
+            <TouchableOpacity
+              style={[
+                styles.queueActionBtn,
+                !isIN ? styles.queueActionBtnOUTActive : styles.queueActionBtnInactive,
+              ]}
+              onPress={() => updateQueueItem(item.id, { action: 'OUT' })}
+            >
+              <Ionicons
+                name="remove-circle"
+                size={18}
+                color={!isIN ? '#EF4444' : '#EF4444'}
+              />
+              <Text style={[
+                styles.queueActionBtnText,
+                { color: !isIN ? '#EF4444' : '#EF4444' }
+              ]}>
+                TAKE STOCK
+              </Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.queueQtyInputRow}>
-            <TouchableOpacity
-              style={[styles.queueQtyBtnLarge, { borderColor: accentColor + '50', backgroundColor: accentColor + '18' }]}
-              onPress={() => updateQueueItem(item.id, { qty: Math.max(1, item.qty - 1) })}
-            >
-              <Ionicons name="remove" size={20} color={accentColor} />
-            </TouchableOpacity>
-            <TextInput
-              style={[styles.queueQtyInput, {
-                backgroundColor: accentColor + '18',
-                borderColor: accentColor + '70',
-                color: '#FFFFFF',
-              }]}
-              value={String(item.qty)}
-              onChangeText={v => {
-                const n = parseInt(v);
-                if (!isNaN(n) && n >= 1) updateQueueItem(item.id, { qty: n });
-                else if (v === '' || v === '0') updateQueueItem(item.id, { qty: 1 });
-              }}
-              keyboardType="number-pad"
-            />
-            <TouchableOpacity
-              style={[styles.queueQtyBtnLarge, { borderColor: accentColor + '50', backgroundColor: accentColor + '18' }]}
-              onPress={() => updateQueueItem(item.id, { qty: item.qty + 1 })}
-            >
-              <Ionicons name="add" size={20} color={accentColor} />
-            </TouchableOpacity>
+
+          <View style={styles.queueQtyRow}>
+            <View style={styles.queueQtyLabelGroup}>
+              <Text style={[styles.queueQtyLabel, { color: '#10B981' }]}>QTY</Text>
+              <Text style={[styles.queueQtyUnit, { color: 'rgba(255,255,255,0.4)' }]}>
+                ({item.unit || 'units'})
+              </Text>
+            </View>
+            <View style={styles.queueQtyInputRow}>
+              <TouchableOpacity
+                style={styles.queueQtyBtnLarge}
+                onPress={() => updateQueueItem(item.id, { qty: Math.max(1, item.qty - 1) })}
+              >
+                <Ionicons name="remove" size={18} color="#10B981" />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.queueQtyInput}
+                value={String(item.qty)}
+                onChangeText={v => {
+                  const n = parseInt(v);
+                  if (!isNaN(n) && n >= 1) updateQueueItem(item.id, { qty: n });
+                  else if (v === '' || v === '0') updateQueueItem(item.id, { qty: 1 });
+                }}
+                keyboardType="number-pad"
+              />
+              <TouchableOpacity
+                style={styles.queueQtyBtnLarge}
+                onPress={() => updateQueueItem(item.id, { qty: item.qty + 1 })}
+              >
+                <Ionicons name="add" size={18} color="#10B981" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -455,7 +499,7 @@ export default function StockScannerModal({
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-            <Ionicons name="close" size={24} color="#FFF" />
+            <Ionicons name="close" size={20} color="#FFF" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>SCAN & ADD</Text>
@@ -472,12 +516,9 @@ export default function StockScannerModal({
               disabled={isSubmitting}
             >
               {isSubmitting ? (
-                <ActivityIndicator size="small" color="#000" />
+                <ActivityIndicator size="small" color="#FFF" />
               ) : (
-                <>
-                  <Text style={styles.submitAllBtnText}>SUBMIT</Text>
-                  <Text style={styles.submitAllBtnCount}>{queue.length}</Text>
-                </>
+                <Text style={styles.submitAllBtnText}>SUBMIT {queue.length}</Text>
               )}
             </TouchableOpacity>
           ) : (
@@ -543,34 +584,40 @@ export default function StockScannerModal({
                     barcodeScannerSettings={{
                       barcodeTypes: BARCODE_TYPES as any,
                     }}
-                  >
-                    <View style={styles.overlay}>
+                  />
+                  <View style={[styles.overlay, StyleSheet.absoluteFill]} pointerEvents="box-none">
+                    <View style={styles.darkOverlay} />
+                    <View style={styles.middleRow}>
                       <View style={styles.darkOverlay} />
-                      <View style={styles.middleRow}>
-                        <View style={styles.darkOverlay} />
-                        <View style={styles.scanWindow}>
-                          <View style={[styles.corner, styles.cornerTL]} />
-                          <View style={[styles.corner, styles.cornerTR]} />
-                          <View style={[styles.corner, styles.cornerBL]} />
-                          <View style={[styles.corner, styles.cornerBR]} />
-                          {loading && (
-                            <View style={styles.scanLoading}>
-                              <ActivityIndicator size="large" color="#708F96" />
-                            </View>
-                          )}
-                        </View>
-                        <View style={styles.darkOverlay} />
+                      <View style={styles.scanWindow}>
+                        <View style={[styles.corner, styles.cornerTL]} />
+                        <View style={[styles.corner, styles.cornerTR]} />
+                        <View style={[styles.corner, styles.cornerBL]} />
+                        <View style={[styles.corner, styles.cornerBR]} />
+                        {/* Scanning line indicator */}
+                        <View style={styles.scanLine} />
+                        {loading && (
+                          <View style={styles.scanLoading}>
+                            <ActivityIndicator size="large" color="#10B981" />
+                          </View>
+                        )}
                       </View>
-                      <View style={styles.darkOverlay}>
+                      <View style={styles.darkOverlay} />
+                    </View>
+                    <View style={styles.darkOverlay}>
+                      <View style={styles.instructionPill}>
                         <Text style={styles.instructionText}>
                           {queue.length > 0
-                            ? `${queue.length} item${queue.length !== 1 ? 's' : ''} queued — keep scanning!`
-                            : 'Align barcode within the frame'
+                            ? `${queue.length} item${queue.length !== 1 ? 's' : ''} queued`
+                            : 'Align barcode within frame'
                           }
                         </Text>
+                        {queue.length > 0 && (
+                          <Text style={styles.instructionSub}>Keep scanning!</Text>
+                        )}
                       </View>
                     </View>
-                  </CameraView>
+                  </View>
                 </View>
               )}
             </View>
@@ -651,33 +698,51 @@ export default function StockScannerModal({
             </ScrollView>
           )}
 
-          {/* ── Queue Section (full height when items present) ── */}
+          {/* ── Queue Section (expandable bottom panel) ── */}
           {queue.length > 0 && (
-            <View style={[styles.queueSection, { backgroundColor: '#0F172A' }]}>
-              {/* Summary Bar */}
-              <View style={styles.queueSummaryBar}>
-                <View style={styles.queueSummaryLeft}>
-                  <Ionicons name="cube-outline" size={16} color="#708F96" />
-                  <Text style={styles.queueSummaryText}>
-                    {queue.length} item{queue.length !== 1 ? 's' : ''} queued
-                  </Text>
-                </View>
-                <View style={styles.queueSummaryRight}>
-                  {queue.filter(i => i.action === 'IN').length > 0 && (
-                    <View style={styles.queueSummaryBadge}>
-                      <Text style={styles.queueSummaryBadgeTextIn}>
-                        {queue.filter(i => i.action === 'IN').length} ADD
+            <Animated.View style={[
+              styles.queueSection,
+              { height: queueHeightAnim, backgroundColor: '#0F172A' },
+            ]}>
+              {/* Drag Handle */}
+              <View {...panResponder.panHandlers}>
+                <TouchableOpacity
+                  style={styles.dragHandleArea}
+                  onPress={toggleQueueExpanded}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.dragHandle} />
+                  {/* Summary Bar */}
+                  <View style={styles.queueSummaryBar}>
+                    <View style={styles.queueSummaryLeft}>
+                      <Ionicons name="cube-outline" size={16} color="rgba(255,255,255,0.4)" />
+                      <Text style={styles.queueSummaryText}>
+                        {queue.length} item{queue.length !== 1 ? 's' : ''} queued
                       </Text>
                     </View>
-                  )}
-                  {queue.filter(i => i.action === 'OUT').length > 0 && (
-                    <View style={styles.queueSummaryBadge}>
-                      <Text style={styles.queueSummaryBadgeTextOut}>
-                        {queue.filter(i => i.action === 'OUT').length} TAKE
-                      </Text>
+                    <View style={styles.queueSummaryRight}>
+                      {queue.filter(i => i.action === 'IN').length > 0 && (
+                        <View style={styles.queueSummaryBadge}>
+                          <Text style={styles.queueSummaryBadgeTextIn}>
+                            {queue.filter(i => i.action === 'IN').length} ADD
+                          </Text>
+                        </View>
+                      )}
+                      {queue.filter(i => i.action === 'OUT').length > 0 && (
+                        <View style={styles.queueSummaryBadge}>
+                          <Text style={styles.queueSummaryBadgeTextOut}>
+                            {queue.filter(i => i.action === 'OUT').length} TAKE
+                          </Text>
+                        </View>
+                      )}
+                      <Ionicons
+                        name={queueExpanded ? 'chevron-down' : 'chevron-up'}
+                        size={18}
+                        color="rgba(255,255,255,0.3)"
+                      />
                     </View>
-                  )}
-                </View>
+                  </View>
+                </TouchableOpacity>
               </View>
 
               {/* Item List */}
@@ -686,29 +751,29 @@ export default function StockScannerModal({
                 keyExtractor={item => item.id}
                 renderItem={renderQueueItem}
                 style={styles.queueList}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + 20 }}
                 showsVerticalScrollIndicator={false}
                 ListFooterComponent={
                   <TouchableOpacity
                     style={styles.scanMoreBtn}
-                    onPress={() => setScanMode('camera')}
+                    onPress={() => { setQueueExpanded(false); Animated.spring(queueHeightAnim, { toValue: COLLAPSED_QUEUE_HEIGHT, useNativeDriver: false, friction: 12, tension: 65 }).start(); setScanMode('camera'); }}
                   >
-                    <Ionicons name="qr-code-outline" size={18} color="#708F96" />
-                    <Text style={styles.scanMoreBtnText}>Scan More Items</Text>
+                    <Ionicons name="scan-outline" size={18} color="rgba(255,255,255,0.4)" />
+                    <Text style={styles.scanMoreBtnText}>Scan more items</Text>
                   </TouchableOpacity>
                 }
               />
-            </View>
+            </Animated.View>
           )}
 
           {/* ── Empty / Camera State ── */}
           {queue.length === 0 && !loading && (
             <View style={styles.emptyQueue}>
               <View style={styles.emptyIcon}>
-                <Ionicons name="qr-code-outline" size={48} color="rgba(255,255,255,0.1)" />
+                <Ionicons name="scan-outline" size={48} color="rgba(16,185,129,0.2)" />
               </View>
               <Text style={styles.emptyTitle}>No items scanned</Text>
-              <Text style={styles.emptySub}>Point camera at barcode to scan</Text>
+              <Text style={styles.emptySub}>Point camera at a QR code to scan</Text>
             </View>
           )}
         </KeyboardAvoidingView>
@@ -717,10 +782,8 @@ export default function StockScannerModal({
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: '#090C11' },
 
   // Header
   header: {
@@ -728,48 +791,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
   },
   closeBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center',
   },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerTitle: {
     color: '#FFF', fontSize: 16, fontWeight: '900',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
   queueBadge: {
-    backgroundColor: '#708F96', borderRadius: 10, minWidth: 20, height: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, minWidth: 20, height: 20,
     justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6,
   },
-  queueBadgeText: { color: '#FFF', fontSize: 11, fontWeight: '900' },
+  queueBadgeText: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '900' },
   submitAllBtn: {
-    backgroundColor: '#708F96', borderRadius: 12, paddingHorizontal: 14,
-    paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#10B981', borderRadius: 16, paddingHorizontal: 16,
+    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 6,
   },
   submitAllBtnDisabled: { opacity: 0.6 },
   submitAllBtnText: { color: '#FFF', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
-  submitAllBtnCount: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '700' },
 
   // Tabs
   tabs: {
-    flexDirection: 'row', marginHorizontal: 16, gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: 4,
-    marginBottom: 8,
+    flexDirection: 'row', marginHorizontal: 16, gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, padding: 4,
+    marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.02)',
   },
   tab: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, borderRadius: 10,
+    gap: 6, paddingVertical: 12, borderRadius: 12,
   },
-  tabActive: { backgroundColor: 'rgba(112,143,150,0.4)' },
-  tabText: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+  tabActive: { backgroundColor: '#10B981' },
+  tabText: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
   tabTextActive: { color: '#FFF' },
 
   // Error
   errorBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(239,68,68,0.15)', marginHorizontal: 16, marginBottom: 8,
-    padding: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)',
+    backgroundColor: '#3B0A0A', marginHorizontal: 16, marginBottom: 8,
+    padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#7F1D1D',
   },
-  errorText: { color: '#EF4444', fontSize: 13, fontWeight: '600', flex: 1 },
+  errorText: { color: '#FCA5A5', fontSize: 13, fontWeight: '600', flex: 1 },
 
   // Camera
   cameraWrapper: { flex: 1 },
@@ -779,42 +841,53 @@ const styles = StyleSheet.create({
   permissionTitle: { color: '#FFF', fontSize: 18, fontWeight: '800', textAlign: 'center' },
   permissionSubtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
   permissionBtn: {
-    backgroundColor: '#708F96', paddingHorizontal: 28, paddingVertical: 14,
+    backgroundColor: '#10B981', paddingHorizontal: 28, paddingVertical: 14,
     borderRadius: 14, marginTop: 8,
   },
   permissionBtnText: { color: '#FFF', fontWeight: '800', fontSize: 14 },
   cameraContainer: { flex: 1 },
   overlay: { flex: 1 },
-  darkOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)' },
+  darkOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
   middleRow: { flexDirection: 'row', flex: 1.5 },
   scanWindow: {
-    width: 240, height: 240, backgroundColor: 'transparent',
+    width: 260, height: 180, backgroundColor: 'transparent',
     position: 'relative', alignItems: 'center', justifyContent: 'center',
   },
-  corner: { position: 'absolute', width: 32, height: 32, borderColor: '#708F96' },
-  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
-  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
-  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
-  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
+  scanLine: {
+    position: 'absolute', top: '50%', left: 0, right: 0, height: 2,
+    backgroundColor: '#10B981', shadowColor: '#10B981', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8, shadowRadius: 10, elevation: 5,
+  },
+  corner: { position: 'absolute', width: 40, height: 40, borderColor: '#10B981', borderWidth: 2, borderRadius: 12 },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 0 },
   scanLoading: {
     ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center', borderRadius: 12,
   },
+  instructionPill: {
+    backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 20, paddingVertical: 10,
+    borderRadius: 20, alignSelf: 'center', marginTop: 24, alignItems: 'center',
+  },
   instructionText: {
-    color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600',
-    textAlign: 'center', padding: 12,
+    color: '#FFF', fontSize: 14, fontWeight: '700', textAlign: 'center',
+  },
+  instructionSub: {
+    color: 'rgba(255,255,255,0.6)', fontSize: 12, textAlign: 'center', marginTop: 2,
   },
 
   // Gallery
   galleryWrapper: { flex: 1, padding: 16 },
   galleryPicker: {
-    flex: 1, borderWidth: 2, borderColor: 'rgba(112,143,150,0.3)',
+    flex: 1, borderWidth: 2, borderColor: 'rgba(16,185,129,0.3)',
     borderStyle: 'dashed', borderRadius: 20, justifyContent: 'center',
     alignItems: 'center', gap: 16,
   },
   galleryPickerIcon: {
     width: 80, height: 80, borderRadius: 20,
-    backgroundColor: 'rgba(112,143,150,0.1)', justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(16,185,129,0.1)', justifyContent: 'center', alignItems: 'center',
   },
   galleryPickerTitle: { color: '#FFF', fontSize: 18, fontWeight: '800' },
   galleryPickerSub: { color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center' },
@@ -826,22 +899,22 @@ const styles = StyleSheet.create({
   },
   galleryProcessingText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   galleryCancelBtn: {
-    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12,
     paddingVertical: 12, alignItems: 'center', marginTop: 12,
   },
   galleryCancelText: { color: 'rgba(255,255,255,0.5)', fontWeight: '700', fontSize: 14 },
 
   // Manual
   manualWrapper: { flex: 1 },
-  manualCard: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 20, gap: 12 },
+  manualCard: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 20, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   manualTitle: { color: '#FFF', fontSize: 18, fontWeight: '800' },
   manualSub: { color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 18 },
   manualInput: {
     borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 16, fontWeight: '600', letterSpacing: 1,
+    fontSize: 16, fontWeight: '600', letterSpacing: 1, borderColor: 'rgba(255,255,255,0.1)', color: '#FFF',
   },
   manualBtn: {
-    backgroundColor: '#708F96', borderRadius: 12, paddingVertical: 14,
+    backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
   manualBtnDisabled: { opacity: 0.4 },
@@ -849,58 +922,61 @@ const styles = StyleSheet.create({
 
   // Queue Section
   queueSection: {
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    flex: 1,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    backgroundColor: '#090C11',
+    overflow: 'hidden',
+  },
+  dragHandleArea: {
+    paddingTop: 8,
+  },
+  dragHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center', marginBottom: 4,
   },
   queueSummaryBar: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12,
   },
-  queueSummaryLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  queueSummaryLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   queueSummaryRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  queueSummaryText: { fontSize: 13, fontWeight: '800', color: '#708F96', letterSpacing: 0.3 },
+  queueSummaryText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.5)' },
   queueSummaryBadge: {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
   },
-  queueSummaryBadgeTextIn: { fontSize: 10, fontWeight: '900', color: '#10B981' },
-  queueSummaryBadgeTextOut: { fontSize: 10, fontWeight: '900', color: '#EF4444' },
-  queueList: { flex: 1, paddingTop: 12 },
+  queueSummaryBadgeTextIn: { fontSize: 11, fontWeight: '800', color: '#10B981', letterSpacing: 0.5 },
+  queueSummaryBadgeTextOut: { fontSize: 11, fontWeight: '800', color: '#EF4444', letterSpacing: 0.5 },
+  queueList: { flex: 1, paddingTop: 4 },
   scanMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 8, paddingVertical: 14, marginHorizontal: 0,
-    borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(112,143,150,0.3)',
-    borderStyle: 'dashed', marginTop: 8, marginBottom: 8,
+    borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.03)',
+    marginTop: 4, marginBottom: 12,
   },
-  scanMoreBtnText: { fontSize: 13, fontWeight: '700', color: '#708F96' },
+  scanMoreBtnText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.5)' },
 
   // Queue Item (full card)
   queueItem: {
-    padding: 14, borderRadius: 16, marginBottom: 12,
-    gap: 12,
+    padding: 16, borderRadius: 16, marginBottom: 12,
+    backgroundColor: '#111827', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
   },
   queueItemTop: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-  },
-  queueItemAccent: {
-    width: 4, height: 40, borderRadius: 2, flexShrink: 0,
-  },
-  queueItemTopLeft: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
   },
   queueIndexBadge: {
     width: 28, height: 28, borderRadius: 8, borderWidth: 1.5,
+    borderColor: '#10B981', backgroundColor: 'transparent',
     justifyContent: 'center', alignItems: 'center',
     flexShrink: 0,
   },
   queueIndexBadgeText: {
-    fontSize: 12, fontWeight: '900',
+    fontSize: 12, fontWeight: '800', color: '#10B981',
   },
   queueItemNameGroup: { flex: 1, minWidth: 0 },
-  queueItemName: { fontSize: 15, fontWeight: '800', marginBottom: 2, letterSpacing: -0.2 },
-  queueItemMeta: { fontSize: 11, fontWeight: '600' },
+  queueItemName: { fontSize: 15, fontWeight: '800', marginBottom: 2, color: '#FFF' },
+  queueItemMeta: { fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.4)' },
   queueRemoveBtn: {
-    width: 30, height: 30, borderRadius: 8,
+    width: 28, height: 28, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center', alignItems: 'center',
     flexShrink: 0,
@@ -908,68 +984,76 @@ const styles = StyleSheet.create({
 
   // Stock info row
   queueStockRow: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 16,
   },
   queueStockBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
   },
   queueStockBadgeText: {
-    fontSize: 14, fontWeight: '900',
+    fontSize: 12, fontWeight: '800',
   },
   queueStockBadgeLabel: {
-    fontSize: 12, fontWeight: '500',
+    fontSize: 11, fontWeight: '500',
+  },
+
+  // Action row & Quantity row wrapper
+  queueBottomRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12,
   },
 
   // Action row — ADD / TAKE buttons
   queueActionRow: {
-    flexDirection: 'row', gap: 10,
+    flexDirection: 'row', gap: 8, flex: 1,
   },
   queueActionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 12, borderRadius: 12,
-    borderWidth: 2,
+    gap: 6, paddingVertical: 10, borderRadius: 8,
+    borderWidth: 1.5,
   },
   queueActionBtnINActive: {
     backgroundColor: '#10B981', borderColor: '#10B981',
   },
   queueActionBtnOUTActive: {
-    backgroundColor: '#EF4444', borderColor: '#EF4444',
+    backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)',
   },
   queueActionBtnInactive: {
-    backgroundColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)',
   },
-  queueActionBtnText: { fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  queueActionBtnText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 
   // Quantity row
   queueQtyRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    alignItems: 'flex-end',
   },
-  queueQtyLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  queueQtyLabel: { fontSize: 11, fontWeight: '900', letterSpacing: 1, color: 'rgba(255,255,255,0.5)' },
-  queueQtyUnit: { fontSize: 11 },
+  queueQtyLabelGroup: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  queueQtyLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  queueQtyUnit: { fontSize: 10 },
   queueQtyInputRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
   },
   queueQtyBtnLarge: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: 'rgba(16,185,129,0.1)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)',
     justifyContent: 'center', alignItems: 'center',
   },
   queueQtyInput: {
-    width: 70, height: 44, borderRadius: 10,
-    borderWidth: 1.5, fontSize: 22, fontWeight: '900',
+    width: 50, height: 36, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    fontSize: 16, fontWeight: '800', color: '#FFF',
     textAlign: 'center',
   },
 
   // Empty State
   emptyQueue: {
-    flex: 1, justifyContent: 'center', alignItems: 'center', gap: 8, padding: 40,
+    flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 40,
   },
   emptyIcon: {
     width: 72, height: 72, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'rgba(16,185,129,0.06)',
     justifyContent: 'center', alignItems: 'center', marginBottom: 8,
+    borderWidth: 1, borderColor: 'rgba(16,185,129,0.1)',
   },
   emptyTitle: { color: 'rgba(255,255,255,0.3)', fontSize: 16, fontWeight: '700' },
   emptySub: { color: 'rgba(255,255,255,0.15)', fontSize: 13, textAlign: 'center' },

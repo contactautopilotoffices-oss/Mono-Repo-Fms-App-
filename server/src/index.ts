@@ -2,6 +2,7 @@
 import './bootstrap.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { ticketRoutes } from './routes/tickets.js';
@@ -28,6 +29,23 @@ export function buildServer(opts: { logger?: boolean } = {}) {
   fastify.register(cors, {
     origin: true,
     credentials: true,
+  });
+
+  // Register multipart for file uploads
+  fastify.register(multipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB max
+    },
+  });
+
+  // Add content type parser for JSON (required for POST endpoints with JSON body)
+  fastify.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    try {
+      const json = JSON.parse(body as string);
+      done(null, json);
+    } catch (err: any) {
+      done(err, undefined);
+    }
   });
 
   // ---------------------------------------------------------------------------

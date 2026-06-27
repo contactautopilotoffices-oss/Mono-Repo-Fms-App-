@@ -501,13 +501,19 @@ export function getRoleAllowedPaths(role: string, propertyId: string): string[] 
   if (capabilities.reports) paths.push(`${basePath}/reports`);
   if (capabilities.security) paths.push(`${basePath}/security`);
   if (capabilities.sop) paths.push(`${basePath}/checklist`);
+  paths.push(`${basePath}/checklist/scan`);
 
   // Common pages every logged-in user can reach
   paths.push(`${basePath}/settings`, `${basePath}/profile`);
 
-  // Admin-level roles get blanket access
+  // Admin-level roles get blanket access to all property pages
   if (PROPERTY_ADMIN_ROLES.includes(role)) {
-    return [`${basePath}`];
+    return [
+      `${basePath}`,
+      `${basePath}/dashboard`,
+      `${basePath}/checklist`,
+      `${basePath}/checklist/scan`,
+    ];
   }
 
   return paths;

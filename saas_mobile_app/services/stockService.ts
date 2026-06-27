@@ -167,28 +167,28 @@ export const stockService = {
   },
 
   // ── Fetch single item by barcode/item_code ─────────────────────────────────
+  // Uses the dedicated server endpoint which has the correct Supabase .or() call,
+  // matching the web app's lookup at /api/properties/[propertyId]/stock/items?barcode=X
   async getItemByBarcode(propertyId: string, barcode: string): Promise<ApiResponse<StockItem>> {
     try {
-      const res = await serverApi.query<StockItem[]>({
-        table: 'stock_items',
-        action: 'select',
-        select: '*',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'or', conditions: [
-            { op: 'eq', column: 'barcode', value: barcode },
-            { op: 'eq', column: 'item_code', value: barcode },
-          ]},
-        ],
-        limit: 1,
+      // GET /api/stock/items/by-barcode?propertyId=X&code=Y
+      // Server responds: { item: StockItem | null }
+      const res = await serverApi.get<{ item: StockItem | null }>('/api/stock/items/by-barcode', {
+        propertyId,
+        code: barcode,
       });
 
       if (res.error) throw new Error(res.error.message);
-      if (!res.data || res.data.length === 0) {
+
+      // serverApi.get passes the response as res.data = { item: StockItem | null }
+      const responseData = res.data as any;
+      const item = responseData?.item ?? null;
+
+      if (!item) {
         return { success: false, data: null, error: 'Item not found', status: 404 };
       }
 
-      return { success: true, data: res.data[0], status: 200 };
+      return { success: true, data: item as StockItem, status: 200 };
     } catch (err: any) {
       return { success: false, data: null, error: err.message, status: 500 };
     }
@@ -564,11 +564,20 @@ export const stockService = {
   parseScannedCode(scannedValue: string): { type: 'id' | 'item_code' | 'barcode'; value: string } | null {
     if (!scannedValue) return null;
 
-    // Try to parse as JSON (QR code from web app)
+    // Try to parse as JSON (QR code data from web or mobile app)
     try {
       const data = JSON.parse(scannedValue);
+      // Web app qr_code_data format: { item_id, item_code, name, property_id, barcode }
+      if (data.item_id) {
+        return { type: 'id', value: data.item_id };
+      }
+      // Mobile app QRCodeData format: { id, item_code, name, category }
       if (data.id) {
         return { type: 'id', value: data.id };
+      }
+      // Fallback: try barcode field from web qr_code_data
+      if (data.barcode) {
+        return { type: 'barcode', value: data.barcode };
       }
       if (data.item_code) {
         return { type: 'item_code', value: data.item_code };
@@ -577,7 +586,7 @@ export const stockService = {
       // Not JSON, continue with plain text parsing
     }
 
-    // Check if it's a barcode format (PROPERTYCODE-ITEMCODE)
+    // Check if it's a barcode format (PROPERTYCODE-ITEMCODE-TIMESTAMP)
     if (scannedValue.includes('-')) {
       return { type: 'barcode', value: scannedValue };
     }
@@ -598,7 +607,7 @@ export const stockService = {
         item = byBarcode.data;
       }
 
-      // If not found, try parsing QR code data
+      // If not found, try parsing QR code data (handles JSON QR and plain barcode strings)
       if (!item) {
         const parsed = this.parseScannedCode(barcode);
         if (parsed) {
@@ -622,6 +631,20 @@ export const stockService = {
               filters: [
                 { op: 'eq', column: 'item_code', value: parsed.value },
                 { op: 'eq', column: 'property_id', value: propertyId },
+              ],
+              limit: 1,
+            });
+            if (res.data && res.data.length > 0) {
+              item = res.data[0];
+            }
+          } else if (parsed.type === 'barcode') {
+            // Retry barcode/item_code lookup with parsed value (safety net)
+            const res = await serverApi.query<StockItem[]>({
+              table: 'stock_items',
+              action: 'select',
+              filters: [
+                { op: 'eq', column: 'property_id', value: propertyId },
+                { op: 'or', expression: `barcode.eq.${parsed.value},item_code.eq.${parsed.value}` },
               ],
               limit: 1,
             });
@@ -654,25 +677,23 @@ export const stockService = {
     userId?: string;
   }): Promise<ApiResponse<{ quantityAfter: number }>> {
     try {
-      // Record movement
-      await serverApi.query({
-        table: 'stock_movements',
-        action: 'insert',
-        values: {
-          item_id: params.itemId,
-          property_id: params.propertyId,
-          action: params.action,
-          quantity_change: params.quantityChange,
-          quantity_before: params.quantityBefore,
-          quantity_after: params.quantityAfter,
-          notes: params.notes ?? null,
-          user_id: params.userId ?? null,
-        },
+      // Record movement via the dedicated server endpoint, which properly updates stock_items quantity
+      const res = await serverApi.post<{ success: boolean; movement: any; item: { quantity: number } }>('/api/stock/movements', {
+        propertyId: params.propertyId,
+        itemId: params.itemId,
+        action: params.action,
+        quantity: Math.abs(params.quantityChange), // the backend infers sign from action
+        notes: params.notes,
       });
+
+      if (res.error) throw new Error(res.error.message);
+
+      // Backend returns { success, movement, item } — item.quantity is the new total
+      const newQty = res.data?.item?.quantity ?? params.quantityAfter;
 
       return {
         success: true,
-        data: { quantityAfter: params.quantityAfter },
+        data: { quantityAfter: newQty },
         status: 200,
       };
     } catch (err: any) {
