@@ -12,6 +12,7 @@ import LovablePropertyAdminDashboard from '@/components/dashboard/LovablePropert
 import SecurityDashboard from '@/components/dashboard/SecurityDashboard';
 import LovableSoftServiceManagerDashboard from '@/components/dashboard/LovableSoftServiceManagerDashboard';
 import LovableStaffDashboard from '@/components/dashboard/LovableStaffDashboard';
+import SuperTenantPropertySelector from '@/components/dashboard/SuperTenantPropertySelector';
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 
 // ─── Role constants ────────────────────────────────────────────────────────────
@@ -22,7 +23,8 @@ const PROPERTY_ADMIN_ROLES = ['property_admin', 'admin', 'manager', 'property_ma
 const SECURITY_ROLES = ['security', 'security_guard', 'guard'];
 const SOFT_SERVICE_ROLES = ['soft_service_manager', 'soft_services', 'housekeeping_manager'];
 const STAFF_ROLES = ['staff', 'maintenance_staff', 'technician', 'helper', 'cleaner'];
-const TENANT_ROLES = ['tenant', 'super_tenant'];
+const TENANT_ROLES = ['tenant'];
+const SUPER_TENANT_ROLES = ['super_tenant'];
 
 export default function DashboardScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
@@ -63,6 +65,7 @@ export default function DashboardScreen() {
     if (PROPERTY_ADMIN_ROLES.includes(propRole)) return 'property_admin';
     if (SECURITY_ROLES.includes(propRole)) return 'security';
     if (SOFT_SERVICE_ROLES.includes(propRole)) return 'soft_service';
+    if (propRole === 'super_tenant') return 'super_tenant';
     if (TENANT_ROLES.includes(propRole)) return 'tenant';
     if (STAFF_ROLES.includes(propRole)) return 'staff';
 
@@ -90,6 +93,11 @@ export default function DashboardScreen() {
   // ─── Role-based render ────────────────────────────────────────────────────
   if (effectiveRole === 'procurement') {
     return <Redirect href={`/property/${pid}/procurement`} />;
+  }
+
+  // super_tenant: show property selector (not a redirect, a full screen)
+  if (effectiveRole === 'super_tenant') {
+    return <SuperTenantPropertySelector />;
   }
 
   if (effectiveRole === 'tenant') {

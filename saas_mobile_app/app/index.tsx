@@ -47,6 +47,15 @@ export default function Index() {
     return <Redirect href="/super-admin" />;
   }
 
+  // super_tenant org role — show property selector with all their assigned properties
+  if (membership.org_role === 'super_tenant') {
+    // Redirect to the first property's dashboard which will render the SuperTenantPropertySelector
+    if (membership.properties && membership.properties.length > 0) {
+      const firstProperty = membership.properties[0];
+      return <Redirect href={`/property/${firstProperty.id}/dashboard`} />;
+    }
+  }
+
   // User is authenticated — redirect directly to first property dashboard
   if (membership.properties && membership.properties.length > 0) {
     const firstProperty = membership.properties[0];
