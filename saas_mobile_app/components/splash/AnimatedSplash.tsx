@@ -1,28 +1,33 @@
 /**
  * AnimatedSplash - Premium Animated Splash Screen
  *
- * Provides a smooth, enterprise-grade animated logo reveal during app startup.
- * Runs in parallel with critical initialization tasks.
- *
- * Animation: Logo scales from 85% to 100% with ease-out curve over 700-900ms
- * If startup is slow (>2s), a subtle loading indicator appears below the logo
+ * Shows the Autopilot logo centered, zooms it in, then fades away
+ * to reveal the app underneath. During the splash, auth state is resolved
+ * and the user's dashboard is prefetched in the background for a smooth,
+ * professional cold-start experience.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, StyleSheet, Dimensions, Image } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withSpring,
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
+import { useAuth } from '@/hooks/useAuth';
+import { useDashboardStore } from '@/stores/dashboardStore';
+import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
 
-const ANIMATION_DURATION = 800;
-const SCALE_INITIAL = 0.85;
-const SCALE_FINAL = 1;
-const SLOW_STARTUP_THRESHOLD = 2000;
+const MIN_DISPLAY_MS = 2200; // Minimum time logo is visible
+const ENTRANCE_DURATION = 1300; // Zoom-in duration
+const EXIT_DURATION = 700;      // Fade-up duration
+const SCALE_INITIAL = 0.35;     // Start small
+const SCALE_FINAL = 2.5;        // Camera ends inside the logo
+const EXIT_SCALE = 2.8;         // Slight extra zoom while fading up
+const EXIT_TRANSLATE_Y = -60;   // Float upward while fading out
 
 interface AnimatedSplashProps {
   onAnimationComplete: () => void;
@@ -30,91 +35,130 @@ interface AnimatedSplashProps {
 }
 
 export function AnimatedSplash({ onAnimationComplete, startupComplete }: AnimatedSplashProps) {
-  const [showLoader, setShowLoader] = useState(false);
-  const [isReady, setIsReady] = useState(false);
+  const { user, isLoading: isAuthLoading, membership, isMembershipLoading } = useAuth();
+
+  const [phase, setPhase] = useState<'entering' | 'holding' | 'prefetching' | 'exiting' | 'done'>('entering');
   const splashStartTime = useRef(Date.now());
+  const hasCompletedRef = useRef(false);
+  const hasPrefetchedRef = useRef(false);
+  const hasHapticTriggered = useRef(false);
 
   // Animation values
   const scale = useSharedValue(SCALE_INITIAL);
-  const opacity = useSharedValue(0);
-  const loaderOpacity = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  const translateY = useSharedValue(0);
 
-  // Track if we've already called onAnimationComplete
-  const hasCompletedRef = useRef(false);
+  const runExitAnimation = useCallback(() => {
+    if (hasCompletedRef.current) return;
+    hasCompletedRef.current = true;
+    setPhase('exiting');
 
-  useEffect(() => {
-    // Start entrance animation immediately
-    // Fade in + scale up
-    opacity.value = withTiming(1, {
-      duration: ANIMATION_DURATION,
+    // Continue zooming in slightly + float upward while fading out
+    scale.value = withTiming(EXIT_SCALE, {
+      duration: EXIT_DURATION,
       easing: Easing.out(Easing.ease),
     });
 
-    scale.value = withSpring(SCALE_FINAL, {
-      damping: 15,
-      stiffness: 100,
-      mass: 1,
+    translateY.value = withTiming(EXIT_TRANSLATE_Y, {
+      duration: EXIT_DURATION,
+      easing: Easing.out(Easing.ease),
     });
 
-    // Set ready state for transition
-    const readyTimeout = setTimeout(() => {
-      setIsReady(true);
-    }, 100);
-
-    // Show loader if startup is slow
-    const loaderTimeout = setTimeout(() => {
-      if (!startupComplete) {
-        setShowLoader(true);
-        loaderOpacity.value = withTiming(1, {
-          duration: 300,
-          easing: Easing.out(Easing.ease),
-        });
+    opacity.value = withTiming(0, {
+      duration: EXIT_DURATION,
+      easing: Easing.out(Easing.ease),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(onAnimationComplete)();
       }
-    }, SLOW_STARTUP_THRESHOLD);
+    });
+  }, [onAnimationComplete, opacity, scale, translateY]);
 
-    return () => {
-      clearTimeout(readyTimeout);
-      clearTimeout(loaderTimeout);
-    };
-  }, []);
-
-  // Handle startup completion
+  // Entrance animation: camera zooms into the logo (small -> fills screen)
   useEffect(() => {
-    if (startupComplete && isReady && !hasCompletedRef.current) {
-      hasCompletedRef.current = true;
+    if (phase !== 'entering') return;
 
-      // Let animation finish naturally, then transition
-      const transitionDelay = Math.max(0, ANIMATION_DURATION - (Date.now() - splashStartTime.current));
-
-      setTimeout(() => {
-        // Fade out splash
-        opacity.value = withTiming(0, {
-          duration: 300,
-          easing: Easing.out(Easing.ease),
-        }, (finished) => {
-          if (finished) {
-            runOnJS(onAnimationComplete)();
-          }
-        });
-      }, transitionDelay);
+    // Subtle hardware vibration as the zoom begins
+    if (!hasHapticTriggered.current) {
+      hasHapticTriggered.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     }
-  }, [startupComplete, isReady, onAnimationComplete]);
 
-  // Animated styles
+    scale.value = withTiming(SCALE_FINAL, {
+      duration: ENTRANCE_DURATION,
+      easing: Easing.in(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(setPhase)('holding');
+      }
+    });
+  }, [phase, scale]);
+
+  // Background prefetch while the splash is visible
+  useEffect(() => {
+    if (hasPrefetchedRef.current) return;
+    if (isAuthLoading || isMembershipLoading) return;
+    if (!user || !membership?.properties?.length) return;
+
+    hasPrefetchedRef.current = true;
+    setPhase('prefetching');
+
+    const propertyId = useDashboardStore.getState().selectedPropertyId || membership.properties[0].id;
+    if (!propertyId) return;
+
+    // Start prefetch in parallel; don't block the exit animation
+    Promise.allSettled([
+      prefetchDashboard(propertyId),
+      prefetchImportantOnLogin(propertyId),
+    ]).then(() => {
+      console.log('[AnimatedSplash] Background prefetch complete');
+    });
+  }, [isAuthLoading, isMembershipLoading, user, membership]);
+
+  // Trigger exit once startup is complete and minimum display time has passed
+  useEffect(() => {
+    if (phase === 'exiting' || phase === 'done' || phase === 'entering') return;
+
+    const checkReady = () => {
+      if (!startupComplete) return;
+      if (isAuthLoading || isMembershipLoading) return;
+
+      const elapsed = Date.now() - splashStartTime.current;
+      const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
+
+      const timer = setTimeout(() => {
+        runExitAnimation();
+      }, remaining);
+
+      return () => clearTimeout(timer);
+    };
+
+    const cleanup = checkReady();
+    return cleanup;
+  }, [startupComplete, isAuthLoading, isMembershipLoading, phase, runExitAnimation]);
+
+  // Safety: force exit after a max duration so the splash never traps the user
+  useEffect(() => {
+    const maxTimer = setTimeout(() => {
+      if (!hasCompletedRef.current) {
+        hasCompletedRef.current = true;
+        opacity.value = 0;
+        onAnimationComplete();
+      }
+    }, 8000);
+    return () => clearTimeout(maxTimer);
+  }, [onAnimationComplete, opacity]);
+
   const containerStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
   const logoStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  const loaderStyle = useAnimatedStyle(() => ({
-    opacity: loaderOpacity.value,
+    transform: [{ scale: scale.value }, { translateY: translateY.value }] as [{ scale: number }, { translateY: number }],
   }));
 
   return (
-    <Animated.View style={[styles.container, containerStyle]}>
+    <Animated.View style={[styles.container, containerStyle]} pointerEvents="none">
       <View style={styles.content}>
         <Animated.View style={[styles.logoContainer, logoStyle]}>
           <Image
@@ -123,23 +167,17 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
             resizeMode="contain"
           />
         </Animated.View>
-
-        {showLoader && (
-          <Animated.View style={[styles.loaderContainer, loaderStyle]}>
-            <ActivityIndicator size="small" color="#708F96" />
-          </Animated.View>
-        )}
       </View>
     </Animated.View>
   );
 }
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#0F1521',
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
@@ -157,12 +195,7 @@ const styles = StyleSheet.create({
   logo: {
     width: '100%',
     height: '100%',
-  },
-  loaderContainer: {
-    marginTop: 32,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+    tintColor: '#FFFFFF',
   },
 });
 

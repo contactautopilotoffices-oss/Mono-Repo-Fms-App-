@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import TenantDashboard from '@/components/tenant/TenantDashboard';
@@ -48,8 +49,8 @@ export default function TenantPage() {
 
   if (isLoading) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#667eea" />
+      <View style={{ flex: 1, padding: 16 }}>
+        <SkeletonLoader type="list" count={5} />
       </View>
     );
   }

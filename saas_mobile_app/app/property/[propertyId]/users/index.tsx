@@ -25,7 +25,8 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { useAuth } from '@/hooks/useAuth';
 import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 
 
 import {
@@ -336,11 +337,8 @@ function EmptyState({ colors }: { colors: typeof Colors.light }) {
 
 function LoadingState({ colors }: { colors: typeof Colors.light }) {
   return (
-    <View style={styles.loadingState}>
-      <ActivityIndicator size="large" color={colors.primary} />
-      <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-        Loading team members...
-      </Text>
+    <View style={{ flex: 1, padding: 16 }}>
+      <SkeletonLoader type="list" count={5} />
     </View>
   );
 }
@@ -1080,21 +1078,23 @@ export default function UsersScreen() {
     }
   }
 
-  const { data: users = [], isLoading, isFetching, refetch } = useServerQuery<UserWithMembership[]>(
+  const { data, isLoading, isFetching, refetch } = useServerQuery<UserWithMembership[]>(
     queryKeys.property.users(propertyId),
     fetchUsers,
     { staleTime: 1000 * 60 * 5 }
   );
+  const users = Array.isArray(data) ? data : [];
 
   const handleRefresh = () => refetch();
 
   // Dynamically extract all unique roles present in the team
   const availableRoles = useMemo(() => {
     const unique = new Set<string>();
-    (users || []).forEach((u) => {
-      const r = u.propertyRole || u.role;
+    const safeUsers = Array.isArray(users) ? users : [];
+    for (const u of safeUsers) {
+      const r = u?.propertyRole || u?.role;
       if (r) unique.add(r);
-    });
+    }
 
     const activeRoles = Array.from(unique);
 
@@ -1153,16 +1153,11 @@ export default function UsersScreen() {
   const activeCount = users.filter((u) => u.is_active).length;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen
         options={{
           headerShown: false,
         }}
-      />
-
-      <LinearGradient
-        colors={isDark ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']}
-        style={StyleSheet.absoluteFillObject}
       />
 
       {/* Modern Header */}

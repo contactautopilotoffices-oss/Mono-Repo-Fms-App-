@@ -23,6 +23,7 @@ import { stockService } from "@/services/stockService";
 import { LinearGradient } from "expo-linear-gradient";
 import { FlashList } from "@shopify/flash-list";
 import Animated, { FadeInUp } from "react-native-reanimated";
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import SafeBlurView from "@/components/ui/SafeBlurView";
 import BulkImportModal from "@/components/stock/BulkImportModal";
 import StockScannerModal from "@/components/stock/StockScannerModal";
@@ -93,9 +94,6 @@ interface StockMovement {
 // ─── Design Tokens (Craxinno Glass) ───────────────────────────────────────────
 
 const TOKENS = {
-  bg: {
-    gradient: ["#0B1B2A", "#0F2D3D", "#113B4D"] as const,
-  },
   glass: {
     border: "rgba(255,255,255,0.18)",
     bg: "rgba(255,255,255,0.06)",
@@ -435,16 +433,11 @@ export default function StockScreen() {
       <View
         style={[
           styles.container,
-          { paddingTop: insets.top, paddingBottom: insets.bottom },
+          { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
       >
-        <LinearGradient
-          colors={[...TOKENS.bg.gradient]}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3B82F6" />
-          <Text style={styles.loadingText}>Loading stock...</Text>
+        <View style={{ flex: 1, paddingHorizontal: 16 }}>
+          <SkeletonLoader type="list" count={5} />
         </View>
       </View>
     );
@@ -455,16 +448,13 @@ export default function StockScreen() {
       style={[
         styles.container,
         {
+          backgroundColor: colors.background,
           paddingTop: insets.top,
           paddingBottom: Math.max(insets.bottom, 12) + 90,
         },
       ]}
     >
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient
-        colors={[...TOKENS.bg.gradient]}
-        style={StyleSheet.absoluteFillObject}
-      />
 
       {/* ── Header ── */}
       <Animated.View

@@ -35,7 +35,7 @@ import SafeBlurView from "@/components/ui/SafeBlurView";
 
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import { checklistService } from "@/services/checklistService";
-import { isDue, getCompletionSlot, computeSlotTime, getHourlyInterval, isWithinTimeWindow, fmt12h } from "@/utils/checklistTime";
+import { isDue, getCompletionSlot, computeSlotTime, parseHourlyInterval as getHourlyInterval, isWithinTimeWindow, fmt12h, getISTDateParts } from "@/utils/checklistTime";
 import { processAndStampImage } from "@/utils/mediaProcessor";
 
 import {
@@ -245,11 +245,13 @@ function getTemplateGaps(
 
   for (let i = 0; i < daysLimit; i++) {
     const d = new Date(refDate.getTime() - i * 24 * 60 * 60 * 1000);
-    const dateStr = d.toLocaleDateString("en-CA");
+    const dIst = getISTDateParts(d);
+    const dateStr = dIst.isoDate;
     const isToday = i === 0;
 
     // Do not generate missed gaps for dates prior to template creation
-    const createdDateStr = new Date(template.created_at).toLocaleDateString("en-CA");
+    const createdDateIst = getISTDateParts(new Date(template.created_at));
+    const createdDateStr = createdDateIst.isoDate;
     if (dateStr < createdDateStr) continue;
 
     if (template.frequency === "daily" || isHourlyFreq(template.frequency)) {
@@ -279,7 +281,8 @@ function getTemplateGaps(
           isOvernight && nowMins < endMins && isToday
             ? new Date(d.getTime() - 24 * 60 * 60 * 1000)
             : d;
-        const baselineStr = baselineDate.toLocaleDateString("en-CA");
+        const baselineIst = getISTDateParts(baselineDate);
+        const baselineStr = baselineIst.isoDate;
         const windowDuration = isOvernight
           ? 1440 - startMins + endMins
           : endMins - startMins;
@@ -403,7 +406,7 @@ function CircularProgress({
   progress,
   size = 40,
   strokeWidth = 4,
-  color = "#3B82F6",
+  color = "#718f96",
   bgColor = "#f1f5f9",
 }: {
   progress: number;
@@ -475,6 +478,7 @@ type SubView = "history" | "templates" | "runner" | "detail";
 type HistoryFilter = "all" | "due" | "missed" | "completed";
 type DueStatusEntry = { due: boolean; label: string; status: DueStatus };
 type HistoryItem =
+  | { type: "date_header"; date: string }
   | { type: "template"; data: SOPTemplate }
   | { type: "completion"; data: SOPCompletion }
   | { type: "missed_occurrence"; data: MissedOccurrence };
@@ -485,7 +489,7 @@ function StatusBadge({ status, label }: { status: DueStatus; label: string }) {
   const { theme } = useTheme();
   const sysColors = Colors[theme];
   const badgeColors: Record<string, { bg: string; text: string }> = {
-    due: { bg: "#3B82F620", text: sysColors.primary },
+    due: { bg: "#718f9620", text: sysColors.primary },
     missed: { bg: "#EF444420", text: sysColors.error || sysColors.warning },
     completed: { bg: "#10B98120", text: sysColors.success },
     upcoming: { bg: "#F59E0B20", text: "#F59E0B" },
@@ -929,9 +933,11 @@ export default function ChecklistScreen() {
     }
 
     // All completed completions + today's completed
-    const todayStr = liveNow.toLocaleDateString("en-CA");
+    const liveIst = getISTDateParts(liveNow);
+    const todayStr = liveIst.isoDate;
     const yesterdayDate = new Date(liveNow.getTime() - 24 * 60 * 60 * 1000);
-    const yesterdayStr = yesterdayDate.toLocaleDateString("en-CA");
+    const yesterdayIst = getISTDateParts(yesterdayDate);
+    const yesterdayStr = yesterdayIst.isoDate;
 
     filteredCompletions.forEach((c) => {
       if (c.status === "completed") {
@@ -1009,30 +1015,76 @@ export default function ChecklistScreen() {
       missedOccurrences,
       allCompletedCompletions,
     } = getHistoryGroups();
-    if (historyFilter === "due")
-      return dueTemplates.map((t) => ({ type: "template" as const, data: t }));
-    if (historyFilter === "upcoming") return [];
-    if (historyFilter === "paused") return [];
-    if (historyFilter === "missed")
-      return missedOccurrences.map((m) => ({
-        type: "missed_occurrence" as const,
-        data: m,
-      }));
-    if (historyFilter === "completed")
-      return allCompletedCompletions.map((c) => ({
-        type: "completion" as const,
-        data: c,
-      }));
-    
-    // All: due first, then missed, then completed
+    const liveIst = getISTDateParts(liveNow);
+    const todayStr = liveIst.isoDate;
+
+    const getCompletionDate = (c: SOPCompletion) => {
+      const template = templates.find((t) => t.id === c.template_id);
+      if (!template || !template.start_time || !template.end_time) return c.completion_date || "";
+      const [sh] = template.start_time.split(":").map(Number);
+      const [eh] = template.end_time.split(":").map(Number);
+      const isOvernight = eh * 60 + (parseInt(template.end_time.slice(3,5))||0) <= sh * 60 + (parseInt(template.start_time.slice(3,5))||0);
+      if (isOvernight) {
+         const compAt = new Date(c.completed_at || c.created_at);
+         const compMins = compAt.getHours() * 60 + compAt.getMinutes();
+         const ehMins = eh * 60 + (parseInt(template.end_time.slice(3,5))||0);
+         if (compMins < ehMins) {
+           const yesterday = new Date(compAt.getTime() - 24 * 60 * 60 * 1000);
+           return getISTDateParts(yesterday).isoDate;
+         }
+      }
+      return c.completion_date || "";
+    };
+
+    const getTemplateLogicalToday = (t: SOPTemplate) => {
+      if (!t.start_time || !t.end_time) return todayStr;
+      const [sh] = t.start_time.split(":").map(Number);
+      const [eh] = t.end_time.split(":").map(Number);
+      const isOvernight = eh * 60 + (parseInt(t.end_time.slice(3,5))||0) <= sh * 60 + (parseInt(t.start_time.slice(3,5))||0);
+      if (isOvernight) {
+         const nowMins = liveNow.getHours() * 60 + liveNow.getMinutes();
+         const ehMins = eh * 60 + (parseInt(t.end_time.slice(3,5))||0);
+         if (nowMins < ehMins) {
+           const yesterday = new Date(liveNow.getTime() - 24 * 60 * 60 * 1000);
+           return getISTDateParts(yesterday).isoDate;
+         }
+      }
+      return todayStr;
+    };
+
+    const rawItems: { item: HistoryItem; date: string; ts: number }[] = [];
+
+    if (historyFilter === "due" || historyFilter === "all") {
+      dueTemplates.forEach((t) => {
+        rawItems.push({ item: { type: "template", data: t }, date: getTemplateLogicalToday(t), ts: liveNow.getTime() });
+      });
+    }
+    if (historyFilter === "missed" || historyFilter === "all") {
+      missedOccurrences.forEach((m) => {
+        rawItems.push({ item: { type: "missed_occurrence", data: m }, date: m.date, ts: new Date(m.date).getTime() });
+      });
+    }
+    if (historyFilter === "completed" || historyFilter === "all") {
+      allCompletedCompletions.forEach((c) => {
+        rawItems.push({ item: { type: "completion", data: c }, date: getCompletionDate(c), ts: new Date(c.completed_at || c.created_at).getTime() });
+      });
+    }
+
+    rawItems.sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date) * -1;
+      return b.ts - a.ts;
+    });
+
     const items: HistoryItem[] = [];
-    dueTemplates.forEach((t) => items.push({ type: "template", data: t }));
-    missedOccurrences.forEach((m) =>
-      items.push({ type: "missed_occurrence", data: m }),
-    );
-    allCompletedCompletions.forEach((c) =>
-      items.push({ type: "completion", data: c }),
-    );
+    let lastDate = "";
+    rawItems.forEach((r) => {
+      if (r.date !== lastDate) {
+        items.push({ type: "date_header", date: r.date });
+        lastDate = r.date;
+      }
+      items.push(r.item);
+    });
+
     return items;
   }, [
     historyFilter,
@@ -1136,7 +1188,8 @@ export default function ChecklistScreen() {
           parseInt(template.start_time.split(":")[0]) * 60 +
             parseInt(template.start_time.split(":")[1]);
 
-      let logicalDateStr = backfillDate || now.toLocaleDateString("en-CA");
+      const nowIst = getISTDateParts(now);
+      let logicalDateStr = backfillDate || nowIst.isoDate;
       if (!backfillDate && isOvernight) {
         const nowMins = now.getHours() * 60 + now.getMinutes();
         const endMins =
@@ -1145,7 +1198,8 @@ export default function ChecklistScreen() {
         if (nowMins < endMins) {
           // If starting in the morning portion of an overnight shift, it belongs to logically "yesterday"
           const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-          logicalDateStr = yesterday.toLocaleDateString("en-CA");
+          const yesterdayIst = getISTDateParts(yesterday);
+          logicalDateStr = yesterdayIst.isoDate;
         }
       }
 
@@ -1808,8 +1862,6 @@ export default function ChecklistScreen() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
-  const bgColor = theme === "dark" ? colors.background : "#F8FAFC";
-
   // ── Runner View ──
   if (view === "runner" && activeTemplate) {
     const totalItems = activeTemplate.items.length;
@@ -1832,10 +1884,7 @@ export default function ChecklistScreen() {
     const sectionKeys = Object.keys(sections);
 
     return (
-      <LinearGradient
-        colors={isDark ? ["#0F1419", "#1A1F2E"] : ["#F8FAFC", "#EEF2F6"]}
-        style={styles.container}
-      >
+      <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={{ flex: 1 }}
@@ -1864,7 +1913,7 @@ export default function ChecklistScreen() {
                   {activeTemplate.title}
                 </Text>
                 {activeCompletion?.completion_date !==
-                  new Date().toLocaleDateString("en-CA") && (
+                  getISTDateParts(new Date()).isoDate && (
                   <Text
                     style={{
                       fontSize: 10,
@@ -2152,7 +2201,7 @@ export default function ChecklistScreen() {
                           >
                             {checkItem.title}
                             {isOptional && (
-                              <Text style={{ color: colors.textTertiary, fontSize: 12, fontFamily: "Urbanist-Regular" }}>
+                              <Text style={{ color: colors.textTertiary, fontSize: 12, fontFamily: "Urbanist-Medium" }}>
                                 {" "}
                                 (Optional)
                               </Text>
@@ -2380,7 +2429,7 @@ export default function ChecklistScreen() {
             )}
           />
         </KeyboardAvoidingView>
-      </LinearGradient>
+      </View>
     );
   }
 
@@ -2390,10 +2439,7 @@ export default function ChecklistScreen() {
       (t) => t.id === historyCompletion.template_id,
     );
     return (
-      <LinearGradient
-        colors={isDark ? ["#0F1419", "#1A1F2E"] : ["#F8FAFC", "#EEF2F6"]}
-        style={styles.container}
-      >
+      <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
         <View
           style={[
             runnerStyles.header,
@@ -2668,13 +2714,13 @@ export default function ChecklistScreen() {
             );
           }}
         />
-      </LinearGradient>
+      </View>
     );
   }
 
   // ── Main View ──
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Top nav */}
@@ -2700,7 +2746,7 @@ export default function ChecklistScreen() {
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >
-          <ActivityIndicator size="large" color="#4F93E4" />
+          <ActivityIndicator size="large" color="#718f96" />
         </View>
       ) : view === "templates" && isAdmin ? (
         <FlashList
@@ -2709,7 +2755,7 @@ export default function ChecklistScreen() {
           data={filteredTemplates as SOPTemplate[]}
           keyExtractor={(item) => (item as SOPTemplate).id}
           estimatedItemSize={120}
-          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#4F93E4" />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#718f96" />}
           ListHeaderComponent={
             <View style={{ marginBottom: 16 }}>
               <LinearGradient
@@ -2863,13 +2909,15 @@ export default function ChecklistScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           data={filteredHistoryList}
-          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#4F93E4" />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#718f96" />}
           keyExtractor={(item, idx) =>
-            item.type === "missed_occurrence"
+            item.type === "date_header"
+              ? `header-${item.date}`
+              : item.type === "missed_occurrence"
               ? `missed-${idx}`
               : item.type === "template"
-                ? `tmpl-${item.data.id}`
-                : `comp-${item.data.id}`
+              ? `tmpl-${item.data.id}`
+              : `comp-${item.data.id}`
           }
           estimatedItemSize={120}
           ListHeaderComponent={
@@ -2947,7 +2995,7 @@ export default function ChecklistScreen() {
                     style={[
                       styles.filterChip,
                       historyFilter === f && styles.filterChipActive,
-                      { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 24 }
+                      { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 16 }
                     ]}
                     onPress={() => setHistoryFilter(f)}
                   >
@@ -2984,29 +3032,55 @@ export default function ChecklistScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <HistoryListCard
-              item={item}
-              templates={templates}
-              dueStatusMap={dueStatusMap}
-              onStart={handleStartChecklist}
-              onView={async (comp) => {
-                // Fetch completion with items for detail view
-                try {
-                  const res = await checklistService.fetchTemplateCompletions(propertyId as string, comp.template_id, 50);
-                  const completionWithItems = res.completions.find((c) => c.id === comp.id);
-                  if (completionWithItems) {
-                    setHistoryCompletion(completionWithItems);
-                  } else {
+          renderItem={({ item }) => {
+            if (item.type === "date_header") {
+              return (
+                <View style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 16,
+                  marginTop: 16,
+                  marginBottom: 8,
+                  backgroundColor: "rgba(15, 23, 42, 0.5)",
+                  alignSelf: "flex-start",
+                  borderRadius: 16,
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.1)",
+                }}>
+                  <Text style={{
+                    color: "#94A3B8",
+                    fontSize: 12,
+                    fontFamily: "Urbanist-Bold",
+                    letterSpacing: 1
+                  }}>
+                    {item.date}
+                  </Text>
+                </View>
+              );
+            }
+            return (
+              <HistoryListCard
+                item={item}
+                templates={templates}
+                dueStatusMap={dueStatusMap}
+                onStart={handleStartChecklist}
+                onView={async (comp) => {
+                  // Fetch completion with items for detail view
+                  try {
+                    const res = await checklistService.fetchTemplateCompletions(propertyId as string, comp.template_id, 50);
+                    const completionWithItems = res.completions.find((c) => c.id === comp.id);
+                    if (completionWithItems) {
+                      setHistoryCompletion(completionWithItems);
+                    } else {
+                      setHistoryCompletion(comp); // fallback
+                    }
+                  } catch {
                     setHistoryCompletion(comp); // fallback
                   }
-                } catch {
-                  setHistoryCompletion(comp); // fallback
-                }
-                setView("detail");
-              }}
-            />
-          )}
+                  setView("detail");
+                }}
+              />
+            );
+          }}
         />
       )}
 
@@ -3633,14 +3707,14 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
     backgroundColor: "transparent",
   },
   filterChipActive: {
     backgroundColor: "rgba(59, 130, 246, 0.2)",
-    borderColor: "#708F96",
+    borderColor: "#718f96",
   },
   filterChipText: {
     fontSize: 12,
@@ -3670,12 +3744,12 @@ const styles = StyleSheet.create({
   historyTitle: {
     fontSize: 14,
     fontFamily: "Poppins-Bold",
-    color: "#4F93E4",
+    color: "#718f96",
     marginBottom: 2,
   },
   historyMeta: {
     fontSize: 11,
-    fontFamily: "Urbanist-Regular",
+    fontFamily: "Urbanist-Medium",
     color: "rgba(255,255,255,0.5)",
   },
 
@@ -3693,8 +3767,8 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 80,
+    borderRadius: 12,
+    minWidth: 90,
     backgroundColor: "rgba(255,255,255,0.1)",
   },
   startBtnText: {
@@ -3725,7 +3799,7 @@ const runnerStyles = StyleSheet.create({
   },
   headerSubtitle: {
     fontSize: 11,
-    fontFamily: "Urbanist-Regular",
+    fontFamily: "Urbanist-Medium",
     color: "rgba(255,255,255,0.7)",
     marginTop: 2,
   },
@@ -3822,7 +3896,7 @@ const runnerStyles = StyleSheet.create({
     width: 3,
     height: 12,
     borderRadius: 2,
-    backgroundColor: "#708F96",
+    backgroundColor: "#718f96",
   },
   sectionTitle: {
     fontSize: 10,
@@ -3918,7 +3992,7 @@ const runnerStyles = StyleSheet.create({
   commentInput: {
     flex: 1,
     fontSize: 12,
-    fontFamily: "Urbanist-Regular",
+    fontFamily: "Urbanist-Medium",
     minHeight: 28,
   },
   photoRow: {
@@ -3986,14 +4060,14 @@ const modalStyles = StyleSheet.create({
     marginBottom: 6,
     marginTop: 10,
   },
-  subLabel: { fontSize: 10, fontFamily: "Urbanist-Regular", marginBottom: 4 },
+  subLabel: { fontSize: 10, fontFamily: "Urbanist-Medium", marginBottom: 4 },
   input: {
     borderRadius: 10,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
-    fontFamily: "Urbanist-Regular",
+    fontFamily: "Urbanist-Medium",
   },
   textArea: { minHeight: 72, textAlignVertical: "top" },
   freqGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

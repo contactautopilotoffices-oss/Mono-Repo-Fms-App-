@@ -82,7 +82,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const healthScore = data?.healthScore ?? 100;
   const attentionItems = data?.attentionItems ?? [];
   const tenantUserIds = data?.tenantUserIds ?? [];
-  const propertyPhoto = data?.propertyLogoUrl ?? null;
+  const propertyPhoto =
+    membership?.properties?.find((p) => p.id === propertyId)?.image_url ??
+    data?.propertyLogoUrl ??
+    null;
   const ppmSchedules = data?.ppmSchedules ?? [];
 
   // ─── UI State (ephemeral) ───
@@ -122,13 +125,18 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     const RESOLVED_STATUSES = ['resolved', 'closed'];
     const ACTIVE_STATUSES = ['open', 'assigned', 'in_progress', 'waitlist', 'blocked', 'client_raised', 'work_started'];
 
-    const activeRpcItems = (attentionItems || []).filter((item) => {
+    const activeRpcItems = (attentionItems || []).reduce<any[]>((acc, item) => {
       if (item.entity_type === 'ticket') {
         const t = tickets.find((tk) => tk.id === item.entity_id);
-        if (t && RESOLVED_STATUSES.includes(t.status)) return false;
+        if (t && RESOLVED_STATUSES.includes(t.status)) return acc;
       }
-      return true;
-    });
+      // Deduplicate by entity_id (or id) to avoid duplicate React keys
+      const key = item.entity_id ?? item.id;
+      if (!acc.some((i) => (i.entity_id ?? i.id) === key)) {
+        acc.push(item);
+      }
+      return acc;
+    }, []);
 
     const items: any[] = [...activeRpcItems];
     const seenIds = new Set(items.map((i) => i.entity_id));
@@ -320,7 +328,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
         <View style={styles.headerRight}>
           {canSwitchProperty && (
-            <TouchableOpacity style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }]} onPress={() => setShowPropertySwitcher(true)} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 16 }]} onPress={() => setShowPropertySwitcher(true)} activeOpacity={0.7}>
               {propertyPhoto ? (
                 <Image source={{ uri: propertyPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
               ) : (
@@ -547,5 +555,4 @@ const styles = StyleSheet.create({
   timeToggleTextActive: { color: '#FFF', fontWeight: '700' },
   trendChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(31,194,110,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   trendChipText: { color: '#1FC26E', fontSize: 12, fontWeight: '700' },
-  nameContainer: { flexDirection: 'column' as const },
 });

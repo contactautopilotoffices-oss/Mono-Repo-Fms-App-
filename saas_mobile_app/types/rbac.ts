@@ -20,6 +20,7 @@ export type CapabilityDomain =
     | 'properties'
     | 'tickets'
     | 'assets'
+    | 'water'
     | 'procurement'
     | 'visitors'
     | 'security'

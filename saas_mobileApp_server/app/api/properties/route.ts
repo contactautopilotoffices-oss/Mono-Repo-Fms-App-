@@ -11,7 +11,6 @@ export async function GET(request: NextRequest) {
     
     const { searchParams } = new URL(request.url);
     const orgId = searchParams.get("organizationId");
-    const status = searchParams.get("status");
 
     const admin = createAdminClient();
     
@@ -20,7 +19,7 @@ export async function GET(request: NextRequest) {
       .from("property_memberships")
       .select("property_id")
       .eq("user_id", auth.user.id)
-      .eq("is_active", true);
+      .or("is_active.eq.true,is_active.is.null");
 
     const propertyIds = (memberships ?? []).map(m => m.property_id);
     
@@ -30,16 +29,18 @@ export async function GET(request: NextRequest) {
 
     let query = admin
       .from("properties")
-      .select("id, organization_id, name, type, address, city, state, zip, phone, email, status, total_units, occupied_units, amenities, code, created_at, updated_at")
+      .select("id, organization_id, code, name, created_at")
       .in("id", propertyIds)
       .order("name", { ascending: true });
 
     if (orgId) query = query.eq("organization_id", orgId);
-    if (status) query = query.eq("status", status);
 
     const { data: properties, error } = await query;
     
-    if (error) return NextResponse.json({ error: "Failed to fetch properties" }, { status: 500 });
+    if (error) {
+      console.error("[GET /api/properties] error:", error);
+      return NextResponse.json({ error: "Failed to fetch properties" }, { status: 500 });
+    }
     return NextResponse.json({ properties: properties ?? [] }, { status: 200 });
   } catch (error) {
     console.error("[saas-mobile-server] properties GET error:", error);

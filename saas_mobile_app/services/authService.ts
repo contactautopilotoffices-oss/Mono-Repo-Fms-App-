@@ -2,10 +2,25 @@
 // Auth Service — Direct Supabase Auth
 // ============================================
 // All auth operations go through Supabase Auth directly.
-// No Fastify proxy. No apiClient.
+// For OAuth on mobile, we use expo-linking to handle the redirect.
 
+// ============================================
+// MOBILE OAUTH SETUP REQUIRED:
+// ============================================
+// 1. Add to app.json schemes:
+//    "scheme": "autopilot"
+//
+// 2. For Google OAuth in Supabase:
+//    - Enable Google provider in Supabase Dashboard
+//    - Add iOS bundle ID and Android package name
+//    - SHA-1 fingerprint from Google Cloud Console
+//
+// 3. Deep link will be: autopilot://callback?code=xxx
+
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { createClient } from '@/utils/supabase/client';
-import { ApiResponse, User, UserRole } from '@/types';
+import { ApiResponse, User } from '@/types';
 
 export interface LoginCredentials {
   email: string;
@@ -26,6 +41,14 @@ export interface ResetPasswordData {
 
 export interface UpdatePasswordData {
   password: string;
+}
+
+// Create the OAuth redirect URL for mobile
+function getRedirectUrl(): string {
+  // Use expo-linking to create a proper deep link
+  const { makeUrl } = Linking;
+  // For mobile, we use a custom scheme URL that will be caught by expo-router
+  return 'autopilot://callback';
 }
 
 export const authService = {
@@ -87,7 +110,9 @@ export const authService = {
   async forgotPassword(data: ResetPasswordData): Promise<ApiResponse<void>> {
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.resetPasswordForEmail(data.email);
+      const { error } = await supabase.auth.resetPasswordForEmail(data.email, {
+        redirectTo: 'autopilot://reset-password',
+      });
       if (error) throw error;
       return { data: undefined, error: null, status: 200 };
     } catch (error) {
@@ -125,30 +150,128 @@ export const authService = {
     }
   },
 
-  // Google OAuth
+  // Google OAuth - Mobile version using expo-web-browser
   async signInWithGoogle(): Promise<ApiResponse<void>> {
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOAuth({
+
+      // For mobile, we need to use the async version with proper redirect handling
+      const redirectUrl = getRedirectUrl();
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: 'autopilot://callback' },
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true, // Important for mobile
+        },
       });
+
       if (error) throw error;
+
+      if (data?.url) {
+        // Open the browser for OAuth
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUrl,
+          { showInRecents: true }
+        );
+
+        // Handle the result
+        if (result.type === 'success' && result.url) {
+          // Parse the URL to extract the code
+          const url = new URL(result.url);
+          const code = url.searchParams.get('code');
+
+          if (code) {
+            // Exchange the code for a session
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) throw exchangeError;
+          }
+        } else if (result.type === 'cancel') {
+          throw new Error('Authentication was cancelled');
+        }
+      }
+
       return { data: undefined, error: null, status: 200 };
     } catch (error) {
       return { data: null, error: error as Error, status: 400 };
     }
   },
 
-  // Zoho OAuth (mapped to Google provider)
+  // Zoho OAuth (mapped to Google provider in Supabase)
   async signInWithZoho(): Promise<ApiResponse<void>> {
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google' as any,
-        options: { redirectTo: 'autopilot://callback' },
+      const redirectUrl = getRedirectUrl();
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+        },
       });
+
       if (error) throw error;
+
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUrl,
+          { showInRecents: true }
+        );
+
+        if (result.type === 'success' && result.url) {
+          const url = new URL(result.url);
+          const code = url.searchParams.get('code');
+
+          if (code) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) throw exchangeError;
+          }
+        }
+      }
+
+      return { data: undefined, error: null, status: 200 };
+    } catch (error) {
+      return { data: null, error: error as Error, status: 400 };
+    }
+  },
+
+  // Apple OAuth - Mobile version
+  async signInWithApple(): Promise<ApiResponse<void>> {
+    try {
+      const supabase = createClient();
+      const redirectUrl = getRedirectUrl();
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'apple',
+        options: {
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(
+          data.url,
+          redirectUrl,
+          { showInRecents: true }
+        );
+
+        if (result.type === 'success' && result.url) {
+          const url = new URL(result.url);
+          const code = url.searchParams.get('code');
+
+          if (code) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) throw exchangeError;
+          }
+        }
+      }
+
       return { data: undefined, error: null, status: 200 };
     } catch (error) {
       return { data: null, error: error as Error, status: 400 };
@@ -164,6 +287,45 @@ export const authService = {
       return { data: undefined, error: null, status: 200 };
     } catch (error) {
       return { data: null, error: error as Error, status: 401 };
+    }
+  },
+
+  // Check if there's an OAuth callback URL to process
+  async handleOAuthCallback(url: string): Promise<ApiResponse<{ user: any }>> {
+    try {
+      const supabase = createClient();
+
+      // Parse the URL
+      const urlObj = new URL(url);
+      const code = urlObj.searchParams.get('code');
+      const error = urlObj.searchParams.get('error');
+
+      if (error) {
+        throw new Error(urlObj.searchParams.get('error_description') || error);
+      }
+
+      if (code) {
+        // Exchange the code for a session
+        const { data: { user }, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+        if (sessionError) throw sessionError;
+
+        // Ensure user profile exists
+        if (user) {
+          await supabase.from('users').upsert({
+            id: user.id,
+            full_name: user.user_metadata?.full_name || user.email?.split('@')[0],
+            email: user.email!,
+            phone: user.phone || user.user_metadata?.phone || null,
+            metadata: user.user_metadata,
+          }, { onConflict: 'id' });
+        }
+
+        return { data: { user }, error: null, status: 200 };
+      }
+
+      throw new Error('No authorization code in callback URL');
+    } catch (error) {
+      return { data: null, error: error as Error, status: 400 };
     }
   },
 };

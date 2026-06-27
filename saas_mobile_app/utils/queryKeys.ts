@@ -72,6 +72,10 @@ const property = {
   diesel: (propertyId: string) => ['diesel', propertyId] as const,
   /** Diesel analytics for a property */
   dieselAnalytics: (propertyId: string) => ['diesel-analytics', propertyId] as const,
+  /** Water readings for a property */
+  water: (propertyId: string) => ['water', propertyId] as const,
+  /** Water analytics for a property */
+  waterAnalytics: (propertyId: string) => ['water-analytics', propertyId] as const,
   /** Request reports for a property and month */
   reportsRequests: (propertyId: string, month: string) => ['reports-requests', propertyId, month] as const,
   /** Snag reports for a property */

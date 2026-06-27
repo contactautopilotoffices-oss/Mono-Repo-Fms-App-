@@ -14,6 +14,7 @@ import NotificationBanner from '@/components/notifications/NotificationBanner';
 import { PersistGate } from '@/components/PersistGate';
 import Toast from 'react-native-toast-message';
 import { AnimatedSplash } from '@/components/splash/AnimatedSplash';
+import { useAuth } from '@/hooks/useAuth';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();
@@ -74,6 +75,7 @@ function RootLayoutInner() {
   const colorScheme = useColorScheme();
   const [appReady, setAppReady] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [splashAnimationComplete, setSplashAnimationComplete] = useState(false);
 
   console.log('[RootLayout] Rendering...');
 
@@ -122,32 +124,21 @@ function RootLayoutInner() {
     setIsHydrated(true);
   }, []);
 
-  // Handle animated splash completion - this is when we finally hide the native splash
-  const handleAnimatedSplashComplete = useCallback(() => {
-    console.log('[RootLayout] Animated splash complete - hiding native splash');
-    SplashScreen.hideAsync().catch(() => {});
-  }, []);
-
-  // Show animated splash while app is initializing
-  const showAnimatedSplash = !appReady || !isHydrated;
-
   return (
     <ErrorBoundary>
-      {/* Premium Animated Splash - renders over native splash until startup completes */}
-      {showAnimatedSplash && (
-        <AnimatedSplash
-          startupComplete={appReady && isHydrated}
-          onAnimationComplete={handleAnimatedSplashComplete}
-        />
-      )}
-
       <PersistGate onReady={handleHydrationComplete}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <ThemeProvider>
               <AuthProvider>
                 <BottomSheetModalProvider>
-                  <AppContent colorScheme={colorScheme} />
+                  <AppContent
+                    colorScheme={colorScheme}
+                    appReady={appReady}
+                    isHydrated={isHydrated}
+                    splashAnimationComplete={splashAnimationComplete}
+                    setSplashAnimationComplete={setSplashAnimationComplete}
+                  />
                 </BottomSheetModalProvider>
               </AuthProvider>
             </ThemeProvider>
@@ -162,11 +153,44 @@ export default Sentry.wrap(RootLayoutInner);
 
 import { useOfflineMediaSync } from '@/hooks/useOfflineMediaSync';
 
-function AppContent({ colorScheme }: { colorScheme: any }) {
+interface AppContentProps {
+  colorScheme: any;
+  appReady: boolean;
+  isHydrated: boolean;
+  splashAnimationComplete: boolean;
+  setSplashAnimationComplete: (value: boolean) => void;
+}
+
+function AppContent({
+  colorScheme,
+  appReady,
+  isHydrated,
+  splashAnimationComplete,
+  setSplashAnimationComplete,
+}: AppContentProps) {
   // Register push notifications inside AuthProvider context
   usePushNotifications();
   // Register offline media sync for checklists
   useOfflineMediaSync();
+
+  const { isLoading: isAuthLoading, isMembershipLoading } = useAuth();
+
+  // Handle animated splash completion - this is when we finally hide the animated splash
+  const handleAnimatedSplashComplete = useCallback(() => {
+    console.log('[RootLayout] Animated splash complete');
+    setSplashAnimationComplete(true);
+  }, [setSplashAnimationComplete]);
+
+  // Hide the native splash screen as soon as AppContent mounts, because AnimatedSplash covers it.
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  // Show animated splash while app is initializing and until animation finishes
+  const showAnimatedSplash = !splashAnimationComplete;
+
+  // Splash stays until fonts, hydration, and auth/membership are all resolved
+  const startupComplete = appReady && isHydrated && !isAuthLoading && !isMembershipLoading;
 
   return (
     <>
@@ -174,6 +198,15 @@ function AppContent({ colorScheme }: { colorScheme: any }) {
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <Toast />
+
+      {/* Premium Animated Splash - renders over the app until startup completes
+          and the logo zoom-out animation finishes */}
+      {showAnimatedSplash && (
+        <AnimatedSplash
+          startupComplete={startupComplete}
+          onAnimationComplete={handleAnimatedSplashComplete}
+        />
+      )}
     </>
   );
 }

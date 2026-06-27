@@ -124,7 +124,7 @@ export default function PropertySwitcherModal({
                 >
                   <View style={[styles.iconContainer, isActive && styles.iconContainerActive, p.image_url ? { padding: 0, overflow: 'hidden', borderWidth: 0 } : {}]}>
                     {p.image_url ? (
-                      <Image source={{ uri: p.image_url }} style={{ width: '100%', height: '100%', borderRadius: 10 }} />
+                      <Image source={{ uri: p.image_url }} style={{ width: '100%', height: '100%', borderRadius: 20 }} />
                     ) : (
                       <Ionicons
                         name="business-outline"

@@ -30,6 +30,7 @@ import {
   DoorOpen,
   Fuel,
   Zap,
+  Droplets,
   Package,
   ArrowUpCircle,
   FileText,
@@ -40,6 +41,8 @@ import {
   Shield,
   ShoppingBag,
 } from 'lucide-react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Ionicons } from '@expo/vector-icons';
 import { TicketCreateModal } from '../../../components/tickets/TicketCreateModal';
 import AnimatedLogo from '@/components/shared/AnimatedLogo';
@@ -105,6 +108,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Meeting Rooms',     route: 'rooms',        icon: DoorOpen,        domain: 'properties' },
   { label: 'Diesel',           route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
+  { label: 'Water',             route: 'water',        icon: Droplets,        domain: 'water' },
   { label: 'Stock / Inventory', route: 'stock',        icon: Package,         domain: 'stock' },
   { label: 'Procurement',       route: 'procurement',  icon: ShoppingBag,     domain: 'procurement' },
   { label: 'SOPs & Checklists', route: 'checklist',    icon: ClipboardList,   domain: 'sop' },
@@ -115,7 +119,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const NAV_SECTIONS: { label: string; routes: string[] }[] = [
   { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'security', 'rooms'] },
-  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
+  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'water', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
 ];
 
 // ---- Get User Initials ----
@@ -507,15 +511,8 @@ export default function PropertyLayout() {
   if (authLoading || accessState.checking || (user && !membership)) {
     console.log('[PropertyLayout] Loading — authLoading:', authLoading, 'accessChecking:', accessState.checking, 'membershipNull:', !membership);
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: colors.background,
-        }}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <SkeletonLoader type="list" count={5} />
       </View>
     );
   }

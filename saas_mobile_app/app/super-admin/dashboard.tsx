@@ -3,15 +3,15 @@ import { View, Text, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import LovableSuperAdminDashboard from '@/components/dashboard/LovableSuperAdminDashboard';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 
 export default function SuperAdminDashboardScreen() {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
     return (
-      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
-        <ActivityIndicator size="large" color="#708F96" />
-        <Text style={{ marginTop: 16, color: '#666', fontSize: 14 }}>Loading Super Admin Dashboard...</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#1E1E1E' }}>
+        <SkeletonLoader type="dashboard" count={3} />
       </SafeAreaView>
     );
   }

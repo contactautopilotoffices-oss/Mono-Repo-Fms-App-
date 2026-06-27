@@ -372,7 +372,28 @@ export async function checkPropertyAccess(
       return { authorized: false };
     }
 
-    // 1. Check if master admin
+    // 1. Handle org-wide "all" overview for org admins
+    if (propertyId === 'all') {
+      console.log('[checkPropertyAccess] Org-wide overview requested');
+      const { data: orgMemberships, error: orgError } = await supabase
+        .from('organization_memberships')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('is_active', true) as { data: { role: string }[] | null; error: unknown };
+      if (orgError) console.error('[checkPropertyAccess] org_memberships error:', orgError);
+
+      const adminRole = orgMemberships?.find((m) =>
+        ['org_admin', 'org_super_admin', 'owner', 'admin'].includes(m.role)
+      )?.role;
+      if (adminRole) {
+        console.log('[checkPropertyAccess] Org-wide access granted:', adminRole);
+        return { authorized: true, role: adminRole };
+      }
+      console.log('[checkPropertyAccess] No org admin membership for all-properties view');
+      return { authorized: false };
+    }
+
+    // 2. Check if master admin
     console.log('[checkPropertyAccess] Checking users table for:', user.id);
     const { data: userProfile, error: userError } = await supabase
       .from('users')

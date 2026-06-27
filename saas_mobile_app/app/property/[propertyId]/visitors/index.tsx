@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  ActivityIndicator,
   Modal,
   Dimensions,
   Image,
@@ -24,6 +23,7 @@ import { useTheme } from '@/context';
 import { Colors, DesignTokens } from '@/constants/Colors';
 import { toast } from '@/lib/toast';
 import { LinearGradient } from 'expo-linear-gradient';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { vmsService, DateFilter, VisitorLog } from '@/services/vmsService';
 
@@ -1288,13 +1288,9 @@ export default function VisitorsScreen() {
   const filteredAll = visitors;
 
   return (
-    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 12) + 90 }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 12) + 90 }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient 
-        colors={isDark ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']} 
-        style={StyleSheet.absoluteFillObject} 
-      />
-      
+
       {/* Top Navigation — Scanner REMOVED */}
       <SafeBlurView
         intensity={80}
@@ -1439,8 +1435,8 @@ export default function VisitorsScreen() {
 
           {/* Visitor List */}
           {isLoading ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator size="large" color={colors.primary} />
+            <View style={{ flex: 1, paddingHorizontal: 12 }}>
+              <SkeletonLoader type="list" count={5} />
             </View>
           ) : filteredAll.length === 0 ? (
             <View style={styles.emptyWrap}>

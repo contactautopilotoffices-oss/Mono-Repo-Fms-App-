@@ -8,12 +8,13 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Platform,
   StyleSheet,
   Image,
   TextInput,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,6 +55,7 @@ export default function AdminCreditsScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
+  const colors = Colors[theme];
   const insets = useSafeAreaInsets();
 
 
@@ -343,12 +345,7 @@ export default function AdminCreditsScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <LinearGradient
-        colors={theme === 'dark' ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']}
-        style={StyleSheet.absoluteFillObject}
-      />
-
+    <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <SafeBlurView intensity={80} tint="dark" style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ChevronLeft size={24} color="#FFFFFF" />
@@ -366,9 +363,8 @@ export default function AdminCreditsScreen() {
       </SafeBlurView>
 
       {isLoading ? (
-        <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color="#708F96" />
-          <Text style={styles.loadingText}>Loading companies...</Text>
+        <View style={{ flex: 1, padding: 16 }}>
+          <SkeletonLoader type="list" count={4} />
         </View>
       ) : (
         <FlatList
@@ -397,7 +393,9 @@ export default function AdminCreditsScreen() {
         <View style={styles.sheetContent}>
           <Text style={styles.sheetTitle}>Select User to Add</Text>
           {isUsersLoading ? (
-            <ActivityIndicator size="large" color="#708F96" style={{ marginTop: 40 }} />
+            <View style={{ padding: 16 }}>
+              <SkeletonLoader type="list" count={3} />
+            </View>
           ) : (
             <BottomSheetFlatList
               data={usersList}

@@ -11,10 +11,10 @@ import {
 } from 'react-native';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft } from 'lucide-react-native';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
+import { LinearGradient } from 'expo-linear-gradient';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { createCompanyApi } from '@/utils/api/mobileApi';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,6 +23,7 @@ export default function AddCompanyScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const { theme } = useTheme();
+  const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const { membership } = useAuth();
 
@@ -64,12 +65,7 @@ export default function AddCompanyScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={theme === 'dark' ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']}
-        style={StyleSheet.absoluteFillObject}
-      />
-
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <SafeBlurView intensity={80} tint="dark" style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerTop}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>

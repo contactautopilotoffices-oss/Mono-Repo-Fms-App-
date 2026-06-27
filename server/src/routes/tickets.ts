@@ -1,6 +1,13 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { supabaseAdmin } from '../utils/supabase.js';
+import {
+  notifyTicketCreated,
+  notifyTicketAssigned,
+  notifyTicketResolved,
+  notifyTicketClosed,
+  notifyTicketCommented,
+} from '../services/notificationService.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -8,6 +15,7 @@ import { supabaseAdmin } from '../utils/supabase.js';
 
 interface Ticket {
   id: string;
+  ticket_number?: string;
   property_id: string;
   organization_id: string;
   raised_by: string;
@@ -52,19 +60,49 @@ const CreateTicketSchema = z.object({
   category_id: z.string().optional(),
   priority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
   is_internal: z.boolean().default(false),
-  // FIX C0-11: Accept photo_before_url from Cassandra orchestrator (mobile upload)
   photo_before_url: z.string().url().optional().nullable(),
+  raised_by: z.string().min(1).optional(), // User ID of ticket raiser
+});
+
+const AssignTicketSchema = z.object({
+  assigned_to: z.string().min(1),
+});
+
+const UpdateTicketStatusSchema = z.object({
+  status: z.enum(['open', 'in_progress', 'pending', 'resolved', 'closed']),
 });
 
 const CreateCommentSchema = z.object({
   comment: z.string().min(1),
+  user_id: z.string().min(1).optional(), // Defaults to raised_by if not provided
 });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDateTime(date: Date): string {
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function generateTicketNumber(propertyId: string): string {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const suffix = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `TKT-${timestamp.slice(-4)}${suffix}`;
+}
 
 // ---------------------------------------------------------------------------
 // Plugin — wired to Supabase (real data, not in-memory)
 // ---------------------------------------------------------------------------
 
 export const ticketRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
+
   // GET /tickets
   fastify.get('/tickets', async (request, reply) => {
     try {
@@ -148,6 +186,10 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         };
       }
 
+      const raisedBy = parsed.raised_by || 'dev_user_id';
+      const ticketNumber = generateTicketNumber(parsed.property_id);
+      const now = new Date().toISOString();
+
       const newTicket = {
         property_id: parsed.property_id,
         organization_id: orgId,
@@ -160,9 +202,10 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         photo_before_url: parsed.photo_before_url ?? null,
         photo_after_url: null,
         assigned_to: null,
-        raised_by: 'dev_user_id', // TODO: extract from authenticated user context
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        raised_by: raisedBy,
+        ticket_number: ticketNumber,
+        created_at: now,
+        updated_at: now,
       };
 
       const { data, error } = await supabaseAdmin
@@ -177,8 +220,27 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         return { error: 'insert_failed', message: error.message };
       }
 
+      const ticket = data as Ticket;
+
+      // Send WhatsApp notification to ticket raiser
+      if (raisedBy !== 'dev_user_id') {
+        const notifResult = await notifyTicketCreated({
+          ticketId: ticket.id,
+          ticketNumber: ticketNumber,
+          title: ticket.title,
+          raisedByUserId: raisedBy,
+          propertyId: ticket.property_id,
+          raisedAt: formatDateTime(new Date(ticket.created_at)),
+        }).catch(err => {
+          fastify.log.error(`[TICKETS] WhatsApp notification failed: ${err.message}`);
+          return { success: false, queued: false };
+        });
+
+        fastify.log.info(`[TICKETS] Ticket created: ${ticketNumber}, WhatsApp: ${notifResult.queued ? 'queued' : 'skipped'}`);
+      }
+
       reply.status(201);
-      return { data: data as Ticket };
+      return { data: ticket };
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.status(400);
@@ -188,50 +250,247 @@ export const ticketRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
     }
   });
 
-  // POST /tickets/:id/comments
-  fastify.post('/tickets/:id/comments', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const { comment } = CreateCommentSchema.parse(request.body);
+  // PATCH /tickets/:id/assign
+  fastify.patch<{ Params: { id: string }; Body: z.infer<typeof AssignTicketSchema> }>(
+    '/tickets/:id/assign',
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const { assigned_to } = AssignTicketSchema.parse(request.body);
 
-      // Verify ticket exists
-      const { data: ticket } = await supabaseAdmin
-        .from('tickets')
-        .select('id')
-        .eq('id', id)
-        .maybeSingle();
+        // Get current ticket
+        const { data: ticket, error: fetchError } = await supabaseAdmin
+          .from('tickets')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
 
-      if (!ticket) {
-        reply.status(404);
-        return { error: 'not_found', message: `Ticket ${id} not found` };
+        if (fetchError || !ticket) {
+          reply.status(404);
+          return { error: 'not_found', message: `Ticket ${id} not found` };
+        }
+
+        const oldAssigned = ticket.assigned_to;
+
+        // Update ticket
+        const { data: updated, error: updateError } = await supabaseAdmin
+          .from('tickets')
+          .update({
+            assigned_to,
+            status: ticket.status === 'open' ? 'in_progress' : ticket.status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (updateError) {
+          fastify.log.error(`[TICKETS] Assign failed: ${updateError.message}`);
+          reply.status(500);
+          return { error: 'update_failed', message: updateError.message };
+        }
+
+        // Send WhatsApp notification to assigned staff
+        const notifResult = await notifyTicketAssigned({
+          ticketId: id,
+          ticketNumber: (ticket as any).ticket_number || `TKT-${id.slice(0, 8)}`,
+          title: ticket.title,
+          priority: ticket.priority,
+          assignedToUserId: assigned_to,
+          raisedByUserId: ticket.raised_by,
+          propertyId: ticket.property_id,
+        }).catch(err => {
+          fastify.log.error(`[TICKETS] WhatsApp assign notification failed: ${err.message}`);
+          return { success: false, queued: false };
+        });
+
+        fastify.log.info(`[TICKETS] Ticket ${id} assigned to ${assigned_to}, WhatsApp: ${notifResult.queued ? 'queued' : 'skipped'}`);
+
+        return { data: updated as Ticket };
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          reply.status(400);
+          return { error: 'validation_error', message: err.errors.map(e => e.message).join(', ') };
+        }
+        throw err;
       }
+    }
+  );
 
-      const newComment = {
-        ticket_id: id,
-        user_id: 'dev_user_id', // TODO: extract from authenticated user context
-        comment,
-        created_at: new Date().toISOString(),
-      };
+  // PATCH /tickets/:id/status
+  fastify.patch<{ Params: { id: string }; Body: z.infer<typeof UpdateTicketStatusSchema> }>(
+    '/tickets/:id/status',
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const { status } = UpdateTicketStatusSchema.parse(request.body);
+
+        // Get current ticket
+        const { data: ticket, error: fetchError } = await supabaseAdmin
+          .from('tickets')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (fetchError || !ticket) {
+          reply.status(404);
+          return { error: 'not_found', message: `Ticket ${id} not found` };
+        }
+
+        const oldStatus = ticket.status;
+
+        // Update ticket
+        const { data: updated, error: updateError } = await supabaseAdmin
+          .from('tickets')
+          .update({
+            status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (updateError) {
+          fastify.log.error(`[TICKETS] Status update failed: ${updateError.message}`);
+          reply.status(500);
+          return { error: 'update_failed', message: updateError.message };
+        }
+
+        // Send WhatsApp notification based on new status
+        const ticketNumber = (ticket as any).ticket_number || `TKT-${id.slice(0, 8)}`;
+
+        if (status === 'resolved') {
+          const resolvedBy = 'dev_user_id'; // TODO: get from auth context
+          await notifyTicketResolved({
+            ticketId: id,
+            ticketNumber,
+            title: ticket.title,
+            resolvedByUserId: resolvedBy,
+            raisedByUserId: ticket.raised_by,
+            propertyId: ticket.property_id,
+            resolvedAt: formatDateTime(new Date()),
+          }).catch(err => {
+            fastify.log.error(`[TICKETS] WhatsApp resolved notification failed: ${err.message}`);
+          });
+        } else if (status === 'closed') {
+          await notifyTicketClosed({
+            ticketId: id,
+            ticketNumber,
+            title: ticket.title,
+            raisedByUserId: ticket.raised_by,
+            propertyId: ticket.property_id,
+          }).catch(err => {
+            fastify.log.error(`[TICKETS] WhatsApp closed notification failed: ${err.message}`);
+          });
+        }
+
+        fastify.log.info(`[TICKETS] Ticket ${id} status: ${oldStatus} -> ${status}`);
+
+        return { data: updated as Ticket };
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          reply.status(400);
+          return { error: 'validation_error', message: err.errors.map(e => e.message).join(', ') };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // POST /tickets/:id/comments
+  fastify.post<{ Params: { id: string }; Body: z.infer<typeof CreateCommentSchema> }>(
+    '/tickets/:id/comments',
+    async (request, reply) => {
+      try {
+        const { id } = request.params;
+        const { comment, user_id } = CreateCommentSchema.parse(request.body);
+
+        // Verify ticket exists
+        const { data: ticket } = await supabaseAdmin
+          .from('tickets')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (!ticket) {
+          reply.status(404);
+          return { error: 'not_found', message: `Ticket ${id} not found` };
+        }
+
+        const commentUserId = user_id || ticket.raised_by;
+
+        // Get commenter name
+        const { data: commenter } = await supabaseAdmin
+          .from('users')
+          .select('full_name')
+          .eq('id', commentUserId)
+          .single();
+
+        const newComment = {
+          ticket_id: id,
+          user_id: commentUserId,
+          comment,
+          created_at: new Date().toISOString(),
+        };
+
+        const { data, error } = await supabaseAdmin
+          .from('ticket_comments')
+          .insert(newComment)
+          .select()
+          .single();
+
+        if (error) {
+          fastify.log.error(`[TICKETS] Comment insert failed: ${error.message}`);
+          reply.status(500);
+          return { error: 'insert_failed', message: error.message };
+        }
+
+        // Send WhatsApp notification to ticket participants
+        const ticketNumber = (ticket as any).ticket_number || `TKT-${id.slice(0, 8)}`;
+
+        await notifyTicketCommented({
+          ticketId: id,
+          ticketNumber,
+          title: ticket.title,
+          commenterName: commenter?.full_name || 'Staff',
+          comment,
+          raisedByUserId: ticket.raised_by,
+          assignedToUserId: ticket.assigned_to,
+          propertyId: ticket.property_id,
+        }).catch(err => {
+          fastify.log.error(`[TICKETS] WhatsApp comment notification failed: ${err.message}`);
+        });
+
+        return { data };
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          reply.status(400);
+          return { error: 'validation_error', message: err.errors.map(e => e.message).join(', ') };
+        }
+        throw err;
+      }
+    }
+  );
+
+  // GET /tickets/:id/comments
+  fastify.get<{ Params: { id: string } }>(
+    '/tickets/:id/comments',
+    async (request, reply) => {
+      const { id } = request.params;
 
       const { data, error } = await supabaseAdmin
         .from('ticket_comments')
-        .insert(newComment)
-        .select()
-        .single();
+        .select('*, users(full_name)')
+        .eq('ticket_id', id)
+        .order('created_at', { ascending: true });
 
       if (error) {
-        fastify.log.error(`[TICKETS] Comment insert failed: ${error.message}`);
+        fastify.log.error(`[TICKETS] Fetch comments failed: ${error.message}`);
         reply.status(500);
-        return { error: 'insert_failed', message: error.message };
+        return { error: 'query_failed', message: error.message };
       }
 
-      return { data };
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        reply.status(400);
-        return { error: 'validation_error', message: err.errors.map(e => e.message).join(', ') };
-      }
-      throw err;
+      return { data: data || [] };
     }
-  });
+  );
 };

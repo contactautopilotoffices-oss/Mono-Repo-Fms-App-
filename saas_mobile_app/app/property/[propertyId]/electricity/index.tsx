@@ -2220,18 +2220,10 @@ const totalUnits = filteredReadings.reduce(
     <View
       style={[
         styles.container,
-        { paddingBottom: Math.max(insets.bottom, 12) + 90 },
+        { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 12) + 90 },
       ]}
     >
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient
-        colors={
-          isDark
-            ? ["#0F1521", "#121824", "#090d16"]
-            : ["#F5F0E8", "#EAE0D5", "#DFD3C3"]
-        }
-        style={StyleSheet.absoluteFillObject}
-      />
 
       {/* Top Navigation */}
       <SafeBlurView

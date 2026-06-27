@@ -130,12 +130,20 @@ export async function GET(request: NextRequest) {
 
     // Build the per-property parallel queries
     const perPropQueries = Promise.all(propIds.map(async (pid) => {
-      const [elec, diesel, health, attention, funnel, ppm, ppmSchedules] = await Promise.all([
+      const [elec, elecMonthly, diesel, health, attention, funnel, ppm, ppmSchedules] = await Promise.all([
+        // Last reading (for trend calculation)
         admin.from('electricity_readings')
-          .select('final_units, created_at')
+          .select('final_units, computed_units, created_at')
           .eq('property_id', pid)
           .order('created_at', { ascending: false })
-          .limit(2),
+          .limit(1)
+          .maybeSingle(),
+        // Monthly readings (for monthly consumption)
+        admin.from('electricity_readings')
+          .select('computed_units, final_units, created_at')
+          .eq('property_id', pid)
+          .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
+          .order('created_at', { ascending: true }),
         admin.from('diesel_readings')
           .select('closing_diesel_level, computed_consumed_litres')
           .eq('property_id', pid)
@@ -151,7 +159,7 @@ export async function GET(request: NextRequest) {
           .eq('property_id', pid)
           .order('planned_date', { ascending: true })
       ]);
-      return { elec, diesel, health, attention, funnel, ppm, ppmSchedules };
+      return { elec, elecMonthly, diesel, health, attention, funnel, ppm, ppmSchedules };
     }));
 
     // Wait for all queries to execute
@@ -193,6 +201,7 @@ export async function GET(request: NextRequest) {
     let totalElec = 0;
     let elecTrendSum = 0;
     let elecTrendCount = 0;
+    let monthlyElecSum = 0;
     let totalDieselLevel = 0;
     let totalDieselConsumption = 0;
     let dieselCount = 0;
@@ -202,18 +211,27 @@ export async function GET(request: NextRequest) {
     let pTotal = 0, pDone = 0, pPending = 0, pOverdue = 0, pPostponed = 0;
 
     perPropResults.forEach(res => {
-      if (res.elec.data && Array.isArray(res.elec.data)) {
-        const readings = res.elec.data as any[];
-        const todayElec = readings[0]?.final_units || 0;
-        const yesterdayElec = readings[1]?.final_units || 0;
-        totalElec += todayElec;
-        if (yesterdayElec > 0) {
-          elecTrendSum += ((todayElec - yesterdayElec) / yesterdayElec) * 100;
-          elecTrendCount++;
+      // Last reading (for current/trend)
+      if (res.elec.data) {
+        const lastReading = res.elec.data as any;
+        if (lastReading?.final_units || lastReading?.computed_units) {
+          const lastElec = lastReading.computed_units || lastReading.final_units || 0;
+          totalElec += lastElec;
         }
       }
+
+      // Monthly readings (for monthly consumption)
+      if (res.elecMonthly?.data && Array.isArray(res.elecMonthly.data)) {
+        const monthlyReadings = res.elecMonthly.data as any[];
+        // Sum up all units for the month
+        const monthlyUnits = monthlyReadings.reduce((sum: number, r: any) => {
+          return sum + (r.computed_units || r.final_units || 0);
+        }, 0);
+        monthlyElecSum += monthlyUnits;
+      }
+
       if (res.diesel.data) {
-        totalDieselLevel += (res.diesel.data.current_fuel_level || 0);
+        totalDieselLevel += (res.diesel.data.closing_diesel_level || 0);
         totalDieselConsumption += (res.diesel.data.computed_consumed_litres || 0);
         dieselCount++;
       }
@@ -261,8 +279,8 @@ export async function GET(request: NextRequest) {
       },
       sopTotal: sopTemplatesRes.count ?? 0,
       sopCount: sopCompletionsRes.count ?? 0,
-      energyKwh: Math.round(totalElec),
-      energyTrend: elecTrendCount > 0 ? Math.round(elecTrendSum / elecTrendCount) : null,
+      energyKwh: Math.round(monthlyElecSum),
+      energyTrend: elecTrendCount > 0 ? Math.round(elecTrendSum / elecTrendCount) : 0,
       healthScore,
       attentionItems: sortedAttention,
       ticketFunnel,

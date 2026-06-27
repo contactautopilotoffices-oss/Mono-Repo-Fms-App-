@@ -13,11 +13,17 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const admin = createAdminClient();
     const { data: property, error } = await admin
       .from("properties")
-      .select("id, organization_id, name, type, address, city, state, zip, phone, email, status, total_units, occupied_units, amenities, code, created_at, updated_at")
+      .select("id, organization_id, code, name, created_at")
       .eq("id", params.id)
       .single();
 
-    if (error) return NextResponse.json({ error: "Failed to fetch property" }, { status: 500 });
+    if (error || !property) {
+      console.error("[GET /api/properties/:id] error:", error);
+      return NextResponse.json(
+        { error: error?.code === "PGRST116" ? "Property not found" : "Failed to fetch property" },
+        { status: error?.code === "PGRST116" ? 404 : 500 }
+      );
+    }
     return NextResponse.json({ property }, { status: 200 });
   } catch (error) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

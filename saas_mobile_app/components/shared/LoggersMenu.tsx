@@ -33,6 +33,14 @@ export function LoggersMenu({ visible, onClose, propertyId }: LoggersMenuProps) 
       description: 'Log fuel refills & generator levels',
       route: `/property/${propertyId}/diesel`,
     },
+    {
+      title: 'Water',
+      icon: 'water-outline' as const,
+      bgColor: 'rgba(14,165,233,0.1)',
+      iconColor: '#0EA5E9',
+      description: 'Log water jars, tankers & costs',
+      route: `/property/${propertyId}/water`,
+    },
   ];
 
   return (

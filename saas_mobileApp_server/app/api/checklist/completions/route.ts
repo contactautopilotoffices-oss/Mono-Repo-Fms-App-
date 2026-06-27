@@ -18,10 +18,10 @@ export async function GET(request: NextRequest) {
     const admin = createAdminClient();
     let query = admin
       .from("sop_completions")
-      .select("id, status, completed_at, template:sop_templates(title)")
+      .select("*, user:users(id, full_name), items:sop_completion_items(*)")
       .eq("property_id", propertyId)
       .order("completed_at", { ascending: false })
-      .limit(20);
+      .limit(50);
 
     if (templateId) {
       query = query.eq("template_id", templateId);
@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const propertyId = body.propertyId || body.property_id;
     if (!propertyId || !body.template_id) return NextResponse.json({ error: "Missing checklist fields" }, { status: 400 });
+
     if (!(await canManageProperty(auth.user.id, propertyId))) {
       const access = await getPropertyAccess(auth.user.id, propertyId);
       const accessAllowed = access.authorized && body.completed_by === auth.user.id;
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       await admin.from("sop_completion_items").insert(itemsPayload);
     }
 
-    return NextResponse.json({ success: true, completion: data }, { status: 201 });
+    return NextResponse.json({ completion: data });
   } catch (error) {
     console.error("[saas-mobile-server] checklist completions POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

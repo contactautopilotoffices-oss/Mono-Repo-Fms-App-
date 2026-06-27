@@ -23,7 +23,7 @@ export function fmtRemaining(ms: number): string {
   return `${hrs}h ${rMins}m`;
 }
 
-function getISTDateParts(date: Date) {
+export function getISTDateParts(date: Date) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
   const day = date.getDate();
@@ -42,6 +42,60 @@ function getISTDateParts(date: Date) {
     totalMins: hour * 60 + minute,
     todayStart: new Date(year, month - 1, day, 0, 0, 0),
   };
+}
+
+export function computeSlotTime(
+  frequency: string,
+  startTime: string | null,
+  endTime: string | null,
+  now: Date,
+): string | null {
+  const intervalH = parseHourlyInterval(frequency);
+  if (!intervalH || !startTime) return null;
+
+  // Validate startTime format
+  if (!startTime || typeof startTime !== 'string' || !startTime.includes(':')) {
+    return null;
+  }
+
+  const ist = getISTDateParts(now);
+  const nowMins = ist.totalMins;
+
+  const timeParts = startTime.slice(0, 5).split(":").map(Number);
+  if (timeParts.some(isNaN)) return null;
+  const [sH, sM] = timeParts;
+  const startMins = sH * 60 + sM;
+
+  if (isNaN(startMins)) return null;
+
+  const elapsed = nowMins - startMins;
+  const elapsedActual = elapsed < 0 ? elapsed + 1440 : elapsed;
+
+  let slotStartMins = startMins + Math.floor(elapsedActual / (intervalH * 60)) * intervalH * 60;
+
+  if (endTime && typeof endTime === 'string' && endTime.includes(':')) {
+    const endParts = endTime.slice(0, 5).split(":").map(Number);
+    if (!endParts.some(isNaN)) {
+      const [eH, eM] = endParts;
+      const endMins = eH * 60 + eM;
+      if (!isNaN(endMins)) {
+        const isOvernight = endMins <= startMins;
+        const windowDuration = isOvernight ? 1440 - startMins + endMins : endMins - startMins;
+        const elapsedSinceStart = isOvernight && nowMins < endMins ? nowMins + 1440 - startMins : nowMins - startMins;
+        if (elapsedSinceStart < 0 || elapsedSinceStart >= windowDuration) return null;
+        const lastValidSlotStartOffset = Math.floor((windowDuration - intervalH * 60) / (intervalH * 60)) * intervalH * 60;
+        const currentSlotOffset = Math.floor(elapsedSinceStart / (intervalH * 60)) * intervalH * 60;
+        if (currentSlotOffset > lastValidSlotStartOffset) return null;
+        slotStartMins = startMins + currentSlotOffset;
+      }
+    }
+  }
+
+  if (isNaN(slotStartMins)) return null;
+
+  const h = Math.floor(slotStartMins / 60) % 24;
+  const mn = slotStartMins % 60;
+  return `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
 }
 
 export function getCompletionSlot(
@@ -64,98 +118,20 @@ export function getCompletionSlot(
     };
     return `${fmt(start)} - ${fmt(end)}`;
   }
-
   if (!timestampStr) return null;
-
-  const ist = getISTDateParts(new Date(timestampStr));
-  const dtMins = ist.totalMins;
-  const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
-  const startMins = sH * 60 + sM;
-
-  let elapsed = dtMins - startMins;
-  if (elapsed < 0) elapsed += 1440;
-
-  const slotIndex = Math.floor(elapsed / (intervalHours * 60));
-  const slotStartMins = startMins + slotIndex * intervalHours * 60;
-  const slotEndMins = slotStartMins + intervalHours * 60;
-
-  const fmt = (mins: number) => {
-    const h = Math.floor(mins / 60) % 24;
-    const m = mins % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  };
-  return `${fmt(slotStartMins)} - ${fmt(slotEndMins)}`;
+  const d = new Date(timestampStr);
+  return computeSlotTime(frequency, startTime, null, d);
 }
 
-export function computeCurrentSlotStart(
-  frequency: string,
-  startTime: string | null,
-  now: Date,
-  endTime?: string | null,
-): string | null {
-  const intervalH = parseHourlyInterval(frequency);
-  if (!intervalH || !startTime) return null;
-
-  const ist = getISTDateParts(now);
-  const nowMins = ist.totalMins;
-
-  const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
-  const startMins = sH * 60 + sM;
-  const elapsed = nowMins - startMins;
-
-  if (elapsed < 0 && !isWithinTimeWindow(nowMins, startTime, endTime || "23:59"))
-    return null;
-
-  const elapsedActual = elapsed < 0 ? elapsed + 1440 : elapsed;
-  let slotStartMins =
-    startMins + Math.floor(elapsedActual / (intervalH * 60)) * intervalH * 60;
-
-  if (endTime) {
-    const [eH, eM] = endTime.slice(0, 5).split(":").map(Number);
-    const endMins = eH * 60 + eM;
-    const isOvernight = endMins <= startMins;
-
-    const windowDuration = isOvernight
-      ? 1440 - startMins + endMins
-      : endMins - startMins;
-    const elapsedSinceStart =
-      isOvernight && nowMins < endMins
-        ? nowMins + 1440 - startMins
-        : nowMins - startMins;
-
-    if (elapsedSinceStart < 0 || elapsedSinceStart >= windowDuration)
-      return null;
-
-    const lastValidSlotStartOffset =
-      Math.floor((windowDuration - intervalH * 60) / (intervalH * 60)) *
-      intervalH *
-      60;
-    const currentSlotOffset =
-      Math.floor(elapsedSinceStart / (intervalH * 60)) * intervalH * 60;
-
-    if (currentSlotOffset > lastValidSlotStartOffset) return null;
-
-    slotStartMins = startMins + currentSlotOffset;
+export function isWithinTimeWindow(nowMins: number, startTime: string, endTime: string): boolean {
+  const [sH, sM] = startTime.split(":").map(Number);
+  const [eH, eM] = endTime.split(":").map(Number);
+  const start = sH * 60 + sM;
+  const end = eH * 60 + eM;
+  if (end > start) {
+    return nowMins >= start && nowMins <= end;
   }
-
-  const h = Math.floor(slotStartMins / 60) % 24;
-  const mn = slotStartMins % 60;
-  return `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
-}
-
-export function isWithinTimeWindow(
-  nm: number,
-  st: string,
-  et: string,
-): boolean {
-  const [sh, sm] = st.slice(0, 5).split(":").map(Number);
-  const [eh, em] = et.slice(0, 5).split(":").map(Number);
-  const smins = sh * 60 + sm;
-  const emins = eh * 60 + em;
-  if (emins <= smins) {
-    return nm >= smins || nm < emins;
-  }
-  return nm >= smins && nm <= emins;
+  return nowMins >= start || nowMins <= end;
 }
 
 export function isDue(
@@ -176,8 +152,21 @@ export function isDue(
   const now = baseDate || new Date();
   const ist = getISTDateParts(now);
   const nowMins = ist.totalMins;
-  const todayStr = ist.isoDate;
   const intervalHours = parseHourlyInterval(frequency);
+
+  let todayStr = ist.isoDate;
+  if (startTime && endTime) {
+    const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
+    const [eH, eM] = endTime.slice(0, 5).split(":").map(Number);
+    const startMins = sH * 60 + sM;
+    const endMins = eH * 60 + eM;
+    const isOvernight = endMins <= startMins;
+
+    if (isOvernight && nowMins < endMins) {
+      const yesterday = new Date(now.getTime() - 86400000);
+      todayStr = getISTDateParts(yesterday).isoDate;
+    }
+  }
 
   if (intervalHours !== null && startTime && endTime) {
     const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
@@ -187,11 +176,6 @@ export function isDue(
 
     const isOvernight = endMins <= startMins;
     let baselineDateStr = todayStr;
-
-    if (isOvernight && nowMins < endMins) {
-      const yesterday = new Date(now.getTime() - 86400000);
-      baselineDateStr = getISTDateParts(yesterday).isoDate;
-    }
 
     const baselineStart = new Date(
       `${baselineDateStr}T${startTime.slice(0, 5)}:00+05:30`,
@@ -253,7 +237,24 @@ export function isDue(
 
   // Daily
   if (frequency === "daily") {
-    const lastDoneStr = lastCompletionDate;
+    let lastDoneStr = lastCompletionDate;
+    if (startTime && endTime) {
+      const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
+      const [eH, eM] = endTime.slice(0, 5).split(":").map(Number);
+      const startMins = sH * 60 + sM;
+      const endMins = eH * 60 + eM;
+      if (endMins <= startMins && lastCompletedAt) {
+        const lastDateObj = new Date(lastCompletedAt);
+        const lIst = getISTDateParts(lastDateObj);
+        if (lIst.totalMins < endMins) {
+           const y = new Date(lastDateObj.getTime() - 86400000);
+           lastDoneStr = getISTDateParts(y).isoDate;
+        } else {
+           lastDoneStr = lIst.isoDate;
+        }
+      }
+    }
+    
     if (lastDoneStr === todayStr) {
       return { due: false, label: "Done for today", status: "completed" };
     }
@@ -276,4 +277,15 @@ export function isDue(
 
   // Weekly/Monthly
   return { due: true, label: "Due", status: "due" };
+}
+
+export function getDueStatus(
+  frequency: string,
+  lastCompletionDate: string | null,
+  startTime: string | null,
+  endTime: string | null,
+  lastSlotTime: string | null,
+): "due" | "upcoming" | "completed" | null {
+  if (isDue(frequency, lastCompletionDate, startTime, endTime, lastSlotTime)) return "due";
+  return "completed";
 }

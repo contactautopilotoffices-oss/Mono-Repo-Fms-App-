@@ -21,6 +21,7 @@ import { serverApi } from '@/lib/serverApi';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/context';
+import { Colors } from '@/constants/Colors';
 import TicketListItem from '@/components/tickets/TicketListItem';
 import TicketListItemSkeleton from '@/components/tickets/TicketListItemSkeleton';
 import MediaCaptureModal, { MediaFile } from '@/components/shared/MediaCaptureModal';
@@ -28,7 +29,6 @@ import { GlassCard } from '@/constants/designSystem';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { RotatingBorder } from '@/components/shared/RotatingBorder';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 
@@ -152,6 +152,7 @@ export default function TicketsScreen() {
   const { membership, user: authUser } = useAuth();
   const isTenant = membership?.role === 'tenant' || membership?.properties?.find((p: any) => p.id === propertyId)?.role === 'tenant';
   const { theme } = useTheme();
+  const colors = Colors[theme];
   const isDark = theme === 'dark';
 
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -523,23 +524,17 @@ const onRefresh = () => {
     );
   };
 
-  const bg = isDark ? '#0F1521' : '#F5F0E8';
   const cardBg = isDark ? 'rgba(30,38,55,0.88)' : 'rgba(255,255,255,0.88)';
   const textPrimary = isDark ? '#F0F4F8' : '#1A2332';
   const textSecondary = isDark ? '#A0AEC0' : '#64748B';
   const borderColor = isDark ? 'rgba(80,100,130,0.30)' : 'rgba(180,195,210,0.35)';
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack.Screen
         options={{
           headerShown: false,
         }}
-      />
-
-      <LinearGradient 
-        colors={isDark ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']} 
-        style={StyleSheet.absoluteFillObject} 
       />
 
       <View style={[styles.container, { paddingBottom: 0 }]}>
@@ -619,7 +614,7 @@ const onRefresh = () => {
         <View style={[styles.dateFilterRow, { borderBottomColor: borderColor }]}>
           <TouchableOpacity
             style={styles.dateFilterBtn}
-            onPress={() => setShowDateFilter(!showDateFilter)}
+            onPress={() => { setShowDateFilter(!showDateFilter); setShowTypeFilter(false); }}
             activeOpacity={0.7}
           >
             <Ionicons name="calendar-outline" size={15} color={textSecondary} />
@@ -635,7 +630,7 @@ const onRefresh = () => {
 
           <TouchableOpacity
             style={styles.dateFilterBtn}
-            onPress={() => setShowTypeFilter(!showTypeFilter)}
+            onPress={() => { setShowTypeFilter(!showTypeFilter); setShowDateFilter(false); }}
             activeOpacity={0.7}
           >
             <Ionicons name="filter-outline" size={15} color={textSecondary} />
@@ -676,54 +671,31 @@ const onRefresh = () => {
           </View>
         )}
 
-      {/* Type Filter Modal */}
-      <Modal
-        visible={showTypeFilter}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowTypeFilter(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1} 
-          onPress={() => setShowTypeFilter(false)}
-        >
-          <View style={[styles.modalContent, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: isDark ? '#F9FAFB' : '#111827' }]}>Filter Tickets By Type</Text>
-              <TouchableOpacity onPress={() => setShowTypeFilter(false)} style={styles.modalCloseBtn}>
-                <Ionicons name="close" size={20} color={isDark ? '#9CA3AF' : '#6B7280'} />
-              </TouchableOpacity>
-            </View>
-
-            {TYPE_FILTERS.map(type => (
-              <TouchableOpacity
-                key={type.key}
-                style={[
-                  styles.filterOption,
-                  ticketTypeFilter === type.key && { backgroundColor: isDark ? 'rgba(59,130,246,0.1)' : '#EFF6FF' }
-                ]}
-                onPress={() => {
-                  setTicketTypeFilter(type.key);
-                  setShowTypeFilter(false);
-                  setLimit(PAGE_SIZE);
-                }}
-              >
-                <Text style={[
-                  styles.filterOptionText,
-                  { color: isDark ? '#F3F4F6' : '#374151' },
-                  ticketTypeFilter === type.key && { color: isDark ? '#60A5FA' : '#2563EB', fontFamily: 'Urbanist-Bold' }
-                ]}>
-                  {type.label}
-                </Text>
-                {ticketTypeFilter === type.key && (
-                  <Ionicons name="checkmark" size={20} color={isDark ? '#60A5FA' : '#2563EB'} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Type Filter Dropdown */}
+      {showTypeFilter && (
+        <View style={[styles.dateFilterDropdown, { backgroundColor: cardBg, borderColor, left: 'auto', right: 20, width: 220 }]}>
+          {TYPE_FILTERS.map(type => (
+            <TouchableOpacity
+              key={type.key}
+              style={[
+                styles.dateFilterOption,
+                ticketTypeFilter === type.key && { backgroundColor: isDark ? 'rgba(124,185,168,0.12)' : 'rgba(124,185,168,0.08)' },
+              ]}
+              onPress={() => { setTicketTypeFilter(type.key); setShowTypeFilter(false); setLimit(PAGE_SIZE); }}
+            >
+              <Text style={[styles.dateFilterOptionText, {
+                color: ticketTypeFilter === type.key ? '#7CB9A8' : textSecondary,
+                fontWeight: ticketTypeFilter === type.key ? '700' : '500',
+              }]}>
+                {type.label}
+              </Text>
+              {ticketTypeFilter === type.key && (
+                <Ionicons name="checkmark" size={16} color="#7CB9A8" />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
         {/* Ticket List */}
         {isLoading ? (

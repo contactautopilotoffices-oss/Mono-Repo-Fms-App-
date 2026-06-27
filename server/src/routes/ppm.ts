@@ -11,11 +11,21 @@
  *   PATCH /api/ppm/:id              — update schedule status / done_date
  *   POST /api/ppm/:id/attachments   — upload attachment URL
  *   DELETE /api/ppm/:id/attachments — remove attachment
+ *
+ * WhatsApp Notifications:
+ *   - PPM Due (fms_ppm_due) - sent to assigned staff
+ *   - PPM Overdue (fms_ppm_overdue) - sent to admins
+ *   - PPM Completed (fms_ppm_completed) - sent to admins
  */
 
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabaseAdmin } from '../utils/supabase.js';
+import {
+  notifyPPMDue,
+  notifyPPMOverdue,
+  notifyPPMCompleted,
+} from '../services/notificationService.js';
 
 // ── Query schemas ────────────────────────────────────────────────────────────
 
@@ -219,6 +229,27 @@ export async function ppmRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({ error: 'DatabaseError', message: error.message });
     }
 
+    // Send WhatsApp notification if assigned and due today
+    const schedule = data as any;
+    if (schedule.assigned_to && schedule.planned_date) {
+      const today = new Date().toISOString().split('T')[0];
+      if (schedule.planned_date === today) {
+        await notifyPPMDue({
+          ppmId: schedule.id,
+          scheduleName: schedule.system_name,
+          dueDate: new Date(schedule.planned_date).toLocaleDateString('en-IN', {
+            day: '2-digit', month: 'short', year: 'numeric',
+          }),
+          assignedToUserId: schedule.assigned_to,
+          propertyId: schedule.property_id || '',
+          location: schedule.location || undefined,
+        }).catch(err => {
+          fastify.log.error(`[PPM] WhatsApp due notification failed: ${err.message}`);
+        });
+        fastify.log.info(`[PPM] Schedule ${schedule.id} created with due notification`);
+      }
+    }
+
     return reply.status(201).send({ schedule: data });
   });
 
@@ -239,6 +270,13 @@ export async function ppmRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Bad Request', message: 'No fields to update' });
     }
 
+    // Get current schedule for notifications
+    const { data: current } = await supabaseAdmin
+      .from('ppm_schedules')
+      .select('*')
+      .eq('id', id)
+      .single();
+
     const { data, error } = await supabaseAdmin
       .from('ppm_schedules')
       .update({ ...updatePayload, updated_at: new Date().toISOString() })
@@ -249,6 +287,24 @@ export async function ppmRoutes(fastify: FastifyInstance) {
     if (error) {
       fastify.log.error({ err: error }, '[PPM] updateSchedule error');
       return reply.status(500).send({ error: 'DatabaseError', message: error.message });
+    }
+
+    // Send WhatsApp notifications based on status change
+    if (parsed.data.status === 'done' && current && current.status !== 'done') {
+      const completedBy = current.assigned_to || 'dev_user_id';
+      await notifyPPMCompleted({
+        ppmId: id,
+        scheduleName: current.system_name,
+        completedByUserId: completedBy,
+        propertyId: current.property_id || '',
+        completedAt: new Date().toLocaleString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        }),
+      }).catch(err => {
+        fastify.log.error(`[PPM] WhatsApp completed notification failed: ${err.message}`);
+      });
+      fastify.log.info(`[PPM] Schedule ${id} marked done, notification sent`);
     }
 
     return reply.send({ schedule: data });
@@ -348,5 +404,46 @@ export async function ppmRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({ success: true });
+  });
+
+  // ── POST /api/ppm/check-overdue — Check and notify overdue schedules ──────
+  // This should be called by a cron job (e.g., every hour)
+  fastify.post('/api/ppm/check-overdue', async (req, reply) => {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Find pending schedules past their due date
+    const { data: overdueSchedules, error } = await supabaseAdmin
+      .from('ppm_schedules')
+      .select('*')
+      .eq('status', 'pending')
+      .lt('planned_date', today);
+
+    if (error) {
+      fastify.log.error({ err: error }, '[PPM] check-overdue query error');
+      return reply.status(500).send({ error: 'DatabaseError', message: error.message });
+    }
+
+    let notified = 0;
+    for (const schedule of overdueSchedules || []) {
+      await notifyPPMOverdue({
+        ppmId: schedule.id,
+        scheduleName: schedule.system_name,
+        dueDate: new Date(schedule.planned_date).toLocaleDateString('en-IN', {
+          day: '2-digit', month: 'short', year: 'numeric',
+        }),
+        assignedToUserId: schedule.assigned_to || 'dev_user_id',
+        propertyId: schedule.property_id || '',
+      }).catch(err => {
+        fastify.log.error(`[PPM] Overdue notification failed for ${schedule.id}: ${err.message}`);
+      });
+      notified++;
+    }
+
+    fastify.log.info(`[PPM] Checked overdue: ${notified} notifications sent`);
+    return reply.send({
+      success: true,
+      checked: overdueSchedules?.length || 0,
+      notified,
+    });
   });
 }

@@ -72,12 +72,17 @@ export default function DashboardScreen() {
     return propRole || 'staff';
   }, [membership, propertyId]);
 
-  if (isMembershipLoading || !membership) {
+  if (isMembershipLoading) {
     return (
       <View style={[styles.loader, { backgroundColor: '#121212' }]}>
         <SkeletonLoader />
       </View>
     );
+  }
+
+  // If membership is null after loading (e.g., network error), redirect to root to handle it
+  if (!membership) {
+    return <Redirect href="/" />;
   }
 
   const pid = propertyId ?? '';

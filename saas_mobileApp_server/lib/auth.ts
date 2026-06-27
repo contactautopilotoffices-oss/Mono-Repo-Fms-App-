@@ -56,7 +56,7 @@ export async function getAuthenticatedUser(request: NextRequest): Promise<{
 // do NOT exist in the current DB enum.
 
 /** Org-level admin roles that have access to ALL properties in the org */
-const ORG_ADMIN_ROLES = new Set(["org_super_admin"]);
+const ORG_ADMIN_ROLES = new Set(["org_super_admin", "org_admin", "owner"]);
 
 /** Property-level roles that grant scoped access to a specific property */
 const PROPERTY_ROLES = new Set([

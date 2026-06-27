@@ -17,7 +17,6 @@ import {
   StatusBar,
   Share,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,6 +47,7 @@ import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { queryClient } from '@/utils/queryClient';
 import TicketDetailSkeleton from '@/components/tickets/TicketDetailSkeleton';
+import { canUserSeePrices, ProcurementPriceVisibilitySetting } from '@/utils/procurement';
 
 interface Ticket {
   id: string;
@@ -109,6 +109,21 @@ interface EscalationLog {
   to_employee?:  { full_name: string } | null;
 }
 
+interface ProcurementActivityLog {
+  id: string;
+  material_request_id: string;
+  action: string;
+  status?: string | null;
+  notes?: string | null;
+  created_at: string;
+  user_id?: string | null;
+  user?: { full_name: string } | null;
+  material_request?: {
+    ticket_id?: string | null;
+    ticket?: { ticket_number?: string | null; title?: string | null } | null;
+  } | null;
+}
+
 const PRIORITY_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
   critical: { bg: 'rgba(244,63,94,0.1)',  text: '#F43F5E', label: 'Critical' },
   high:     { bg: 'rgba(249,115,22,0.1)', text: '#F97316', label: 'High' },
@@ -161,7 +176,7 @@ export default function TicketDetailScreen() {
   const { propertyId, id } = useGlobalSearchParams<{ propertyId: string; id: string }>();
   const router = useRouter();
   const { theme } = useTheme();
-  const { user: authUser, session } = useAuth();
+  const { user: authUser, session, membership } = useAuth();
   // Authenticated client — uses session token so auth works on mobile
   const supabase = session?.access_token ? createClientFromToken(session.access_token) : createClient();
   const isDark = theme === 'dark';
@@ -173,6 +188,9 @@ export default function TicketDetailScreen() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [escalationLogs, setEscalationLogs] = useState<EscalationLog[]>([]);
+  const [procurementRequests, setProcurementRequests] = useState<any[]>([]);
+  const [procurementLogs, setProcurementLogs] = useState<ProcurementActivityLog[]>([]);
+  const [priceVisibilitySettings, setPriceVisibilitySettings] = useState<ProcurementPriceVisibilitySetting[]>([]);
   const [loading, setLoading] = useState(true);
   const [newComment, setNewComment] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
@@ -188,6 +206,8 @@ export default function TicketDetailScreen() {
   const [showAssigneePicker, setShowAssigneePicker] = useState(false);
   const [availableMSTs, setAvailableMSTs] = useState<{ id: string; full_name: string }[]>([]);
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showMaterialRequestsModal, setShowMaterialRequestsModal] = useState(false);
+  const [expandedMaterialRequests, setExpandedMaterialRequests] = useState<Set<string>>(new Set());
   const [validationEnabled, setValidationEnabled] = useState(false);
   const [userNameMap, setUserNameMap] = useState<Record<string, string>>({});
   const [showLoggersMenu, setShowLoggersMenu] = useState(false);
@@ -219,15 +239,18 @@ export default function TicketDetailScreen() {
       // relationship. On mobile (Expo Go), the PostgREST foreign-key join can silently
       // return null even when assigned_to is populated — the raw column serves as a
       // reliable fallback for the isAssignee check.
-      const { data: ticketData, error: ticketError } = await (supabase
-        .from('tickets')
-        .select(`*, assigned_to,
-                         category:issue_categories(name, code), skill_group:skill_groups(name, code),
-                         assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)),
-                         creator:users!raised_by(id, full_name, email, property_memberships(role, property_id))`)
-        .eq('id', id)
-        .eq('property_id', propertyId)
-        .single() as any);
+      const ticketRes = await serverApi.query<Ticket>({
+        table: 'tickets',
+        action: 'select',
+        select: `*, assigned_to, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id))`,
+        filters: [
+          { op: 'eq', column: 'id', value: id },
+          { op: 'eq', column: 'property_id', value: propertyId }
+        ],
+        single: true
+      });
+      const ticketData = ticketRes.data;
+      const ticketError = ticketRes.error;
 
       if (ticketError || !ticketData) {
         console.error('[fetchTicket] Failed to fetch ticket:', ticketError);
@@ -239,14 +262,18 @@ export default function TicketDetailScreen() {
       // 1. Fetch current user's role for this property early for security check
       let userRole = null;
       if (authUser?.id) {
-        const { data: memberData } = await (supabase as any)
-          .from('property_memberships')
-          .select('role')
-          .eq('user_id', authUser.id)
-          .eq('property_id', propertyId)
-          .eq('is_active', true)
-          .single();
-        userRole = memberData?.role ?? null;
+        const memberRes = await serverApi.query<any>({
+          table: 'property_memberships',
+          action: 'select',
+          select: 'role',
+          filters: [
+            { op: 'eq', column: 'user_id', value: authUser.id },
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'is_active', value: true }
+          ],
+          single: true
+        });
+        userRole = memberRes.data?.role ?? null;
         setCurrentUserRole(userRole);
       }
 
@@ -280,26 +307,34 @@ export default function TicketDetailScreen() {
       setTicket(ticketData as Ticket);
 
       // Fetch comments
-      const { data: commentData, error: commentError } = await (supabase
-        .from('ticket_comments')
-        .select(`*, user:users(full_name, user_photo_url)`)
-        .eq('ticket_id', id)
-        .order('created_at', { ascending: true }) as any);
+      const commentsRes = await serverApi.query<Comment[]>({
+        table: 'ticket_comments',
+        action: 'select',
+        select: `*, user:users(full_name, user_photo_url)`,
+        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+        orders: [{ column: 'created_at', ascending: true }]
+      });
+      const commentData = commentsRes.data ?? [];
+      const commentError = commentsRes.error;
       if (commentError) console.error('[fetchTicket] Comments error:', commentError);
-      setComments((commentData ?? []) as Comment[]);
-      if (activeTab !== 'chat' && commentData && commentData.length > 0) {
+      setComments(commentData);
+      if (activeTab !== 'chat' && commentData.length > 0) {
         useUnreadStore.getState().setTicketChat(commentData.length);
       }
 
       // Fetch activity
-      const { data: activityDataRaw, error: activityError } = await (supabase
-        .from('ticket_activity_log')
-        .select(`*`)
-        .eq('ticket_id', id)
-        .order('created_at', { ascending: true }) as any);
+      const activityRes = await serverApi.query<Activity[]>({
+        table: 'ticket_activity_log',
+        action: 'select',
+        select: `*`,
+        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+        orders: [{ column: 'created_at', ascending: true }]
+      });
+      const activityDataRaw = activityRes.data ?? [];
+      const activityError = activityRes.error;
       if (activityError) console.error('[fetchTicket] Activity error:', activityError);
       
-      const activityData = activityDataRaw ?? [];
+      const activityData = activityDataRaw;
 
       // Build userNameMap from activity entries for reassignment display and activity log names
       const newMap: Record<string, string> = {};
@@ -339,11 +374,14 @@ export default function TicketDetailScreen() {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)
       );
       if (idsToResolve.length > 0) {
-        const { data: userRows } = await (supabase
-          .from('users')
-          .select('id, full_name')
-          .in('id', idsToResolve) as any);
-        (userRows ?? []).forEach((u: { id: string; full_name: string }) => {
+        const userRes = await serverApi.query<any[]>({
+          table: 'users',
+          action: 'select',
+          select: 'id, full_name',
+          filters: [{ op: 'in', column: 'id', values: idsToResolve }]
+        });
+        const userRows = userRes.data ?? [];
+        userRows.forEach((u: { id: string; full_name: string }) => {
           newMap[u.id] = u.full_name;
         });
       }
@@ -361,34 +399,109 @@ export default function TicketDetailScreen() {
       setUserNameMap(newMap);
 
       // Fetch escalation logs
-      const { data: escData, error: escError } = await supabase
-        .from('ticket_escalation_logs')
-        .select(`*, from_employee:users!from_employee_id(full_name),
-                         to_employee:users!to_employee_id(full_name)`)
-        .eq('ticket_id', id)
-        .order('escalated_at', { ascending: true });
+      const escRes = await serverApi.query<EscalationLog[]>({
+        table: 'ticket_escalation_logs',
+        action: 'select',
+        select: `*, from_employee:users!from_employee_id(full_name), to_employee:users!to_employee_id(full_name)`,
+        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+        orders: [{ column: 'escalated_at', ascending: true }]
+      });
+      const escData = escRes.data ?? [];
+      const escError = escRes.error;
       if (escError) console.error('[fetchTicket] Escalation error:', escError);
-      setEscalationLogs((escData ?? []) as EscalationLog[]);
+      setEscalationLogs(escData);
 
       // Fetch validationEnabled from property_features
-      const { data: featData } = await (supabase as any)
-        .from('property_features')
-        .select('feature_key, is_enabled')
-        .eq('property_id', propertyId)
-        .eq('feature_key', 'ticket_validation')
-        .maybeSingle();
+      const featRes = await serverApi.query<any>({
+        table: 'property_features',
+        action: 'select',
+        select: 'feature_key, is_enabled',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'feature_key', value: 'ticket_validation' }
+        ],
+        single: true
+      });
+      const featData = featRes.data;
+
       // Fetch MSTs inline
       let msts: { id: string; full_name: string }[] = [];
-      const { data: mstData } = await supabase
-        .from('property_memberships')
-        .select('role, user:users(id, full_name)')
-        .eq('property_id', propertyId)
-        .eq('is_active', true);
+      const mstRes = await serverApi.query<any[]>({
+        table: 'property_memberships',
+        action: 'select',
+        select: 'role, user:users(id, full_name)',
+        filters: [
+          { op: 'eq', column: 'property_id', value: propertyId },
+          { op: 'eq', column: 'is_active', value: true }
+        ]
+      });
+      const mstData = mstRes.data ?? [];
       
-      msts = (mstData ?? [])
+      msts = mstData
         .filter((m: any) => m.role !== 'client')
         .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
         .filter((u: any) => u.id && u.full_name);
+
+      // Fetch material requests
+      let procurementRequestsData = [];
+      const procurementRes = await serverApi.query<any[]>({
+        table: 'material_requests',
+        action: 'select',
+        select: `*, items:material_request_items(*), requester:users!requested_by(full_name), assignee:users!assignee_uid(full_name)`,
+        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+        orders: [{ column: 'created_at', ascending: false }]
+      });
+      const procurementData = procurementRes.data;
+      const procurementError = procurementRes.error;
+      
+      if (procurementError) {
+        console.error('[fetchTicket] Procurement error:', procurementError);
+      } else {
+        procurementRequestsData = procurementData || [];
+      }
+
+      // Fetch procurement activity logs for this ticket
+      let procurementLogsData: ProcurementActivityLog[] = [];
+      try {
+        const matReqIds = procurementRequestsData.map((r: any) => r.id);
+        if (matReqIds.length > 0) {
+          const logRes = await serverApi.query<ProcurementActivityLog[]>({
+            table: 'procurement_activity_log',
+            action: 'select',
+            select: `*, user:users!user_id(full_name), material_request:material_requests!inner(ticket_id, ticket:tickets(ticket_number, title))`,
+            filters: [{ op: 'in', column: 'material_request_id', value: matReqIds }],
+            orders: [{ column: 'created_at', ascending: false }]
+          });
+          if (logRes.error) {
+            console.error('[fetchTicket] Procurement logs error:', logRes.error);
+          } else {
+            procurementLogsData = logRes.data || [];
+          }
+        }
+      } catch (logErr) {
+        console.error('[fetchTicket] Procurement logs fetch failed:', logErr);
+      }
+
+      // Fetch procurement price visibility settings for this organization
+      let priceVisibilityData: ProcurementPriceVisibilitySetting[] = [];
+      try {
+        const ticketOrgId = (ticketData as any)?.organization_id;
+        if (ticketOrgId) {
+          const visRes = await serverApi.query<ProcurementPriceVisibilitySetting[]>({
+            table: 'procurement_price_visibility',
+            action: 'select',
+            select: 'property_id, roles, users',
+            filters: [{ op: 'eq', column: 'organization_id', value: ticketOrgId }]
+          });
+          if (visRes.error) {
+            console.error('[fetchTicket] Price visibility error:', visRes.error);
+          } else {
+            priceVisibilityData = visRes.data || [];
+          }
+        }
+      } catch (visErr) {
+        console.error('[fetchTicket] Price visibility fetch failed:', visErr);
+      }
 
       return {
         ticket: ticketData as Ticket,
@@ -398,7 +511,10 @@ export default function TicketDetailScreen() {
         escalationLogs: (escData ?? []) as EscalationLog[],
         validationEnabled: featData?.is_enabled === true,
         userNameMap: newMap,
-        availableMSTs: msts
+        availableMSTs: msts,
+        procurementRequests: procurementRequestsData,
+        procurementLogs: procurementLogsData,
+        priceVisibilitySettings: priceVisibilityData
       };
 
     } catch (err) {
@@ -424,6 +540,9 @@ export default function TicketDetailScreen() {
       setComments(data.comments);
       setActivities(data.activities);
       setEscalationLogs(data.escalationLogs);
+      setProcurementRequests(data.procurementRequests || []);
+      setProcurementLogs(data.procurementLogs || []);
+      setPriceVisibilitySettings(data.priceVisibilitySettings || []);
       setValidationEnabled(data.validationEnabled);
       setUserNameMap(data.userNameMap);
       setAvailableMSTs(data.availableMSTs);
@@ -863,6 +982,15 @@ export default function TicketDetailScreen() {
   // current session on both web and Expo Go.
   const isMSTUser = currentUserRole === 'mst' || currentUserRole === 'property_mst' || currentUserRole === 'property_admin';
 
+  const canSeePrices = canUserSeePrices(
+    authUser?.id ?? null,
+    ticket?.organization_id ?? null,
+    membership?.org_role ?? null,
+    (membership?.properties ?? []).map(p => ({ property_id: p.id, role: p.role })),
+    propertyId as string | undefined,
+    priceVisibilitySettings
+  );
+
   const isAssignee = Boolean(
     authUser?.id &&
     (
@@ -986,12 +1114,7 @@ export default function TicketDetailScreen() {
   );
 
   return (
-    <View style={{ flex: 1 }}>
-      <LinearGradient 
-        colors={isDark ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']} 
-        style={StyleSheet.absoluteFillObject} 
-      />
-      
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack.Screen
         options={{
           headerShown: false,
@@ -1033,10 +1156,21 @@ export default function TicketDetailScreen() {
           {!isTenant && (
             <TouchableOpacity
               style={styles.headerActionBtn}
-              onPress={() => setShowMaterialModal(true)}
+              onPress={() => {
+                if (procurementRequests.length > 0) {
+                  setShowMaterialRequestsModal(true);
+                } else {
+                  setShowMaterialModal(true);
+                }
+              }}
               activeOpacity={0.7}
             >
               <Ionicons name="cart-outline" size={22} color={textSecondary} />
+              {procurementRequests.length > 0 && (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>{procurementRequests.length}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           )}
           {/* Edit Button — show for creator, assignee, or admin/MST users */}
@@ -1315,7 +1449,7 @@ export default function TicketDetailScreen() {
                   Sequence of Events
                 </Text>
                 <Text style={[styles.seqCount, { color: textSecondary }]}>
-                  {1 + activities.length + escalationLogs.length} events
+                  {1 + activities.length + escalationLogs.length + procurementLogs.length} events
                 </Text>
               </View>
 
@@ -1415,7 +1549,7 @@ export default function TicketDetailScreen() {
                     }
                   }
 
-                  const isLast = idx === activities.length - 1 && escalationLogs.length === 0;
+                  const isLast = idx === activities.length - 1 && escalationLogs.length === 0 && procurementLogs.length === 0;
 
                   return (
                     <View key={act.id} style={styles.seqEvent}>
@@ -1514,7 +1648,7 @@ export default function TicketDetailScreen() {
                 {escalationLogs.map((log, idx) => {
                   const reasonLabel = log.reason === 'timeout' ? 'SLA Timeout'
                     : log.reason === 'manual' ? 'Manual Escalation' : log.reason || 'Escalation';
-                  const isLast = idx === escalationLogs.length - 1;
+                  const isLast = idx === escalationLogs.length - 1 && procurementLogs.length === 0;
                   return (
                     <View key={log.id} style={styles.seqEvent}>
                       <View style={styles.seqLeft}>
@@ -1582,12 +1716,228 @@ export default function TicketDetailScreen() {
                     </View>
                   );
                 })}
+
+                {/* 4. Procurement Activity Events */}
+                {procurementLogs.map((log, idx) => {
+                  const isLast = idx === procurementLogs.length - 1;
+                  const actionLabel = log.action?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Procurement Update';
+                  const statusLabel = log.status
+                    ? log.status === 'pending_quotation'
+                      ? 'Pending Quotation'
+                      : log.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                    : null;
+                  const actorName = log.user?.full_name || userNameMap[log.user_id || ''] || 'System';
+                  let iconName: keyof typeof Ionicons.glyphMap = 'cart-outline';
+                  let dotColor = '#3B82F6';
+                  if (log.action === 'approved') { iconName = 'checkmark-circle'; dotColor = '#10B981'; }
+                  else if (log.action === 'rejected' || log.action === 'cancelled') { iconName = 'close-circle'; dotColor = '#EF4444'; }
+                  else if (log.action === 'ordered') { iconName = 'cube'; dotColor = '#8B5CF6'; }
+                  else if (log.action === 'delivered') { iconName = 'checkmark-done-circle'; dotColor = '#10B981'; }
+                  else if (log.action === 'quoted') { iconName = 'document-text'; dotColor = '#F59E0B'; }
+
+                  return (
+                    <View key={log.id} style={styles.seqEvent}>
+                      <View style={styles.seqLeft}>
+                        <View style={[styles.seqDot, { backgroundColor: dotColor }]}>
+                          <Ionicons name={iconName} size={12} color="#FFF" />
+                        </View>
+                        {!isLast && (
+                          <View style={[styles.seqLine, { backgroundColor: borderColor }]} />
+                        )}
+                      </View>
+                      <View style={styles.seqRight}>
+                        <View style={[styles.seqCard, {
+                          borderColor: `${dotColor}33`,
+                          backgroundColor: isDark ? 'rgba(30,38,51,0.6)' : `${dotColor}0D`,
+                        }]}>
+                          <View style={styles.seqCardHeader}>
+                            <Text style={[styles.seqAction, { color: dotColor }]}>{actionLabel}</Text>
+                            {statusLabel && (
+                              <View style={[styles.seqReasonBadge, { backgroundColor: `${dotColor}1A` }]}>
+                                <Text style={[styles.seqReasonText, { color: dotColor }]}>{statusLabel}</Text>
+                              </View>
+                            )}
+                            <Text style={[styles.seqTime, { color: textSecondary }]}>
+                              {formatDate(log.created_at)}
+                            </Text>
+                          </View>
+
+                          <View style={styles.seqUserRow}>
+                            <View style={[styles.seqAvatar, { backgroundColor: `${dotColor}20` }]}>
+                              <Text style={[styles.seqAvatarText, { color: dotColor }]}>
+                                {actorName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                              </Text>
+                            </View>
+                            <Text style={[styles.seqUserName, { color: textPrimary }]}>
+                              {actorName}
+                            </Text>
+                          </View>
+
+                          {log.notes && (
+                            <Text style={[styles.seqNote, { color: textSecondary }]} numberOfLines={2}>
+                              {log.notes}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {activeTab === 'timeline' && (
+            <View style={{ paddingVertical: 16 }}>
+              <Text style={[styles.sectionTitle, { color: textPrimary, marginLeft: 16, marginBottom: 16 }]}>Ticket Timeline</Text>
+              
+              <View style={[styles.card, { backgroundColor: cardBg, borderColor, marginHorizontal: 16 }]}>
+                <View style={{ gap: 16 }}>
+                  {[
+                    { title: 'Created', time: ticket.created_at, icon: 'add-circle', color: '#10B981' },
+                    { title: 'Assigned', time: ticket.assigned_at, icon: 'person-add', color: '#3B82F6' },
+                    { title: 'Work Started', time: ticket.work_started_at, icon: 'play', color: '#F59E0B' },
+                    { title: 'Resolved/Closed', time: ticket.resolved_at, icon: 'checkmark-circle', color: '#8B5CF6' }
+                  ].map((step, idx, arr) => (
+                    <View key={step.title} style={{ flexDirection: 'row' }}>
+                      <View style={{ alignItems: 'center', width: 32 }}>
+                        <Ionicons 
+                          name={step.time ? step.icon as any : 'ellipse-outline'} 
+                          size={step.time ? 24 : 16} 
+                          color={step.time ? step.color : '#CBD5E1'} 
+                        />
+                        {idx < arr.length - 1 && (
+                          <View style={{ width: 2, flex: 1, backgroundColor: step.time ? step.color : isDark ? '#334155' : '#E2E8F0', marginTop: 4, minHeight: 24 }} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1, paddingLeft: 12, paddingBottom: idx < arr.length - 1 ? 24 : 0 }}>
+                        <Text style={{ fontSize: 16, fontWeight: step.time ? '700' : '500', color: step.time ? textPrimary : textSecondary }}>
+                          {step.title}
+                        </Text>
+                        {step.time ? (
+                          <Text style={{ fontSize: 13, color: textTertiary, marginTop: 4 }}>
+                            {formatDate(step.time)} ({timeAgo(step.time)})
+                          </Text>
+                        ) : (
+                          <Text style={{ fontSize: 13, color: textTertiary, marginTop: 4 }}>Pending</Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </View>
               </View>
             </View>
           )}
 
           {activeTab === 'details' && (
             <>
+              {/* Material Requests Section */}
+              {procurementRequests && procurementRequests.length > 0 && (
+                <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Text style={[styles.sectionTitle, { color: textPrimary, marginBottom: 0 }]}>Material Requests</Text>
+                    <View style={{ backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                      <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '700' }}>{procurementRequests.length} Request(s)</Text>
+                    </View>
+                  </View>
+                  
+                  {procurementRequests.map(req => {
+                    const requesterName = req.requester?.full_name || userNameMap[req.requested_by] || 'Unknown';
+                    const itemCount = Array.isArray(req.items) ? req.items.length : 0;
+                    const isExpanded = expandedMaterialRequests.has(req.id);
+                    return (
+                      <View key={req.id} style={{ backgroundColor: isDark ? '#1E2633' : '#F8FAFC', padding: 14, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: textPrimary, fontWeight: '700', fontSize: 15 }}>
+                              Order #{req.id.slice(0, 8).toUpperCase()}
+                            </Text>
+                            <Text style={{ color: textSecondary, fontSize: 12, marginTop: 2 }}>
+                              Requested by {requesterName}
+                            </Text>
+                          </View>
+                          <View style={{ 
+                            backgroundColor: req.status === 'delivered' ? 'rgba(16,185,129,0.1)' : req.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)', 
+                            paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 
+                          }}>
+                            <Text style={{ 
+                              fontSize: 11, fontWeight: '700',
+                              color: req.status === 'delivered' ? '#10B981' : req.status === 'rejected' ? '#EF4444' : '#F59E0B'
+                            }}>
+                              {req.status === 'pending_quotation' ? 'PENDING QUOTATION' : req.status?.toUpperCase().replace('_', ' ')}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text style={{ color: textSecondary, fontSize: 12, marginBottom: 8 }}>
+                          {formatDate(req.created_at)}
+                        </Text>
+                        {canSeePrices && req.total_amount != null && (
+                          <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 16, marginBottom: 12 }}>
+                            ₹{Number(req.total_amount).toLocaleString()}
+                          </Text>
+                        )}
+
+                        {/* Procurement Progress Steps */}
+                        <MaterialRequestProgress status={req.status} isDark={isDark} />
+                        
+                        {/* Expandable Items Section */}
+                        {itemCount > 0 && (
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', paddingVertical: 10, borderRadius: 10, marginTop: 12 }}
+                            onPress={() => {
+                              const next = new Set(expandedMaterialRequests);
+                              if (next.has(req.id)) next.delete(req.id);
+                              else next.add(req.id);
+                              setExpandedMaterialRequests(next);
+                            }}
+                          >
+                            <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color={textSecondary} />
+                            <Text style={{ color: textSecondary, fontSize: 12, fontWeight: '700' }}>
+                              {isExpanded ? 'Hide Items' : `View ${itemCount} Item${itemCount !== 1 ? 's' : ''}`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {isExpanded && (
+                          <View style={{ marginTop: 12, gap: 10 }}>
+                            {req.items?.map((item: any, i: number) => {
+                              const unitPrice = canSeePrices ? (item.unit_price ?? item.estimated_cost) : null;
+                              const itemTotal = canSeePrices ? (item.total_price ?? (unitPrice != null ? unitPrice * item.quantity : null)) : null;
+                              return (
+                                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF', padding: 10, borderRadius: 10 }}>
+                                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                                    {item.photo_url ? (
+                                      <Image source={{ uri: item.photo_url }} style={{ width: 36, height: 36 }} />
+                                    ) : (
+                                      <Text style={{ fontSize: 14, fontWeight: '700', color: textSecondary }}>{(item.name || 'I')[0].toUpperCase()}</Text>
+                                    )}
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ color: textPrimary, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>{item.name || item.item_name || 'Unknown Item'}</Text>
+                                    <Text style={{ color: textSecondary, fontSize: 12 }}>{item.quantity} {item.unit || 'units'}{unitPrice != null ? ` × ₹${Number(unitPrice).toLocaleString()}` : ''}</Text>
+                                  </View>
+                                  {itemTotal != null && (
+                                    <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 13 }}>₹{Number(itemTotal).toLocaleString()}</Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  <TouchableOpacity 
+                    style={{ backgroundColor: 'rgba(59,130,246,0.1)', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginTop: 4 }}
+                    onPress={() => router.push(`/property/${propertyId}/procurement` as any)}
+                  >
+                    <Text style={{ color: '#3B82F6', fontWeight: '700' }}>View in Procurement</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {/* Media Section */}
               <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
             <Text style={[styles.sectionTitle, { color: textPrimary }]}>Photos & Videos</Text>
@@ -1882,6 +2232,120 @@ export default function TicketDetailScreen() {
         onSuccess={fetchTicket}
       />
 
+      {/* Existing Material Requests Modal */}
+      <Modal visible={showMaterialRequestsModal} transparent animationType="slide" onRequestClose={() => setShowMaterialRequestsModal(false)}>
+        <View style={[styles.modalOverlay, { justifyContent: 'flex-end' }]}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowMaterialRequestsModal(false)} />
+          <View style={[styles.materialRequestsSheet, { backgroundColor: isDark ? '#1E2633' : '#FFF' }]}>
+            <View style={styles.sheetHandleRow}>
+              <View style={styles.sheetHandle} />
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.sheetTitle, { color: textPrimary }]}>Material Requests</Text>
+              <TouchableOpacity onPress={() => setShowMaterialRequestsModal(false)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color={textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+              {procurementRequests.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <Ionicons name="cart-outline" size={48} color={textTertiary} />
+                  <Text style={{ color: textSecondary, marginTop: 12 }}>No material requests yet</Text>
+                  <TouchableOpacity
+                    style={{ marginTop: 16, backgroundColor: '#3B82F6', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 }}
+                    onPress={() => {
+                      setShowMaterialRequestsModal(false);
+                      setShowMaterialModal(true);
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '700' }}>Add Materials</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                procurementRequests.map(req => {
+                  const requesterName = req.requester?.full_name || userNameMap[req.requested_by] || 'Unknown';
+                  const itemCount = Array.isArray(req.items) ? req.items.length : 0;
+                  const isExpanded = expandedMaterialRequests.has(req.id);
+                  const showCosts = canSeePrices;
+                  const totalAmount = showCosts && req.total_amount != null ? Number(req.total_amount) : null;
+                  return (
+                    <View key={req.id} style={[styles.materialRequestSheetCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#F8FAFC', borderColor }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View>
+                          <Text style={{ color: textPrimary, fontWeight: '700', fontSize: 15 }}>Order #{req.id.slice(0, 8).toUpperCase()}</Text>
+                          <Text style={{ color: textSecondary, fontSize: 12, marginTop: 2 }}>By {requesterName}</Text>
+                        </View>
+                        <View style={{ backgroundColor: req.status === 'delivered' ? 'rgba(16,185,129,0.1)' : req.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: req.status === 'delivered' ? '#10B981' : req.status === 'rejected' ? '#EF4444' : '#F59E0B' }}>
+                            {req.status === 'pending_quotation' ? 'PENDING QUOTATION' : req.status?.toUpperCase().replace('_', ' ')}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ color: textSecondary, fontSize: 12, marginTop: 8 }}>{formatDate(req.created_at)}</Text>
+                      {totalAmount != null && (
+                        <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 16, marginTop: 8 }}>₹{totalAmount.toLocaleString()}</Text>
+                      )}
+                      <MaterialRequestProgress status={req.status} isDark={isDark} />
+                      {itemCount > 0 && (
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)', paddingVertical: 10, borderRadius: 10, marginTop: 12 }}
+                          onPress={() => {
+                            const next = new Set(expandedMaterialRequests);
+                            if (next.has(req.id)) next.delete(req.id);
+                            else next.add(req.id);
+                            setExpandedMaterialRequests(next);
+                          }}
+                        >
+                          <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color={textSecondary} />
+                          <Text style={{ color: textSecondary, fontSize: 12, fontWeight: '700' }}>
+                            {isExpanded ? 'Hide Items' : `View ${itemCount} Item${itemCount !== 1 ? 's' : ''}`}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      {isExpanded && (
+                        <View style={{ marginTop: 12, gap: 10 }}>
+                          {req.items?.map((item: any, i: number) => {
+                            const unitPrice = showCosts ? (item.unit_price ?? item.estimated_cost) : null;
+                            const itemTotal = showCosts && item.total_price != null ? Number(item.total_price) : null;
+                            return (
+                              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#FFFFFF', padding: 10, borderRadius: 10 }}>
+                                <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                                  {item.photo_url ? (
+                                    <Image source={{ uri: item.photo_url }} style={{ width: 40, height: 40 }} />
+                                  ) : (
+                                    <Text style={{ fontSize: 16, fontWeight: '700', color: textSecondary }}>{(item.name || 'I')[0].toUpperCase()}</Text>
+                                  )}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: textPrimary, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>{item.name || item.item_name || 'Unknown Item'}</Text>
+                                  <Text style={{ color: textSecondary, fontSize: 12 }}>{item.quantity} {item.unit || 'units'}{unitPrice != null ? ` × ₹${Number(unitPrice).toLocaleString()}` : ''}</Text>
+                                </View>
+                                {itemTotal != null && (
+                                  <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 13 }}>₹{itemTotal.toLocaleString()}</Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+            <TouchableOpacity
+              style={{ backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 8 }}
+              onPress={() => {
+                setShowMaterialRequestsModal(false);
+                setShowMaterialModal(true);
+              }}
+            >
+              <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 15 }}>+ Add More Materials</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Assignee Picker Modal */}
       <Modal visible={showAssigneePicker} transparent animationType="fade" onRequestClose={() => setShowAssigneePicker(false)}>
         <TouchableOpacity
@@ -2150,6 +2614,71 @@ export default function TicketDetailScreen() {
 
     </View>
   );
+}
+
+function MaterialRequestProgress({ status, isDark }: { status?: string; isDark: boolean }) {
+  const steps = [
+    { key: 'requested', label: 'Requested' },
+    { key: 'quoted', label: 'Quoted' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'ordered', label: 'Ordered' },
+    { key: 'delivered', label: 'Delivered' },
+  ];
+  const statusIndex = (() => {
+    if (!status) return 0;
+    const s = status.toLowerCase();
+    if (s === 'pending_quotation') return 0;
+    if (s === 'quoted') return 1;
+    if (s === 'approved') return 2;
+    if (s === 'ordered') return 3;
+    if (s === 'delivered') return 4;
+    if (s === 'rejected' || s === 'cancelled') return -1;
+    return 0;
+  })();
+
+  const lineColor = isDark ? 'rgba(255,255,255,0.08)' : '#E2E8F0';
+  const activeColor = statusIndex === -1 ? '#EF4444' : '#3B82F6';
+  return (
+    <View style={{ marginTop: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        {steps.map((step, idx) => {
+          const isActive = statusIndex >= idx;
+          const isRejected = statusIndex === -1;
+          return (
+            <View key={step.key} style={{ alignItems: 'center', flex: 1 }}>
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: isRejected ? (idx === 0 ? '#EF4444' : lineColor) : isActive ? activeColor : lineColor,
+                  borderWidth: 2,
+                  borderColor: isRejected ? (idx === 0 ? '#EF4444' : lineColor) : isActive ? activeColor : lineColor,
+                }}
+              />
+              <Text
+                style={{
+                  fontSize: 9,
+                  marginTop: 4,
+                  color: isRejected ? (idx === 0 ? '#EF4444' : isDark ? 'rgba(255,255,255,0.3)' : '#94A3B8') : isActive ? textPrimaryFor(isDark) : isDark ? 'rgba(255,255,255,0.3)' : '#94A3B8',
+                  fontWeight: isActive ? '700' : '500',
+                }}
+              >
+                {step.label}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', position: 'absolute', top: 4, left: '10%', right: '10%', height: 2, backgroundColor: lineColor, zIndex: -1 }}>
+        <View style={{ height: 2, backgroundColor: statusIndex === -1 ? '#EF4444' : '#3B82F6', width: statusIndex === -1 ? '0%' : `${(statusIndex / (steps.length - 1)) * 100}%` }} />
+      </View>
+    </View>
+  );
+}
+
+function textPrimaryFor(isDark: boolean) {
+  return isDark ? '#FFFFFF' : '#0F172A';
 }
 
 const { width } = Dimensions.get('window');
@@ -3081,6 +3610,60 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#0F1521',
+  },
+  cartBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  materialRequestsSheet: {
+    width: '100%',
+    maxHeight: '85%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  sheetHandleRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(148,163,184,0.4)',
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  materialRequestSheetCard: {
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
   },
   bottomNav: {
     flexDirection: 'row',

@@ -98,12 +98,8 @@ function CacheRestorationWaiter({ onRestored }: { onRestored: () => void }) {
     };
   }, [attempts, onRestored]);
 
-  // Render skeleton instead of nothing to avoid blank screen
-  return (
-    <View style={{ flex: 1, backgroundColor: '#0B0B0F' }}>
-      <SkeletonLoader />
-    </View>
-  );
+  // Render null so the Native Splash Screen stays visible until the app is fully ready.
+  return null;
 }
 
 // ────────────────────────────────────────────────────────────────

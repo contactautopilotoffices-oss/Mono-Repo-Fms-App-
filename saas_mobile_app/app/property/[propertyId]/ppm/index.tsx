@@ -928,24 +928,14 @@ export default function PPMScreen() {
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────────
-  const bgColor = theme === "light" ? "#FBF8F4" : colors.background;
-
   if (isLoading && schedules.length === 0 && contracts.length === 0) {
     return (
       <View
         style={[
           styles.container,
-          { paddingTop: insets.top, paddingBottom: insets.bottom },
+          { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
       >
-        <LinearGradient
-          colors={
-            isDark
-              ? ["#0F1521", "#121824", "#090d16"]
-              : ["#F5F0E8", "#EAE0D5", "#DFD3C3"]
-          }
-          style={StyleSheet.absoluteFillObject}
-        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
@@ -960,18 +950,10 @@ export default function PPMScreen() {
     <View
       style={[
         styles.container,
-        { paddingBottom: Math.max(insets.bottom, 12) + 90 },
+        { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 12) + 90 },
       ]}
     >
       <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient
-        colors={
-          isDark
-            ? ["#0F1521", "#121824", "#090d16"]
-            : ["#F5F0E8", "#EAE0D5", "#DFD3C3"]
-        }
-        style={StyleSheet.absoluteFillObject}
-      />
 
       {/* Header */}
       <SafeBlurView

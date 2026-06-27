@@ -6,6 +6,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         properties: ['view', 'create', 'update', 'delete'],
         tickets: ['view', 'create', 'update', 'approve', 'assign', 'delete'],
         assets: ['view', 'create', 'update', 'delete'],
+        water: ['view', 'create', 'update', 'delete'],
         procurement: ['view', 'create', 'update', 'approve', 'delete'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -19,6 +20,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         properties: ['view', 'create', 'update', 'delete'],
         tickets: ['view', 'create', 'update', 'approve', 'assign', 'delete'],
         assets: ['view', 'create', 'update', 'delete'],
+        water: ['view', 'create', 'update', 'delete'],
         procurement: ['view', 'create', 'update', 'approve', 'delete'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -32,6 +34,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         properties: ['view', 'update'],
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
+        water: ['view', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -44,6 +47,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         properties: ['view', 'update'],
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
+        water: ['view', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -56,6 +60,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         properties: ['view', 'update'],
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
+        water: ['view', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -66,6 +71,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
     manager_executive: {
         tickets: ['view', 'approve'],
         assets: ['view'],
+        water: ['view'],
         dashboards: ['view'],
         reports: ['view'],
         sop: ['view']
@@ -86,11 +92,13 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
     },
     mst: {
         tickets: ['view', 'update'],
+        water: ['view'],
         dashboards: ['view'],
         sop: ['view', 'update']
     },
     maintenance_staff: {
         tickets: ['view', 'update'],
+        water: ['view'],
         dashboards: ['view'],
         sop: ['view', 'update']
     },
@@ -116,6 +124,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
     },
     bms_operator: {
         assets: ['view', 'update'],
+        water: ['view', 'update'],
         sop: ['view', 'update']
     },
     tenant_user: {
@@ -139,6 +148,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
     },
     staff: {
         tickets: ['view', 'create', 'update'],
+        water: ['view'],
         dashboards: ['view'],
         sop: ['view', 'update']
     },
@@ -165,6 +175,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         security: ['view', 'create', 'update', 'delete'],
         tickets: ['view', 'update'],
         visitors: ['view', 'create', 'update', 'delete'],
+        water: ['view'],
         dashboards: ['view']
     }
 };

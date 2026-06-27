@@ -5,12 +5,12 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   ScrollView,
   StatusBar,
   Modal,
 } from 'react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
@@ -169,7 +169,9 @@ export default function VendorRevenueScreen() {
   if (isLoading && vendors.length === 0) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 100 }} />
+        <View style={{ flex: 1, paddingHorizontal: 16 }}>
+          <SkeletonLoader type="list" count={5} />
+        </View>
       </View>
     );
   }
@@ -248,7 +250,9 @@ export default function VendorRevenueScreen() {
             </View>
 
             {isVendorLoading ? (
-              <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+              <View style={{ padding: 16 }}>
+                <SkeletonLoader type="list" count={3} />
+              </View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalScroll}>
                 {currentCycle ? (

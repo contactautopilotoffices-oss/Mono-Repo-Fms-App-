@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { supabaseAdmin } from '../utils/supabase.js';
+import { notifyVisitorCheckin, notifyVisitorCheckout } from '../services/notificationService.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -201,7 +202,30 @@ export const vmsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           return { error: 'insert_failed', message: error.message };
         }
 
-        return { data, error: null };
+        const visitor = data as VisitorLog;
+
+        // Send WhatsApp notification to host if they have a user account
+        if (body.whom_to_meet_uid) {
+          const checkInTime = new Date(visitor.checkin_time).toLocaleString('en-IN', {
+            day: '2-digit', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit',
+          });
+
+          await notifyVisitorCheckin({
+            visitorId: visitor.id,
+            visitorName: visitor.name,
+            checkInTime,
+            purpose: visitor.purpose || undefined,
+            hostUserId: body.whom_to_meet_uid,
+            propertyId: visitor.property_id,
+          }).catch(err => {
+            fastify.log.error(`[VMS] WhatsApp checkin notification failed: ${err.message}`);
+          });
+
+          fastify.log.info(`[VMS] Visitor checkin notification sent for ${visitor.name}`);
+        }
+
+        return { data: visitor, error: null };
       } catch (err) {
         if (err instanceof z.ZodError) {
           reply.status(400);
@@ -224,7 +248,7 @@ export const vmsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         // Verify visitor exists and is checked_in
         const { data: existing } = await supabaseAdmin
           .from('visitor_logs')
-          .select('id, status')
+          .select('*')
           .eq('id', body.visitor_id)
           .maybeSingle();
 
@@ -238,9 +262,10 @@ export const vmsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           return { error: 'already_checked_out', message: 'Visitor is already checked out' };
         }
 
+        const now = new Date();
         const { data, error } = await supabaseAdmin
           .from('visitor_logs')
-          .update({ status: 'checked_out', checkout_time: new Date().toISOString() })
+          .update({ status: 'checked_out', checkout_time: now.toISOString() })
           .eq('id', body.visitor_id)
           .select()
           .single();
@@ -251,7 +276,32 @@ export const vmsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           return { error: 'update_failed', message: error.message };
         }
 
-        return { data, error: null };
+        const visitor = data as VisitorLog;
+
+        // Calculate visit duration
+        const checkin = new Date(existing.checkin_time);
+        const durationMs = now.getTime() - checkin.getTime();
+        const hours = Math.floor(durationMs / (1000 * 60 * 60));
+        const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+        const duration = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+        // Send WhatsApp notification to property admins
+        await notifyVisitorCheckout({
+          visitorId: visitor.id,
+          visitorName: visitor.name,
+          checkOutTime: now.toLocaleString('en-IN', {
+            day: '2-digit', month: 'short', year: 'numeric',
+            hour: '2-digit', minute: '2-digit',
+          }),
+          visitDuration: duration,
+          propertyId: visitor.property_id,
+        }).catch(err => {
+          fastify.log.error(`[VMS] WhatsApp checkout notification failed: ${err.message}`);
+        });
+
+        fastify.log.info(`[VMS] Visitor checkout notification sent for ${visitor.name}`);
+
+        return { data: visitor, error: null };
       } catch (err) {
         if (err instanceof z.ZodError) {
           reply.status(400);

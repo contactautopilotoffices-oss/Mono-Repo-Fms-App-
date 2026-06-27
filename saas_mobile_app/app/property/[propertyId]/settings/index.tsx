@@ -14,6 +14,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
@@ -389,8 +390,8 @@ export default function SettingsScreen() {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <LinearGradient colors={isDark ? ['#0B1120', '#0f172a', '#1e1b4b'] : ['#eef2f6', '#f8fafc']} style={StyleSheet.absoluteFillObject} />
-        <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#708F96" />
+        <View style={{ flex: 1, paddingHorizontal: 16, marginTop: 24 }}>
+          <SkeletonLoader type="list" count={5} />
         </View>
       </View>
     );

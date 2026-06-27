@@ -1,58 +1,65 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, ViewStyle } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet, ViewStyle, DimensionValue, LayoutChangeEvent } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+  interpolate,
+} from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface SkeletonProps {
-  width?: number | string;
-  height?: number;
+  width?: DimensionValue;
+  height?: DimensionValue;
   borderRadius?: number;
   style?: ViewStyle;
+  isDark?: boolean;
 }
 
-export default function Skeleton({
-  width = '100%',
-  height = 20,
-  borderRadius = 8,
-  style,
-}: SkeletonProps) {
-  const opacity = useRef(new Animated.Value(0.3)).current;
+export default function Skeleton({ width = '100%', height = 20, borderRadius = 8, style, isDark = true }: SkeletonProps) {
+  const animatedValue = useSharedValue(0);
+  const [layoutWidth, setLayoutWidth] = React.useState<number>(0);
 
   useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0.3,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
+    animatedValue.value = withRepeat(
+      withTiming(1, { duration: 1200, easing: Easing.linear }),
+      -1,
+      false
     );
-    animation.start();
-    return () => animation.stop();
   }, []);
 
+  const animatedStyle = useAnimatedStyle(() => {
+    const translateX = interpolate(
+      animatedValue.value,
+      [0, 1],
+      [-layoutWidth || -300, layoutWidth || 300]
+    );
+
+    return {
+      transform: [{ translateX }],
+    };
+  });
+
+  const baseColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+  const highlightColor = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+
   return (
-    <Animated.View
-      style={[
-        styles.skeleton,
-        {
-          width: width as any,
-          height,
-          borderRadius,
-          opacity,
-        },
-        style,
-      ]}
-    />
+    <View 
+      style={[{ width, height, borderRadius, backgroundColor: baseColor, overflow: 'hidden' }, style]}
+      onLayout={(e: LayoutChangeEvent) => setLayoutWidth(e.nativeEvent.layout.width)}
+    >
+      {layoutWidth > 0 && (
+        <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]}>
+          <LinearGradient
+            colors={['transparent', highlightColor, 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFill}
+          />
+        </Animated.View>
+      )}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  skeleton: {
-    backgroundColor: '#E3E3E3',
-  },
-});

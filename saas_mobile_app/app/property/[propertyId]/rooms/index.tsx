@@ -4,12 +4,13 @@ import {
   Text,
   TouchableOpacity,
   FlatList,
-  ActivityIndicator,
+  Platform,
   Alert,
   StyleSheet,
   Image,
   ScrollView,
 } from 'react-native';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -333,9 +334,7 @@ export default function RoomsScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={theme === 'dark' ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']} style={StyleSheet.absoluteFillObject} />
-
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <SafeBlurView intensity={80} tint="dark" style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerTop}>
@@ -391,9 +390,8 @@ export default function RoomsScreen() {
 
       {/* Content */}
       {isLoading && activeTab !== 'rooms' ? (
-        <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color="#708F96" />
-          <Text style={styles.loadingText}>Loading...</Text>
+        <View style={{ flex: 1, padding: 16 }}>
+          <SkeletonLoader type="list" count={4} />
         </View>
       ) : activeTab === 'rooms' ? (
         <View style={{ flex: 1, paddingTop: 8 }}>

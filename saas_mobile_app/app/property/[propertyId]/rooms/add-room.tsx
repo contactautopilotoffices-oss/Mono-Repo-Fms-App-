@@ -51,6 +51,7 @@ export default function AddRoomScreen() {
   const { propertyId, roomId } = useGlobalSearchParams<{ propertyId: string; roomId?: string }>();
   const router = useRouter();
   const { theme } = useTheme();
+  const colors = Colors[theme];
   const insets = useSafeAreaInsets();
   const isEdit = Boolean(roomId);
 
@@ -207,23 +208,14 @@ export default function AddRoomScreen() {
 
   if (isFetching) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <LinearGradient
-          colors={theme === 'dark' ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']}
-          style={StyleSheet.absoluteFillObject}
-        />
+      <View style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator color="#708F96" size="large" />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={theme === 'dark' ? ['#0F1521', '#121824', '#090d16'] : ['#F5F0E8', '#EAE0D5', '#DFD3C3']}
-        style={StyleSheet.absoluteFillObject}
-      />
-
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <SafeBlurView intensity={80} tint="dark" style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerTop}>
