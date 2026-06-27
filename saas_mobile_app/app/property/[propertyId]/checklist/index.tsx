@@ -35,7 +35,8 @@ import SafeBlurView from "@/components/ui/SafeBlurView";
 
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import { checklistService } from "@/services/checklistService";
-import { isDue, getCompletionSlot } from "@/utils/checklistTime";
+import { isDue, getCompletionSlot, computeSlotTime, getHourlyInterval, isWithinTimeWindow, fmt12h } from "@/utils/checklistTime";
+import { processAndStampImage } from "@/utils/mediaProcessor";
 
 import {
   CheckSquare,
@@ -197,8 +198,11 @@ function getFrequencyLabel(freq: Frequency | undefined | null): string {
 }
 
 function parseHourlyInterval(freq: string): number | null {
+  if (!freq || typeof freq !== 'string') return null;
   const match = freq.match(/^every_(\d+)_hours?$/);
-  return match ? parseInt(match[1]) : null;
+  if (!match) return null;
+  const val = parseInt(match[1], 10);
+  return isNaN(val) ? null : val;
 }
 
 function isHourlyFreq(freq: Frequency | undefined | null): boolean {
@@ -383,8 +387,11 @@ function getSlotWindow(
   frequency: string | undefined | null,
 ): string | null {
   const intervalH = parseHourlyInterval(frequency || "");
-  if (!intervalH || !slotTime) return null;
-  const [sH, sM] = slotTime.slice(0, 5).split(":").map(Number);
+  if (!intervalH || !slotTime || typeof slotTime !== 'string') return null;
+  const timeParts = slotTime.slice(0, 5).split(":").map(Number);
+  if (timeParts.some(isNaN)) return null;
+  const [sH, sM] = timeParts;
+  if (isNaN(sH) || isNaN(sM)) return null;
   const endH = (sH + intervalH) % 24;
   const endSlot = `${String(endH).padStart(2, "0")}:${String(sM).padStart(2, "0")}:00`;
   return `${fmt12h(slotTime)} – ${fmt12h(endSlot)}`;
@@ -722,6 +729,8 @@ export default function ChecklistScreen() {
   const [tplFrequency, setTplFrequency] = useState<Frequency>("daily");
   const [tplStartTime, setTplStartTime] = useState("");
   const [tplEndTime, setTplEndTime] = useState("");
+  const [showStartTimePicker, setShowStartTimePicker] = useState(false);
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [tplAssignedTo, setTplAssignedTo] = useState<string[]>([]);
   const [tplItems, setTplItems] = useState<
     {
@@ -747,6 +756,23 @@ export default function ChecklistScreen() {
   >({});
   const [showLoggersMenu] = useState(false);
   const realtimeChannel = useRef<any>(null);
+
+  // ── Derived time picker values ──────────────────────────────────────────────
+  const startTimeDate = useMemo(() => {
+    if (!tplStartTime) return new Date();
+    const [h, m] = tplStartTime.split(":").map(Number);
+    const d = new Date();
+    d.setHours(h || 0, m || 0, 0, 0);
+    return d;
+  }, [tplStartTime]);
+
+  const endTimeDate = useMemo(() => {
+    if (!tplEndTime) return new Date();
+    const [h, m] = tplEndTime.split(":").map(Number);
+    const d = new Date();
+    d.setHours(h || 23, m || 59, 0, 0);
+    return d;
+  }, [tplEndTime]);
 
   // ── Permissions ──────────────────────────────────────────────────────────────
   const isAdmin = useMemo(() => {
@@ -964,6 +990,16 @@ export default function ChecklistScreen() {
       allCompletedCompletions,
     };
   }
+
+  const historyCounts = useMemo(() => {
+    const { dueTemplates, missedOccurrences, allCompletedCompletions } = getHistoryGroups();
+    return {
+      all: dueTemplates.length + missedOccurrences.length + allCompletedCompletions.length,
+      due: dueTemplates.length,
+      missed: missedOccurrences.length,
+      completed: allCompletedCompletions.length,
+    };
+  }, [filteredCompletions, liveNow, filteredTemplates, templates]);
 
   const filteredHistoryList = useMemo((): HistoryItem[] => {
     const {
@@ -1322,14 +1358,27 @@ export default function ChecklistScreen() {
     }));
 
     try {
-      const ext = type === "photo" ? "jpg" : "mp4";
-      const fileName = `${item.id}-${Date.now()}.${ext}`;
+      const isPhoto = type === "photo";
+      let uploadUri = uri;
+      let finalType = isPhoto ? "image/jpeg" : "video/mp4";
+      const ext = isPhoto ? "jpg" : "mp4";
+      let fileName = `${item.id}-${Date.now()}.${ext}`;
+
+      if (isPhoto) {
+        try {
+          uploadUri = await processAndStampImage(uri);
+          finalType = "image/webp";
+          fileName = fileName.replace(".jpg", ".webp");
+        } catch (e) {
+          console.error("Failed to stamp image:", e);
+        }
+      }
 
       const formData = new FormData();
       formData.append("file", {
-        uri,
+        uri: uploadUri,
         name: fileName,
-        type: type === "photo" ? "image/jpeg" : "video/mp4",
+        type: finalType,
       } as any);
       formData.append("propertyId", propertyId as string);
       formData.append("completionId", activeCompletion.id);
@@ -1449,15 +1498,37 @@ export default function ChecklistScreen() {
     try {
       const now = new Date();
       const nowMins = now.getHours() * 60 + now.getMinutes();
-      const isLate = !!(
-        activeTemplate.start_time &&
-        activeTemplate.end_time &&
-        !isWithinTimeWindow(
+      let isLate = false;
+      if (activeTemplate.start_time && activeTemplate.end_time) {
+        isLate = !isWithinTimeWindow(
           nowMins,
           activeTemplate.start_time,
           activeTemplate.end_time,
-        )
-      );
+        );
+      }
+      if (!isLate) {
+        const hourlyMatch = activeTemplate.frequency.match(/^every_(\d+)_hours?$/);
+        if (hourlyMatch) {
+          const intervalH = parseInt(hourlyMatch[1]);
+          const slotStart = activeCompletion.slot_time || activeCompletion.created_at;
+          if (slotStart) {
+            const d = activeCompletion.slot_time
+              ? new Date(
+                  now.getFullYear(),
+                  now.getMonth(),
+                  now.getDate(),
+                  parseInt(activeCompletion.slot_time.split(":")[0]),
+                  parseInt(activeCompletion.slot_time.split(":")[1]),
+                  0,
+                  0,
+                )
+              : new Date(activeCompletion.created_at);
+            const slotEnd = new Date(d.getTime() + intervalH * 3_600_000);
+            if (now.getTime() > slotEnd.getTime()) isLate = true;
+          }
+        }
+      }
+
       await checklistService.updateCompletion(activeCompletion!.id, {
         status: "completed",
         completed_at: now.toISOString(),
@@ -1777,18 +1848,19 @@ export default function ChecklistScreen() {
               {
                 backgroundColor: colors.primary,
                 paddingTop: Math.max(insets.top, 16),
+                borderBottomWidth: 0,
               },
             ]}
           >
-            <View style={runnerStyles.headerRow}>
+            <View style={[runnerStyles.headerRow, { justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 16 }]}>
               <TouchableOpacity
-                style={runnerStyles.backBtn}
+                style={{ padding: 4 }}
                 onPress={handleCancelRunner}
               >
                 <ArrowLeft size={20} color="#FFFFFF" />
               </TouchableOpacity>
-              <View style={runnerStyles.headerTitle}>
-                <Text style={runnerStyles.headerTitleText} numberOfLines={1}>
+              <View style={{ flex: 1, alignItems: 'center', marginHorizontal: 16 }}>
+                <Text style={{ fontSize: 18, fontFamily: "Urbanist-Bold", color: "#FFFFFF" }} numberOfLines={1}>
                   {activeTemplate.title}
                 </Text>
                 {activeCompletion?.completion_date !==
@@ -1797,7 +1869,7 @@ export default function ChecklistScreen() {
                     style={{
                       fontSize: 10,
                       color: "#FBBF24",
-                      fontWeight: "bold",
+                      fontFamily: "Urbanist-Bold",
                     }}
                   >
                     BACKFILLING FOR {activeCompletion?.completion_date}{" "}
@@ -1807,33 +1879,35 @@ export default function ChecklistScreen() {
                   </Text>
                 )}
                 {activeTemplate.description && (
-                  <Text style={runnerStyles.headerSubtitle} numberOfLines={1}>
+                  <Text style={{ fontSize: 12, fontFamily: "Urbanist-Medium", color: "rgba(255,255,255,0.7)" }} numberOfLines={1}>
                     {activeTemplate.description}
                   </Text>
                 )}
               </View>
               {isAdmin &&
                 (activeCompletion?.status === "completed" ||
-                  runnerWindowClosed) && (
+                  runnerWindowClosed) ? (
                   <TouchableOpacity
-                    style={runnerStyles.adminBtn}
+                    style={{ padding: 4 }}
                     onPress={() => setAdminUnlocked((v) => !v)}
                   >
                     <Lock
-                      size={16}
+                      size={18}
                       color={
-                        adminUnlocked ? "#FBBF24" : "rgba(255,255,255,0.5)"
+                        adminUnlocked ? "#FBBF24" : "rgba(255,255,255,0.7)"
                       }
                     />
                   </TouchableOpacity>
+                ) : (
+                  <View style={{ width: 28 }} /> // Placeholder for balance
                 )}
             </View>
 
             {/* Meta bar */}
-            <View style={runnerStyles.metaBar}>
-              <View style={runnerStyles.metaItem}>
-                <Calendar size={11} color="rgba(255,255,255,0.7)" />
-                <Text style={runnerStyles.metaText}>
+            <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Calendar size={14} color="rgba(255,255,255,0.8)" />
+                <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: "rgba(255,255,255,0.8)", textTransform: "uppercase" }}>
                   {activeCompletion?.completion_date
                     ? new Date(
                         activeCompletion.completion_date,
@@ -1849,9 +1923,9 @@ export default function ChecklistScreen() {
                 </Text>
               </View>
               {(activeTemplate.start_time || activeTemplate.end_time) && (
-                <View style={runnerStyles.metaItem}>
-                  <Clock size={11} color="rgba(255,255,255,0.7)" />
-                  <Text style={runnerStyles.metaText}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Clock size={14} color="rgba(255,255,255,0.8)" />
+                  <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: "rgba(255,255,255,0.8)", textTransform: "uppercase" }}>
                     {parseHourlyInterval(activeTemplate.frequency) 
                       ? getCompletionSlot(
                           activeCompletion?.created_at || new Date().toISOString(), 
@@ -1864,45 +1938,26 @@ export default function ChecklistScreen() {
                   </Text>
                 </View>
               )}
-              <View style={runnerStyles.metaItem}>
-                <Repeat size={11} color="rgba(255,255,255,0.7)" />
-                <Text style={runnerStyles.metaText}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
+                <Repeat size={14} color="rgba(255,255,255,0.8)" />
+                <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: "rgba(255,255,255,0.8)", textTransform: "uppercase" }}>
                   {activeTemplate.frequency}
                 </Text>
               </View>
             </View>
 
-            {/* Progress Bar */}
-            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: "600" }}>Progress</Text>
-                <Text style={{ fontSize: 11, color: "white", fontWeight: "bold" }}>
-                  {Math.round(progress * 100)}%
-                </Text>
-              </View>
-              <View style={{ height: 6, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 3, overflow: "hidden" }}>
-                <View style={{ width: `${progress * 100}%`, height: "100%", backgroundColor: "#4ADE80", borderRadius: 3 }} />
-              </View>
-            </View>
-
             {/* Progress */}
-            <View style={runnerStyles.progressSection}>
-              <View style={runnerStyles.progressHeader}>
-                <Text style={runnerStyles.progressLabel}>
-                  COMPLETION STATUS
+            <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+                <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>
+                  COMPLETION
                 </Text>
-                <Text style={runnerStyles.progressCount}>
-                  {Math.round(progress * 100)}% ({runnerCheckedCount}/
-                  {totalItems})
+                <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: "rgba(255,255,255,0.8)" }}>
+                  {Math.round(progress * 100)}% — {runnerCheckedCount}/{totalItems} PTS
                 </Text>
               </View>
-              <View style={runnerStyles.progressTrack}>
-                <View
-                  style={[
-                    runnerStyles.progressFill,
-                    { width: `${progress * 100}%` },
-                  ]}
-                />
+              <View style={{ height: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 2, overflow: "hidden" }}>
+                <View style={{ width: `${progress * 100}%`, height: "100%", backgroundColor: "#4ADE80", borderRadius: 2 }} />
               </View>
             </View>
           </View>
@@ -1982,39 +2037,37 @@ export default function ChecklistScreen() {
             estimatedItemSize={180}
             ListFooterComponent={
               <TouchableOpacity
-                style={[
-                  runnerStyles.completeBtn,
-                  {
-                    backgroundColor: colors.success,
-                    opacity:
-                      runnerIsReadOnly || runnerCheckedCount === 0 ? 0.5 : 1,
-                  },
-                ]}
+                style={{
+                  backgroundColor: "#64748B",
+                  borderRadius: 24,
+                  opacity: runnerIsReadOnly || runnerCheckedCount === 0 ? 0.5 : 1,
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  paddingVertical: 14,
+                  marginTop: 16,
+                  marginBottom: 32,
+                }}
                 onPress={handleCompleteChecklist}
-                disabled={
-                  runnerIsReadOnly || runnerCheckedCount === 0 || isSaving
-                }
+                disabled={runnerIsReadOnly || runnerCheckedCount === 0 || isSaving}
               >
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <>
-                    <CheckCircle2 size={18} color="#FFFFFF" />
-                    <Text style={runnerStyles.completeBtnText}>
-                      {runnerIsReadOnly
-                        ? "Read Only"
-                        : `${runnerCheckedCount}/${totalItems} Done — Submit`}
+                    <Text style={{ fontSize: 12, fontFamily: "Urbanist-Bold", color: "#FFFFFF", textTransform: 'uppercase', letterSpacing: 1, marginRight: 8 }}>
+                      {runnerIsReadOnly ? "READ ONLY" : `${runnerCheckedCount}/${totalItems} DONE`}
                     </Text>
+                    {!runnerIsReadOnly && <ChevronRight size={14} color="#FFFFFF" strokeWidth={3} />}
                   </>
                 )}
               </TouchableOpacity>
             }
             renderItem={({ item: section }) => (
-              <View style={{ marginBottom: 20 }}>
+              <View style={{ marginBottom: 16 }}>
                 {section !== "General" && (
-                  <View style={runnerStyles.sectionHeader}>
-                    <View style={runnerStyles.sectionAccent} />
-                    <Text style={runnerStyles.sectionTitle}>{section}</Text>
+                  <View style={{ backgroundColor: colors.surface, paddingVertical: 12, paddingHorizontal: 16, borderLeftWidth: 4, borderLeftColor: "#64748B", marginBottom: 16, marginTop: 4 }}>
+                    <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: "#64748B", textTransform: 'uppercase', letterSpacing: 1 }}>{section}</Text>
                   </View>
                 )}
                 {sections[section].map((checkItem, index) => {
@@ -2025,17 +2078,17 @@ export default function ChecklistScreen() {
                   return (
                     <View
                       key={checkItem.id}
-                      style={[
-                        runnerStyles.itemCard,
-                        {
-                          backgroundColor: colors.card,
-                          borderColor: colors.border,
-                        },
-                      ]}
+                      style={{
+                        backgroundColor: "transparent",
+                        borderBottomWidth: 1,
+                        borderBottomColor: colors.border,
+                        paddingBottom: 24,
+                        marginBottom: 16,
+                      }}
                     >
                       {/* Item row */}
                       <TouchableOpacity
-                        style={runnerStyles.itemRow}
+                        style={{ flexDirection: 'row', alignItems: 'flex-start' }}
                         onPress={() =>
                           itemType === "checkbox" || itemType === "yes_no"
                             ? toggleItem(checkItem)
@@ -2046,35 +2099,40 @@ export default function ChecklistScreen() {
                       >
                         {itemType === "checkbox" ? (
                           <View
-                            style={[
-                              runnerStyles.checkCircle,
-                              {
-                                backgroundColor: state.checked
-                                  ? colors.success + "18"
-                                  : colors.surface,
-                                borderColor: state.checked
-                                  ? colors.success
-                                  : colors.border,
-                              },
-                            ]}
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              borderWidth: state.checked ? 0 : 1,
+                              borderColor: colors.border,
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              marginTop: 2,
+                            }}
                           >
                             {state.checked ? (
-                              <CheckCircle2 size={22} color={colors.success} />
+                              <CheckCircle2 size={24} color={colors.success} strokeWidth={2.5} />
                             ) : (
-                              <Circle size={22} color={colors.textTertiary} />
+                              <Circle size={24} color={colors.border} strokeWidth={1.5} />
                             )}
                           </View>
                         ) : (
                           <View
-                            style={[
-                              runnerStyles.stepNumber,
-                              { borderColor: colors.border },
-                            ]}
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: 12,
+                              borderWidth: 1,
+                              borderColor: colors.border,
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              marginTop: 2,
+                            }}
                           >
                             <Text
                               style={{
-                                fontSize: 9,
-                                fontWeight: "900",
+                                fontSize: 10,
+                                fontFamily: "Urbanist-Bold",
                                 color: colors.textTertiary,
                               }}
                             >
@@ -2082,82 +2140,62 @@ export default function ChecklistScreen() {
                             </Text>
                           </View>
                         )}
-                        <View style={runnerStyles.itemContent}>
+                        <View style={{ marginLeft: 12, flex: 1 }}>
                           <Text
-                            style={[
-                              runnerStyles.itemTitle,
-                              {
-                                color: state.checked
-                                  ? colors.primary
-                                  : colors.text,
-                              },
-                            ]}
+                            style={{
+                              fontSize: 16,
+                              fontFamily: "Urbanist-Bold",
+                              color: state.checked ? colors.textSecondary : colors.text,
+                              lineHeight: 22,
+                              marginTop: 2,
+                            }}
                           >
                             {checkItem.title}
                             {isOptional && (
-                              <Text
-                                style={{
-                                  color: colors.textTertiary,
-                                  fontSize: 10,
-                                }}
-                              >
+                              <Text style={{ color: colors.textTertiary, fontSize: 12, fontFamily: "Urbanist-Regular" }}>
                                 {" "}
                                 (Optional)
                               </Text>
                             )}
                           </Text>
-                          {/* Checked by */}
-                          {state.checked && (
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "700",
-                                color: colors.textTertiary,
-                                marginTop: 2,
-                              }}
-                            >
-                              By {user?.full_name || "Staff"}
-                            </Text>
-                          )}
-                          {/* Slot badge */}
-                          {(checkItem.start_time || checkItem.end_time) && (
-                            <View
-                              style={[
-                                runnerStyles.slotBadge,
-                                { backgroundColor: colors.primary + "15" },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  runnerStyles.slotBadgeText,
-                                  { color: colors.primary },
-                                ]}
-                              >
-                                {fmt12h(checkItem.start_time)} –{" "}
-                                {fmt12h(checkItem.end_time)}
-                              </Text>
-                            </View>
-                          )}
                         </View>
                       </TouchableOpacity>
 
+                      {/* Subtitles: MEDIA DOCUMENTATION etc */}
+                      <View style={{ marginTop: 12 }}>
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontFamily: "Urbanist-Bold",
+                            color: "#64748B",
+                            textTransform: "uppercase",
+                            letterSpacing: 1,
+                          }}
+                        >
+                          MEDIA DOCUMENTATION
+                        </Text>
+                        {checkItem.description ? (
+                          <Text style={{ fontSize: 13, color: colors.textTertiary, marginTop: 4, fontFamily: "Urbanist-Medium" }}>
+                            {checkItem.description}
+                          </Text>
+                        ) : null}
+                      </View>
+
                       {/* Value input */}
                       {(itemType === "text" || itemType === "number") && (
-                        <View
-                          style={[
-                            runnerStyles.valueRow,
-                            { borderTopColor: colors.border },
-                          ]}
-                        >
+                        <View style={{ marginTop: 12 }}>
                           <TextInput
-                            style={[
-                              runnerStyles.valueInput,
-                              {
-                                backgroundColor: colors.surface,
-                                borderColor: colors.border,
-                                color: colors.text,
-                              },
-                            ]}
+                            style={{
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 10,
+                              color: colors.text,
+                              fontFamily: "Urbanist-Medium",
+                              fontSize: 14,
+                            }}
                             placeholder={
                               itemType === "number"
                                 ? "Enter number..."
@@ -2176,33 +2214,30 @@ export default function ChecklistScreen() {
 
                       {/* Yes/No */}
                       {itemType === "yes_no" && (
-                        <View
-                          style={[
-                            runnerStyles.yesNoRow,
-                            { borderTopColor: colors.border },
-                          ]}
-                        >
+                        <View style={{ marginTop: 12, flexDirection: 'row', gap: 12 }}>
                           {(["yes", "no"] as const).map((opt) => {
                             const isSelected = state.value === opt;
                             const optLabel = opt === "yes" ? "Yes" : "No";
                             return (
                               <TouchableOpacity
                                 key={opt}
-                                style={[
-                                  runnerStyles.yesNoBtn,
-                                  {
-                                    backgroundColor: isSelected
-                                      ? opt === "yes"
-                                        ? colors.success + "18"
-                                        : colors.error + "18"
-                                      : colors.surface,
-                                    borderColor: isSelected
-                                      ? opt === "yes"
-                                        ? colors.success
-                                        : colors.error
-                                      : colors.border,
-                                  },
-                                ]}
+                                style={{
+                                  flex: 1,
+                                  paddingVertical: 10,
+                                  alignItems: 'center',
+                                  borderRadius: 8,
+                                  borderWidth: 1,
+                                  backgroundColor: isSelected
+                                    ? opt === "yes"
+                                      ? colors.success + "18"
+                                      : colors.error + "18"
+                                    : colors.surface,
+                                  borderColor: isSelected
+                                    ? opt === "yes"
+                                      ? colors.success
+                                      : colors.error
+                                    : colors.border,
+                                }}
                                 onPress={() => {
                                   if (runnerIsReadOnly) return;
                                   const newValue = opt;
@@ -2216,8 +2251,7 @@ export default function ChecklistScreen() {
                                   }));
                                   const compItem =
                                     activeCompletion?.items?.find(
-                                      (ci) =>
-                                        ci.checklist_item_id === checkItem.id,
+                                      (ci) => ci.checklist_item_id === checkItem.id,
                                     );
                                   if (compItem) {
                                     checklistService.updateCompletion(activeCompletion!.id, {
@@ -2234,16 +2268,15 @@ export default function ChecklistScreen() {
                                 disabled={runnerIsReadOnly}
                               >
                                 <Text
-                                  style={[
-                                    runnerStyles.yesNoBtnText,
-                                    {
-                                      color: isSelected
-                                        ? opt === "yes"
-                                          ? colors.success
-                                          : colors.error
-                                        : colors.textSecondary,
-                                    },
-                                  ]}
+                                  style={{
+                                    fontSize: 12,
+                                    fontFamily: "Urbanist-Bold",
+                                    color: isSelected
+                                      ? opt === "yes"
+                                        ? colors.success
+                                        : colors.error
+                                      : colors.textSecondary,
+                                  }}
                                 >
                                   {optLabel.toUpperCase()}
                                 </Text>
@@ -2255,183 +2288,56 @@ export default function ChecklistScreen() {
 
                       {/* Comment */}
                       {checkItem.requires_comment && (
-                        <View
-                          style={[
-                            runnerStyles.commentRow,
-                            { borderTopColor: colors.border },
-                          ]}
-                        >
-                          <MessageSquare
-                            size={13}
-                            color={colors.textTertiary}
-                          />
+                        <View style={{ marginTop: 12 }}>
                           <TextInput
-                            style={[
-                              runnerStyles.commentInput,
-                              { color: colors.text },
-                            ]}
+                            style={{
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              borderRadius: 8,
+                              paddingHorizontal: 12,
+                              paddingVertical: 10,
+                              color: colors.text,
+                              fontFamily: "Urbanist-Medium",
+                              fontSize: 14,
+                              minHeight: 60,
+                            }}
                             placeholder="Add observation..."
                             placeholderTextColor={colors.textTertiary}
                             value={state.comment || ""}
-                            onChangeText={(v) =>
-                              handleItemComment(checkItem, v)
-                            }
+                            onChangeText={(v) => handleItemComment(checkItem, v)}
                             editable={!runnerIsReadOnly}
                             multiline
                           />
                         </View>
                       )}
 
-                      {/* Visual Proof */}
-                      <View
-                        style={{
-                          marginTop: 12,
-                          paddingTop: 12,
-                          borderTopWidth: 1,
-                          borderTopColor: colors.border,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 9,
-                            fontWeight: "900",
-                            color: colors.textTertiary,
-                            textTransform: "uppercase",
-                            letterSpacing: 1,
-                            marginBottom: 8,
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <Camera
-                            size={10}
-                            color={colors.textTertiary}
-                            style={{ marginRight: 4 }}
-                          />
-                          Visual Proof
-                        </Text>
-
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            flexWrap: "wrap",
-                            gap: 8,
-                            marginBottom: 10,
-                          }}
-                        >
+                      {/* Media Thumbnails and Actions */}
+                      <View style={{ marginTop: 16 }}>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: state.photo || state.video ? 10 : 0 }}>
                           {state.photo && (
-                            <View
-                              style={{
-                                width: 100,
-                                height: 75,
-                                borderRadius: 8,
-                                overflow: "hidden",
-                                backgroundColor: colors.surface,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                              }}
-                            >
-                              <Image
-                                source={{ uri: state.photo }}
-                                style={{ width: "100%", height: "100%" }}
-                                resizeMode="cover"
-                              />
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  bottom: 4,
-                                  left: 4,
-                                  paddingHorizontal: 4,
-                                  paddingVertical: 2,
-                                  backgroundColor: "rgba(0,0,0,0.6)",
-                                  borderRadius: 4,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "white",
-                                    fontSize: 7,
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  PHOTO
-                                </Text>
+                            <View style={{ width: 100, height: 75, borderRadius: 12, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                              <Image source={{ uri: state.photo }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                              <View style={{ position: "absolute", bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 4 }}>
+                                <Text style={{ color: "white", fontSize: 7, fontWeight: "bold" }}>PHOTO</Text>
                               </View>
                               <TouchableOpacity
-                                onPress={() =>
-                                  handleRemoveMedia(checkItem, "photo")
-                                }
-                                style={{
-                                  position: "absolute",
-                                  top: 4,
-                                  right: 4,
-                                  width: 20,
-                                  height: 20,
-                                  borderRadius: 10,
-                                  backgroundColor: "rgba(239, 68, 68, 0.9)",
-                                  justifyContent: "center",
-                                  alignItems: "center",
-                                }}
+                                onPress={() => handleRemoveMedia(checkItem, "photo")}
+                                style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(239, 68, 68, 0.9)", justifyContent: "center", alignItems: "center" }}
                               >
                                 <X size={12} color="white" />
                               </TouchableOpacity>
                             </View>
                           )}
                           {state.video && (
-                            <View
-                              style={{
-                                width: 100,
-                                height: 75,
-                                borderRadius: 8,
-                                overflow: "hidden",
-                                backgroundColor: colors.card,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                                justifyContent: "center",
-                                alignItems: "center",
-                              }}
-                            >
-                              <Play
-                                size={20}
-                                color="white"
-                                fill="rgba(255,255,255,0.4)"
-                              />
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  bottom: 4,
-                                  left: 4,
-                                  paddingHorizontal: 4,
-                                  paddingVertical: 2,
-                                  backgroundColor: "rgba(59, 130, 246, 0.8)",
-                                  borderRadius: 4,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    color: "white",
-                                    fontSize: 7,
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  VIDEO
-                                </Text>
+                            <View style={{ width: 100, height: 75, borderRadius: 12, overflow: "hidden", backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, justifyContent: "center", alignItems: "center" }}>
+                              <Play size={20} color="white" fill="rgba(255,255,255,0.4)" />
+                              <View style={{ position: "absolute", bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: "rgba(59, 130, 246, 0.8)", borderRadius: 4 }}>
+                                <Text style={{ color: "white", fontSize: 7, fontWeight: "bold" }}>VIDEO</Text>
                               </View>
                               <TouchableOpacity
-                                onPress={() =>
-                                  handleRemoveMedia(checkItem, "video")
-                                }
-                                style={{
-                                  position: "absolute",
-                                  top: 4,
-                                  right: 4,
-                                  width: 20,
-                                  height: 20,
-                                  borderRadius: 10,
-                                  backgroundColor: "rgba(239, 68, 68, 0.9)",
-                                  justifyContent: "center",
-                                  alignItems: "center",
-                                }}
+                                onPress={() => handleRemoveMedia(checkItem, "video")}
+                                style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(239, 68, 68, 0.9)", justifyContent: "center", alignItems: "center" }}
                               >
                                 <X size={12} color="white" />
                               </TouchableOpacity>
@@ -2440,123 +2346,30 @@ export default function ChecklistScreen() {
                         </View>
 
                         {/* Media Action Buttons */}
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            flexWrap: "wrap",
-                            gap: 6,
-                          }}
-                        >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
                           <TouchableOpacity
-                            onPress={() =>
-                              !runnerIsReadOnly && handlePhotoCapture(checkItem)
-                            }
+                            onPress={() => !runnerIsReadOnly && handlePhotoCapture(checkItem)}
                             disabled={runnerIsReadOnly || state.photoUploading}
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              backgroundColor: colors.surface,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: colors.border,
-                            }}
+                            style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
-                            {state.photoUploading ? (
-                              <ActivityIndicator
-                                size="small"
-                                color={colors.textTertiary}
-                              />
-                            ) : (
-                              <Camera size={12} color={colors.textTertiary} />
-                            )}
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "900",
-                                color: colors.textTertiary,
-                                textTransform: "uppercase",
-                                letterSpacing: 1,
-                                marginLeft: 4,
-                              }}
-                            >
-                              {state.photo ? "Change Photo" : "Add Photo"}
-                            </Text>
+                            {state.photoUploading ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Camera size={18} color={colors.textTertiary} />}
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>CAPTURE</Text>
                           </TouchableOpacity>
-
                           <TouchableOpacity
-                            onPress={() =>
-                              !runnerIsReadOnly &&
-                              handleGallerySelect(checkItem)
-                            }
-                            disabled={
-                              runnerIsReadOnly ||
-                              state.photoUploading ||
-                              state.videoUploading
-                            }
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              backgroundColor: colors.surface,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: colors.border,
-                            }}
+                            onPress={() => !runnerIsReadOnly && handleGallerySelect(checkItem)}
+                            disabled={runnerIsReadOnly || state.photoUploading || state.videoUploading}
+                            style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
-                            <Paperclip size={12} color={colors.textTertiary} />
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "900",
-                                color: colors.textTertiary,
-                                textTransform: "uppercase",
-                                letterSpacing: 1,
-                                marginLeft: 4,
-                              }}
-                            >
-                              Upload File
-                            </Text>
+                            <Paperclip size={18} color={colors.textTertiary} />
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>GALLERY</Text>
                           </TouchableOpacity>
-
                           <TouchableOpacity
-                            onPress={() =>
-                              !runnerIsReadOnly && handleVideoCapture(checkItem)
-                            }
+                            onPress={() => !runnerIsReadOnly && handleVideoCapture(checkItem)}
                             disabled={runnerIsReadOnly || state.videoUploading}
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              backgroundColor: colors.surface,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: colors.border,
-                            }}
+                            style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
-                            {state.videoUploading ? (
-                              <ActivityIndicator
-                                size="small"
-                                color={colors.textTertiary}
-                              />
-                            ) : (
-                              <Video size={12} color={colors.textTertiary} />
-                            )}
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "900",
-                                color: colors.textTertiary,
-                                textTransform: "uppercase",
-                                letterSpacing: 1,
-                                marginLeft: 4,
-                              }}
-                            >
-                              {state.video ? "Re-Record" : "Add Video"}
-                            </Text>
+                            {state.videoUploading ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Video size={18} color={colors.textTertiary} />}
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>15S VIDEO</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -2585,89 +2398,77 @@ export default function ChecklistScreen() {
           style={[
             runnerStyles.header,
             {
-              backgroundColor: colors.primary,
+              backgroundColor: colors.card,
               paddingTop: Math.max(insets.top, 16),
+              borderBottomWidth: 1,
+              borderBottomColor: colors.border,
+              paddingBottom: 16,
             },
           ]}
         >
-          <View style={runnerStyles.headerRow}>
+          <View style={[runnerStyles.headerRow, { alignItems: 'flex-start' }]}>
             <TouchableOpacity
-              style={runnerStyles.backBtn}
+              style={[runnerStyles.backBtn, { backgroundColor: 'transparent', width: 'auto', paddingHorizontal: 0, paddingRight: 10, marginTop: 4 }]}
               onPress={() => {
                 setHistoryCompletion(null);
                 setView("history");
               }}
             >
-              <ArrowLeft size={20} color="#FFFFFF" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <ArrowLeft size={16} color={colors.textSecondary} />
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Urbanist-Bold', textTransform: 'uppercase' }}>Back</Text>
+              </View>
             </TouchableOpacity>
-            <View style={runnerStyles.headerTitle}>
-              <Text style={runnerStyles.headerTitleText}>Audit Details</Text>
-              <Text style={runnerStyles.headerSubtitle}>
+            
+            <View style={[runnerStyles.headerTitle, { flex: 1 }]}>
+              <Text style={[runnerStyles.headerTitleText, { color: colors.text, fontSize: 20 }]}>
                 {template?.title || "Checklist"}
-                {historyCompletion.slot_time ? ` · ${fmt12h(historyCompletion.slot_time)}` : ""}
               </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+              
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <User size={12} color="#9CA3AF" />
-                  <Text style={{ fontSize: 12, color: "#9CA3AF" }}>
-                    {(historyCompletion as any).user?.full_name || (historyCompletion as any).completed_by_user?.full_name || "Unknown"}
-                  </Text>
-                </View>
-                <Text style={{ fontSize: 12, color: "#9CA3AF" }}>•</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Calendar size={12} color="#9CA3AF" />
-                  <Text style={{ fontSize: 12, color: "#9CA3AF" }}>
+                  <Calendar size={12} color={colors.textSecondary} />
+                  <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: "Urbanist-Medium", textTransform: "uppercase" }}>
                     {historyCompletion.completion_date
                       ? new Date(historyCompletion.completion_date).toLocaleString("en-US", {
                           month: "short",
                           day: "numeric",
                           year: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
                         })
-                      : "Unknown date"}
+                      : "Unknown"}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <User size={12} color={colors.textSecondary} />
+                  <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: "Urbanist-Medium", textTransform: "uppercase" }}>
+                    {(historyCompletion as any).user?.full_name || (historyCompletion as any).completed_by_user?.full_name || "SYSTEM USER"}
                   </Text>
                 </View>
               </View>
             </View>
-            <View style={{ alignItems: "flex-end", gap: 4 }}>
+
+            <View style={{ alignItems: "flex-end" }}>
               <View
-                style={[
-                  runnerStyles.statusBadge,
-                  {
-                    backgroundColor:
-                      historyCompletion.status === "completed"
-                        ? (colors.success || colors.success) + "30"
-                        : "#3B82F630",
-                  },
-                ]}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 16,
+                  borderWidth: 1,
+                  borderColor: historyCompletion.status === "completed" ? colors.success + "50" : colors.primary + "50",
+                  backgroundColor: "transparent",
+                }}
               >
                 <Text
-                  style={[
-                    runnerStyles.statusBadgeText,
-                    {
-                      color:
-                        historyCompletion.status === "completed"
-                          ? colors.success
-                          : colors.primary,
-                    },
-                  ]}
+                  style={{
+                    fontSize: 10,
+                    fontFamily: "Urbanist-Bold",
+                    letterSpacing: 0.5,
+                    color: historyCompletion.status === "completed" ? colors.success : colors.primary,
+                  }}
                 >
                   {historyCompletion.status?.replace("_", " ").toUpperCase()}
                 </Text>
               </View>
-              {historyCompletion.admin_rating ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-                  {[1, 2, 3].map((star) => (
-                    <Star
-                      key={star}
-                      size={10}
-                      color={star <= historyCompletion.admin_rating! ? "#FBBF24" : "rgba(255,255,255,0.3)"}
-                      fill={star <= historyCompletion.admin_rating! ? "#FBBF24" : "none"}
-                    />
-                  ))}
-                </View>
-              ) : null}
             </View>
           </View>
         </View>
@@ -2680,6 +2481,39 @@ export default function ChecklistScreen() {
             paddingBottom: 120,
           }}
           estimatedItemSize={180}
+          ListHeaderComponent={
+            <View style={{ marginBottom: 20 }}>
+              {/* Score Section */}
+              <View style={{ marginBottom: 24 }}>
+                <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                  Audit Score
+                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 24, fontFamily: "Poppins-Bold", color: colors.text, lineHeight: 28 }}>
+                    {Math.round(((historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0) / Math.max((template?.items?.length || 1), 1)) * 100)}%
+                  </Text>
+                  <View style={{ backgroundColor: colors.border, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: colors.textSecondary }}>
+                      {historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0}/{template?.items?.length || 0} PTS
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ height: 6, backgroundColor: colors.surface, borderRadius: 3, overflow: 'hidden' }}>
+                  <View style={{ 
+                    height: '100%', 
+                    backgroundColor: colors.success, 
+                    borderRadius: 3, 
+                    width: `${Math.round(((historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0) / Math.max((template?.items?.length || 1), 1)) * 100)}%` 
+                  }} />
+                </View>
+              </View>
+
+              {/* Breakdown Label */}
+              <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 1 }}>
+                Audit Breakdown
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => {
             const compItem = historyCompletion.items?.find(
               (ci) => ci.checklist_item_id === item.id,
@@ -2691,181 +2525,145 @@ export default function ChecklistScreen() {
                   {
                     backgroundColor: colors.card,
                     borderColor: colors.border,
-                    marginBottom: 8,
+                    marginBottom: 16,
+                    borderRadius: 16,
                   },
                 ]}
               >
-                <View style={runnerStyles.itemRow}>
-                  <View
-                    style={[
-                      runnerStyles.checkCircle,
-                      {
-                        backgroundColor: compItem?.is_checked
-                          ? colors.success + "18"
-                          : colors.surface,
-                        borderColor: compItem?.is_checked
-                          ? colors.success
-                          : colors.border,
-                      },
-                    ]}
-                  >
-                    {compItem?.is_checked ? (
-                      <CheckCircle2 size={20} color={colors.success} />
-                    ) : (
-                      <Circle size={20} color={colors.textTertiary} />
-                    )}
-                  </View>
-                  <View style={runnerStyles.itemContent}>
-                    <Text
-                      style={[runnerStyles.itemTitle, { color: colors.text }]}
-                    >
-                      {item.title}
-                    </Text>
-                    {(item.type === "text" ||
-                      item.type === "number" ||
-                      item.type === "yes_no") &&
-                      compItem?.value && (
-                        <Text
-                          style={{
-                            color: colors.primary,
-                            fontWeight: "700",
-                            fontSize: 14,
-                            marginTop: 2,
-                          }}
-                        >
-                          {compItem.value}
-                        </Text>
-                      )}
-                    {compItem?.comment && (
-                      <Text
+                <View style={{ padding: 16 }}>
+                  {/* Top row with Check and Title */}
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', flex: 1, paddingRight: 12 }}>
+                      <View
                         style={{
-                          color: colors.textSecondary,
-                          fontSize: 12,
-                          fontStyle: "italic",
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                          borderWidth: compItem?.is_checked ? 2 : 1,
+                          borderColor: compItem?.is_checked ? colors.success : colors.border,
+                          justifyContent: 'center',
+                          alignItems: 'center',
                           marginTop: 2,
                         }}
                       >
-                        "{compItem.comment}"
-                      </Text>
+                        {compItem?.is_checked ? (
+                          <CheckCircle2 size={16} color={colors.success} strokeWidth={3} />
+                        ) : (
+                          <Circle size={14} color={colors.textTertiary} />
+                        )}
+                      </View>
+                      <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={{ color: colors.text, fontSize: 16, fontFamily: "Poppins-Bold", lineHeight: 22 }}>
+                          {item.title}
+                        </Text>
+                        
+                        {(item.type === "text" || item.type === "number" || item.type === "yes_no") && compItem?.value && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2, fontFamily: "Urbanist-Medium" }}>
+                            {compItem.value}
+                          </Text>
+                        )}
+                        {compItem?.comment && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2, fontFamily: "Urbanist-Medium" }}>
+                            {compItem.comment}
+                          </Text>
+                        )}
+                        
+                        {/* User info inline */}
+                        {compItem?.checked_by_user && (
+                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8, gap: 12 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                              <User size={10} color={colors.textSecondary} />
+                              <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
+                                {compItem.checked_by_user.full_name}
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                              <Clock size={10} color={colors.textSecondary} />
+                              <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
+                                {compItem.checked_at ? new Date(compItem.checked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {!item.is_optional && (
+                      <View style={{ backgroundColor: "#FEE2E2", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                        <Text style={{ fontSize: 9, fontFamily: "Urbanist-Bold", color: "#EF4444" }}>REQUIRED</Text>
+                      </View>
                     )}
                   </View>
-                </View>
-                {/* Photo Proof */}
-                {compItem?.photo_url && (
-                  <TouchableOpacity
-                    style={{ marginHorizontal: 12, marginBottom: 12 }}
-                    onPress={() => Linking.openURL(compItem.photo_url || "")}
-                  >
-                    <Image
-                      source={{ uri: compItem.photo_url }}
-                      style={{ width: "100%", height: 180, borderRadius: 12 }}
-                      resizeMode="cover"
-                    />
-                    <View
-                      style={{
-                        position: "absolute",
-                        bottom: 8,
-                        right: 8,
-                        paddingHorizontal: 6,
-                        paddingVertical: 4,
-                        backgroundColor: "rgba(0,0,0,0.6)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "white",
-                          fontSize: 8,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        VIEW FULL IMAGE
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
 
-                {/* Video Proof */}
-                {compItem?.video_url && (
-                  <TouchableOpacity
-                    style={{
-                      marginHorizontal: 12,
-                      marginBottom: 12,
-                      height: 120,
-                      borderRadius: 12,
-                      backgroundColor: colors.card,
-                      justifyContent: "center",
-                      alignItems: "center",
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                    }}
-                    onPress={() => Linking.openURL(compItem.video_url || "")}
-                  >
-                    <Play
-                      size={32}
-                      color="white"
-                      fill="rgba(255,255,255,0.4)"
-                    />
-                    <Text
-                      style={{
-                        color: "white",
-                        fontSize: 11,
-                        fontWeight: "700",
-                        marginTop: 8,
-                      }}
-                    >
-                      PLAY VIDEO PROOF
-                    </Text>
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        right: 8,
-                        paddingHorizontal: 6,
-                        paddingVertical: 4,
-                        backgroundColor: "rgba(59, 130, 246, 0.8)",
-                        borderRadius: 6,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "white",
-                          fontSize: 8,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        VIDEO
-                      </Text>
+                  {/* Photo Proof */}
+                  {compItem?.photo_url && (
+                    <View style={{ marginTop: 16, marginLeft: 36 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <Eye size={12} color={colors.textSecondary} />
+                        <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, letterSpacing: 0.5 }}>VISUAL PROOF</Text>
+                      </View>
+                      
+                      <TouchableOpacity onPress={() => Linking.openURL(compItem.photo_url || "")}>
+                        <View style={{ borderRadius: 12, overflow: 'hidden', height: 180 }}>
+                          <Image source={{ uri: compItem.photo_url }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                          <View style={{ position: "absolute", bottom: 8, left: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Camera size={10} color="#FFF" />
+                            <Text style={{ color: "#FFF", fontSize: 10, fontFamily: "Urbanist-Bold" }}>Photo</Text>
+                          </View>
+                          {compItem.checked_at && (
+                            <View style={{ position: "absolute", bottom: 8, right: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                              <Text style={{ color: "#FFF", fontSize: 9, fontFamily: "Urbanist-Medium" }}>
+                                {new Date(compItem.checked_at).toLocaleString("en-US", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
                     </View>
-                  </TouchableOpacity>
-                )}
-                {compItem?.checked_by_user && (
-                  <View
-                    style={[
-                      runnerStyles.commentRow,
-                      { borderTopColor: colors.border, paddingHorizontal: 12 },
-                    ]}
-                  >
-                    <User size={10} color={colors.textTertiary} />
-                    <Text style={{ fontSize: 10, color: colors.textTertiary }}>
-                      {compItem.checked_by_user.full_name} ·{" "}
-                      {compItem.checked_at
-                        ? new Date(compItem.checked_at).toLocaleTimeString(
-                            "en-US",
-                            { hour: "2-digit", minute: "2-digit" },
-                          )
-                        : ""}
-                    </Text>
-                  </View>
-                )}
-                {compItem?.admin_rating && (
-                  <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingBottom: 10, gap: 4 }}>
-                    <Star size={12} color="#FBBF24" fill="#FBBF24" />
-                    <Text style={{ fontSize: 11, color: colors.textSecondary }}>
-                      Admin Rating: {compItem.admin_rating === 1 ? "Needs Work" : compItem.admin_rating === 2 ? "Acceptable" : "Excellent"}
-                    </Text>
-                  </View>
-                )}
+                  )}
+                  
+                  {/* Video Proof */}
+                  {compItem?.video_url && (
+                    <View style={{ marginTop: 16, marginLeft: 36 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <Eye size={12} color={colors.textSecondary} />
+                        <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, letterSpacing: 0.5 }}>VIDEO PROOF</Text>
+                      </View>
+                      
+                      <TouchableOpacity onPress={() => Linking.openURL(compItem.video_url || "")}>
+                        <View style={{ borderRadius: 12, overflow: 'hidden', height: 140, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
+                          <Play size={32} color={colors.textTertiary} />
+                          <View style={{ position: "absolute", bottom: 8, left: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Video size={10} color="#FFF" />
+                            <Text style={{ color: "#FFF", fontSize: 10, fontFamily: "Urbanist-Bold" }}>Video</Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {compItem?.admin_rating && (
+                    <View style={{ marginTop: 16, marginLeft: 36 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <Star size={12} color={colors.textSecondary} />
+                        <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, letterSpacing: 0.5 }}>RATING</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <View style={{ 
+                          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                          backgroundColor: compItem.admin_rating === 1 ? "#FEE2E2" : compItem.admin_rating === 2 ? "#FEF3C7" : "#DCFCE7",
+                        }}>
+                          <Text style={{ 
+                            fontSize: 10, fontFamily: "Urbanist-Bold",
+                            color: compItem.admin_rating === 1 ? "#EF4444" : compItem.admin_rating === 2 ? "#F59E0B" : "#10B981" 
+                          }}>
+                            {compItem.admin_rating === 1 ? "NEEDS WORK" : compItem.admin_rating === 2 ? "ACCEPTABLE" : "EXCELLENT"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                </View>
               </View>
             );
           }}
@@ -3140,12 +2938,16 @@ export default function ChecklistScreen() {
                     "due",
                     "completed",
                   ] as HistoryFilter[]
-                ).map((f) => (
+                ).map((f) => {
+                  const label = f.charAt(0).toUpperCase() + f.slice(1);
+                  const count = historyCounts[f] || 0;
+                  return (
                   <TouchableOpacity
                     key={f}
                     style={[
                       styles.filterChip,
                       historyFilter === f && styles.filterChipActive,
+                      { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 24 }
                     ]}
                     onPress={() => setHistoryFilter(f)}
                   >
@@ -3153,12 +2955,13 @@ export default function ChecklistScreen() {
                       style={[
                         styles.filterChipText,
                         historyFilter === f && { color: "#FFFFFF" },
+                        { fontSize: 11, fontFamily: "Urbanist-Bold", letterSpacing: 0.5 }
                       ]}
                     >
-                      {f.charAt(0).toUpperCase() + f.slice(1)}
+                      {label} ({count})
                     </Text>
                   </TouchableOpacity>
-                ))}
+                )})}
               </View>
             </View>
           }
@@ -3187,8 +2990,19 @@ export default function ChecklistScreen() {
               templates={templates}
               dueStatusMap={dueStatusMap}
               onStart={handleStartChecklist}
-              onView={(comp) => {
-                setHistoryCompletion(comp);
+              onView={async (comp) => {
+                // Fetch completion with items for detail view
+                try {
+                  const res = await checklistService.fetchTemplateCompletions(propertyId as string, comp.template_id, 50);
+                  const completionWithItems = res.completions.find((c) => c.id === comp.id);
+                  if (completionWithItems) {
+                    setHistoryCompletion(completionWithItems);
+                  } else {
+                    setHistoryCompletion(comp); // fallback
+                  }
+                } catch {
+                  setHistoryCompletion(comp); // fallback
+                }
                 setView("detail");
               }}
             />
@@ -3236,7 +3050,7 @@ export default function ChecklistScreen() {
                       color: colors.text,
                     },
                   ]}
-                  placeholder="e.g. Morning Walkthrough"
+                  placeholder="e.g., Morning Shift Perimeter Check"
                   placeholderTextColor={colors.textTertiary}
                   value={tplTitle}
                   onChangeText={setTplTitle}
@@ -3257,7 +3071,7 @@ export default function ChecklistScreen() {
                       color: colors.text,
                     },
                   ]}
-                  placeholder="Optional description"
+                  placeholder="Briefly describe the purpose of this checklist..."
                   placeholderTextColor={colors.textTertiary}
                   value={tplDesc}
                   onChangeText={setTplDesc}
@@ -3278,7 +3092,7 @@ export default function ChecklistScreen() {
                       color: colors.text,
                     },
                   ]}
-                  placeholder="e.g. safety, general, cleaning"
+                  placeholder="general"
                   placeholderTextColor={colors.textTertiary}
                   value={tplCategory}
                   onChangeText={setTplCategory}
@@ -3327,54 +3141,25 @@ export default function ChecklistScreen() {
                 <Text
                   style={[modalStyles.label, { color: colors.textSecondary }]}
                 >
-                  Time Window
+                  Time Window {isHourlyFreq(tplFrequency) ? "(Required for Hourly)" : "(Optional)"}
                 </Text>
                 <View style={modalStyles.timeRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        modalStyles.subLabel,
-                        { color: colors.textTertiary },
-                      ]}
-                    >
-                      From
-                    </Text>
+                  <View style={[modalStyles.timePickerBtn, { backgroundColor: colors.surface, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, flex: 1 }]}>
+                    <Ionicons name="time-outline" size={16} color={colors.primary} />
                     <TextInput
-                      style={[
-                        modalStyles.input,
-                        {
-                          backgroundColor: colors.surface,
-                          borderColor: colors.border,
-                          color: colors.text,
-                          textAlign: "center",
-                        },
-                      ]}
-                      placeholder="09:00"
+                      style={[modalStyles.timePickerText, { color: colors.text, marginLeft: 8, flex: 1 }]}
+                      placeholder="HH:MM (e.g. 09:00)"
                       placeholderTextColor={colors.textTertiary}
                       value={tplStartTime}
                       onChangeText={setTplStartTime}
                     />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        modalStyles.subLabel,
-                        { color: colors.textTertiary },
-                      ]}
-                    >
-                      To
-                    </Text>
+                  <Text style={{ color: colors.textTertiary, marginHorizontal: 8 }}>to</Text>
+                  <View style={[modalStyles.timePickerBtn, { backgroundColor: colors.surface, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, flex: 1 }]}>
+                    <Ionicons name="time-outline" size={16} color={colors.primary} />
                     <TextInput
-                      style={[
-                        modalStyles.input,
-                        {
-                          backgroundColor: colors.surface,
-                          borderColor: colors.border,
-                          color: colors.text,
-                          textAlign: "center",
-                        },
-                      ]}
-                      placeholder="17:00"
+                      style={[modalStyles.timePickerText, { color: colors.text, marginLeft: 8, flex: 1 }]}
+                      placeholder="HH:MM (e.g. 17:00)"
                       placeholderTextColor={colors.textTertiary}
                       value={tplEndTime}
                       onChangeText={setTplEndTime}
@@ -3483,10 +3268,28 @@ export default function ChecklistScreen() {
                             fontSize: 13,
                           },
                         ]}
-                        placeholder={`Item ${idx + 1} title`}
+                        placeholder="Step Title"
                         placeholderTextColor={colors.textTertiary}
                         value={item.title}
                         onChangeText={(v) => updateTplItem(idx, "title", v)}
+                      />
+                      <TextInput
+                        style={[
+                          modalStyles.input,
+                          {
+                            backgroundColor: colors.card,
+                            borderColor: colors.border,
+                            color: colors.text,
+                            fontSize: 13,
+                            minHeight: 60,
+                            textAlignVertical: "top",
+                          },
+                        ]}
+                        placeholder="Step Description / Instructions..."
+                        placeholderTextColor={colors.textTertiary}
+                        value={item.description || ""}
+                        onChangeText={(v) => updateTplItem(idx, "description", v)}
+                        multiline
                       />
                       <View style={modalStyles.typeRow}>
                         {(
@@ -4201,7 +4004,22 @@ const modalStyles = StyleSheet.create({
     borderWidth: 1,
   },
   freqChipText: { fontSize: 11, fontFamily: "Urbanist-Medium" },
-  timeRow: { flexDirection: "row", gap: 12 },
+  timeRow: { flexDirection: "row", gap: 12, alignItems: "center" },
+  timePickerBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  timePickerText: {
+    fontSize: 14,
+    fontFamily: "Urbanist-Medium",
+  },
   assigneeSection: {
     flexDirection: "row",
     flexWrap: "wrap",
