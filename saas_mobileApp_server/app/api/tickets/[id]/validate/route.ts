@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { createAnonClient } from "@/lib/supabase/client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordTicketResolution } from "@/lib/gamification/scoring";
 
 /**
  * POST /api/tickets/[id]/validate
@@ -118,22 +119,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       new_value: approved ? "resolved" : (validation_note || "rejected by client"),
     });
 
-    // Send push notification to assigned MST
-    if (ticket.assigned_to) {
-      const { sendPushNotification, NOTIFICATION_TYPES } = await import("@/lib/notificationService");
-      sendPushNotification({
-        userId: ticket.assigned_to,
-        propertyId: ticket.property_id,
-        organizationId: ticket.organization_id,
-        type: NOTIFICATION_TYPES.TICKET_CREATED,
-        title: approved ? "Ticket Approved" : "Ticket Rejected",
-        message: approved
-          ? `Your work on "${ticket.title}" has been approved.`
-          : `Your work on "${ticket.title}" was rejected. ${validation_note || "Please review."}`,
-        ticketId: ticket.id,
-        priority: "NORMAL",
-      }).catch(err => console.warn("[Push] Failed to send notification:", err));
+    // Update gamification scores on tenant approval
+    if (approved) {
+      const { data: resolveActivity } = await admin
+        .from("ticket_activity_log")
+        .select("performed_by")
+        .eq("ticket_id", ticketId)
+        .in("action", ["pending_validation", "completed"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const resolverId = resolveActivity?.performed_by || ticket.assigned_to;
+      if (resolverId) {
+        await recordTicketResolution(
+          admin,
+          { ...updatedTicket, status: "resolved", resolved_at: updatedTicket.resolved_at || now },
+          resolverId,
+          { approvedByTenant: true }
+        );
+      }
     }
+
+    // Web app backend handles push notifications, so we do not send them here to avoid duplicates.
+
 
     return NextResponse.json({
       success: true,

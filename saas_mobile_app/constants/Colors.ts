@@ -190,6 +190,10 @@ export const Colors = {
 // Dashboard Background Styles
 // ============================================================
 export const DASHBOARD_BACKGROUNDS = {
+  default: {
+    label: 'Default',
+    image: require('@/assets/images/default-dashboard-bg.png'),
+  },
   sunny: {
     label: 'Sunny',
     image: require('@/assets/images/weather-sun.png'),

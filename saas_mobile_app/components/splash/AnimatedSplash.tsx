@@ -26,8 +26,8 @@ const ENTRANCE_DURATION = 1600; // Smooth zoom-in duration
 const EXIT_DURATION = 700;      // Fade-up duration
 const SCALE_INITIAL = 0.15;     // Start far away
 const SCALE_FINAL = 2.8;        // Logo comes right up to the screen
-const EXIT_SCALE = 3.0;         // Keep moving forward while fading up
-const EXIT_TRANSLATE_Y = -60;   // Float upward while fading out
+const EXIT_SCALE = 0;           // Zoom the logo out completely before removing splash
+const EXIT_TRANSLATE_Y = 0;     // Keep centered while zooming out
 
 interface AnimatedSplashProps {
   onAnimationComplete: () => void;
@@ -53,10 +53,10 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     hasCompletedRef.current = true;
     setPhase('exiting');
 
-    // Continue zooming in slightly + float upward while fading out
+    // Zoom the logo out completely + fade away
     scale.value = withTiming(EXIT_SCALE, {
       duration: EXIT_DURATION,
-      easing: Easing.out(Easing.ease),
+      easing: Easing.in(Easing.ease),
     });
 
     translateY.value = withTiming(EXIT_TRANSLATE_Y, {

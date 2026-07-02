@@ -58,6 +58,15 @@ export default function Index() {
 
   // User is authenticated — redirect directly to first property dashboard
   if (membership.properties && membership.properties.length > 0) {
+    const isPropertyAdminOnAny = membership.properties.some(p => 
+      ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(p.role?.toLowerCase() || '')
+    );
+    
+    // If they have multiple properties and are admin on at least one, go to property selector
+    if (membership.properties.length > 1 && isPropertyAdminOnAny) {
+      return <Redirect href="/super-admin" />;
+    }
+
     const firstProperty = membership.properties[0];
     if (__DEV__) {
       console.log('[Index] Redirecting to property:', firstProperty.id, firstProperty.name);
@@ -71,7 +80,12 @@ export default function Index() {
     return <Redirect href="/(auth)/property-selection" />;
   }
 
-  // User is authenticated but has no property access — show loading instead of login
+  // If the user has not completed onboarding, send them to the onboarding flow
+  if (user?.user_metadata?.onboarding_completed === false || user?.user_metadata?.onboarding_completed === undefined) {
+    return <Redirect href="/(auth)/onboarding" />;
+  }
+
+  // User is authenticated but has no property access and has completed onboarding
   // (they may need to be invited, but we shouldn't log them out)
   return (
     <View style={{ flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center', padding: 24 }}>

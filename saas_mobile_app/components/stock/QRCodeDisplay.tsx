@@ -5,11 +5,10 @@
  * Compatible with web app QR codes (same data format).
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, Share } from 'react-native';
 import { QRCodeData } from '@/services/stockService';
+import { MOBILE_API_BASE } from '@/utils/api/mobileApi';
 import { QrCode, Download, Share2 } from 'lucide-react-native';
 
 interface QRCodeDisplayProps {
@@ -19,6 +18,7 @@ interface QRCodeDisplayProps {
   showLabel?: boolean;
   itemName?: string;
   itemCode?: string;
+  propertyId?: string;
 }
 
 export default function QRCodeDisplay({
@@ -28,35 +28,35 @@ export default function QRCodeDisplay({
   showLabel = true,
   itemName,
   itemCode,
+  propertyId,
 }: QRCodeDisplayProps) {
   // Encode the barcode string in QR code (matches web app's BarcodeDisplay format)
   // Web app uses: <QRCodeSVG value={item.barcode} />
   const qrValue = barcode || data.item_code || data.id || '';
 
   const handleDownload = async () => {
-    try {
-      if (Platform.OS === 'web') {
-        Alert.alert('Download', 'QR Code download not available on web');
-      } else {
-        // Mobile: Use expo-sharing
-        const fileUri = `${FileSystem.cacheDirectory}qr-${data.item_code}.png`;
-        Alert.alert('Share QR', `QR data: ${qrValue}`);
-      }
-    } catch (error) {
-      console.error('Error downloading QR:', error);
-      Alert.alert('Error', 'Failed to download QR code');
-    }
+    Alert.alert('Download', 'QR Code download is not available yet.');
   };
 
   const handleShare = async () => {
     try {
+      const itemLabel = itemName || data.name || 'Stock Item';
+      let shareUrl = qrValue;
+      if (propertyId && !qrValue.match(/^https?:\/\//i)) {
+        shareUrl = `${MOBILE_API_BASE}/property/${propertyId}/stock?barcode=${encodeURIComponent(qrValue)}`;
+      }
+
       if (Platform.OS === 'web') {
         if (navigator.clipboard) {
-          await navigator.clipboard.writeText(qrValue);
-          Alert.alert('Copied!', 'QR data copied to clipboard');
+          await navigator.clipboard.writeText(shareUrl);
+          Alert.alert('Copied!', 'Link copied to clipboard');
         }
       } else {
-        Alert.alert('Share QR', `Share QR code for ${itemName || data.name}`);
+        await Share.share({
+          message: `${itemLabel}\n${shareUrl}`,
+          url: shareUrl,
+          title: itemLabel,
+        });
       }
     } catch (error) {
       console.error('Error sharing:', error);

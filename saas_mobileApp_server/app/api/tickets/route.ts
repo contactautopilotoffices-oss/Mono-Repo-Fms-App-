@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status");
   const assignedTo = searchParams.get("assignedTo");
   const raisedBy = searchParams.get("raisedBy") || searchParams.get("raised_by");
+  const userId = searchParams.get("userId") || searchParams.get("user_id");
   const limitParam = searchParams.get("limit");
   const offsetParam = searchParams.get("offset");
   const internalOnly = searchParams.get("internalOnly") === "true";
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
   if (status) query = status.includes(",") ? query.in("status", status.split(",").map((value) => value.trim())) : query.eq("status", status);
   if (assignedTo) query = query.eq("assigned_to", assignedTo);
   if (raisedBy) query = query.eq("raised_by", raisedBy);
+  if (userId) query = query.or(`assigned_to.eq.${userId},raised_by.eq.${userId}`);
   if (internalOnly) query = query.eq("internal", true);
   if (excludeInternal) query = query.neq("internal", true);
   

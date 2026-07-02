@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
+import { requestCameraPermissionWithSettings, requestMediaLibraryPermissionWithSettings } from '@/utils/permissions';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import { useQueryClient } from '@tanstack/react-query';
 import { Colors } from '@/constants/Colors';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { readFileAsArrayBuffer, compressImage } from '@/utils/mediaUtils';
@@ -34,8 +36,11 @@ import {
   Phone,
   Shield,
   Building2,
+  Image as ImageIcon,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { BottomSheetModal, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+import { createClient } from '@/utils/supabase/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface UserProfile {
@@ -56,9 +61,11 @@ export default function ProfileScreen() {
   const colors = Colors[theme];
   const isDark = theme === 'dark';
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
 
   const [isSaving, setIsSaving] = useState(false);
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [showFullPhoto, setShowFullPhoto] = useState(false);
+  const [showPhotoMenu, setShowPhotoMenu] = useState(false);
 
   // Edit form state — only full_name and phone are editable
   const [editName, setEditName] = useState('');
@@ -86,18 +93,18 @@ export default function ProfileScreen() {
     }
   }, [user]);
 
+  const { data: profile, isLoading, isFetching, refetch } = useServerQuery<UserProfile | null>(
+    queryKeys.user.profile(user?.id ?? 'none'),
+    fetchProfile,
+    { staleTime: 1000 * 60 * 5 }
+  );
+
   useEffect(() => {
     if (profile) {
       setEditName(profile.full_name || '');
       setEditPhone(profile.phone || '');
     }
   }, [profile]);
-
-  const { data: profile, isLoading, isFetching, refetch } = useServerQuery<UserProfile | null>(
-    queryKeys.user.profile(user?.id ?? 'none'),
-    fetchProfile,
-    { staleTime: 1000 * 60 * 5 }
-  );
 
   const onRefresh = useCallback(() => {
     refetch();
@@ -121,6 +128,14 @@ export default function ProfileScreen() {
       });
       if (!response.success) throw new Error(response.error);
 
+      // Update auth context so name updates globally
+      const supabase = createClient();
+      await supabase.auth.updateUser({
+        data: { full_name: editName.trim() }
+      });
+
+      queryClient.invalidateQueries({ queryKey: queryKeys.property.settings(propertyId) });
+
       Alert.alert('Success', 'Profile updated successfully');
       refetch();
     } catch (error) {
@@ -133,11 +148,9 @@ export default function ProfileScreen() {
 
   // ─── Photo upload ──────────────────────────────────────────────────────────
   const handlePhotoCapture = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera access is needed to capture photos');
-      return;
-    }
+    const isGranted = await requestCameraPermissionWithSettings();
+    if (!isGranted) return;
+
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 0.7,
@@ -146,12 +159,16 @@ export default function ProfileScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      await uploadPhoto(result.assets[0].uri);
+      const fileUri = result.assets[0].uri;
+      await uploadPhoto(fileUri);
     }
-    setShowPhotoModal(false);
+    setShowPhotoMenu(false);
   };
 
   const handlePhotoPick = async () => {
+    const isGranted = await requestMediaLibraryPermissionWithSettings();
+    if (!isGranted) return;
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.7,
@@ -162,7 +179,7 @@ export default function ProfileScreen() {
     if (!result.canceled && result.assets[0]) {
       await uploadPhoto(result.assets[0].uri);
     }
-    setShowPhotoModal(false);
+    bottomSheetModalRef.current?.dismiss();
   };
 
   const uploadPhoto = async (uri: string) => {
@@ -188,6 +205,15 @@ export default function ProfileScreen() {
 
       if (!response.success) throw new Error(response.error);
 
+      // Update auth context so avatar updates globally
+      if (response.data?.url) {
+        const supabase = createClient();
+        await supabase.auth.updateUser({
+          data: { avatar_url: response.data.url }
+        });
+      }
+
+      queryClient.invalidateQueries({ queryKey: queryKeys.property.settings(propertyId) });
       refetch();
     } catch (error) {
       console.error('Error uploading photo:', error);
@@ -216,27 +242,7 @@ export default function ProfileScreen() {
            'U';
   };
 
-  // ─── Glass Card Component ──────────────────────────────────────────────────
-  const GlassCard = ({ children, style }: { children: React.ReactNode; style?: any }) => (
-    <SafeBlurView intensity={isDark ? 50 : 60} tint={isDark ? 'dark' : 'light'} style={[s.glassCard, style]}>
-      <LinearGradient
-        colors={isDark ? ['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.01)', 'rgba(0,0,0,0.15)'] : ['rgba(255,255,255,0.7)', 'rgba(255,255,255,0.5)', 'rgba(255,255,255,0.3)']}
-        style={StyleSheet.absoluteFillObject}
-      />
-      <View style={{ zIndex: 2 }}>{children}</View>
-    </SafeBlurView>
-  );
 
-  // ─── Info Row (read-only) ──────────────────────────────────────────────────
-  const InfoRow = ({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) => (
-    <View style={s.infoRow}>
-      <View style={s.infoIconWrap}>{icon}</View>
-      <View style={{ flex: 1 }}>
-        <Text style={[s.infoLabel, { color: colors.textSecondary }]}>{label}</Text>
-        <Text style={[s.infoValue, { color: colors.text }]} numberOfLines={1}>{value}</Text>
-      </View>
-    </View>
-  );
 
   if (isLoading) {
     return (
@@ -250,18 +256,16 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={[s.container, { paddingTop: insets.top }]}>
-      <LinearGradient colors={isDark ? ['#0B1120', '#0f172a', '#1e1b4b'] : ['#eef2f6', '#f8fafc']} style={StyleSheet.absoluteFillObject} />
+    <View style={[s.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
 
       {/* ── Header ── */}
-      <View style={s.headerWrap}>
-        <LinearGradient colors={['#708F96', '#4A6670', '#2D3F47']} style={StyleSheet.absoluteFillObject} />
+      <View style={[s.headerWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderBottomWidth: 1 }]}>
         <View style={s.headerTop}>
-          <TouchableOpacity style={s.backOrb} onPress={() => router.back()} activeOpacity={0.7}>
-            <ArrowLeft size={22} color="#fff" />
+          <TouchableOpacity style={[s.backOrb, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]} onPress={() => router.back()} activeOpacity={0.7}>
+            <ArrowLeft size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={s.headerTitle}>Profile</Text>
+          <Text style={[s.headerTitle, { color: colors.text }]}>Profile</Text>
           <View style={{ width: 40 }} />
         </View>
       </View>
@@ -275,14 +279,16 @@ export default function ProfileScreen() {
         {/* ── Avatar Section ── */}
         <View style={s.avatarSection}>
           <View style={s.avatarWrap}>
-            {profile?.user_photo_url ? (
-              <Image source={{ uri: profile.user_photo_url }} style={s.avatarImg} />
-            ) : (
-              <View style={s.avatarPlaceholder}>
-                <Text style={s.avatarPlaceholderText}>{getInitials()}</Text>
-              </View>
-            )}
-            <TouchableOpacity style={s.cameraBtn} onPress={() => setShowPhotoModal(true)} activeOpacity={0.8}>
+            <TouchableOpacity onPress={() => { if (profile?.user_photo_url) setShowFullPhoto(true); }} activeOpacity={0.8}>
+              {profile?.user_photo_url ? (
+                <Image source={{ uri: profile.user_photo_url }} style={s.avatarImg} />
+              ) : (
+                <View style={s.avatarPlaceholder}>
+                  <Text style={s.avatarPlaceholderText}>{getInitials()}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={s.cameraBtn} onPress={() => setShowPhotoMenu(true)} activeOpacity={0.8}>
               <Camera size={16} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -295,7 +301,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* ── Editable Info ── */}
-        <GlassCard>
+        <WidgetCard isDark={isDark}>
           <Text style={[s.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>EDITABLE INFORMATION</Text>
 
           {/* Full Name */}
@@ -324,57 +330,105 @@ export default function ProfileScreen() {
           </View>
 
           {/* Save Button */}
-          <TouchableOpacity style={s.saveBtn} onPress={handleSave} activeOpacity={0.8} disabled={isSaving}>
+          <TouchableOpacity style={s.actionBtn} onPress={handleSave} activeOpacity={0.8} disabled={isSaving}>
             {isSaving ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <>
-                <Save size={18} color="#fff" />
-                <Text style={s.saveBtnText}>Save Changes</Text>
+                <Save size={16} color="#fff" />
+                <Text style={s.actionBtnText}>Save Changes</Text>
               </>
             )}
           </TouchableOpacity>
-        </GlassCard>
+        </WidgetCard>
 
         {/* ── Read-Only Info ── */}
-        <GlassCard>
+        <WidgetCard isDark={isDark}>
           <Text style={[s.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>ACCOUNT DETAILS</Text>
 
-          <InfoRow icon={<Mail size={18} color="#708F96" />} label="Email Address" value={profile?.email || user?.email || 'Not set'} />
-          <InfoRow icon={<Shield size={18} color="#708F96" />} label="Role" value={getRoleDisplay()} />
-          <InfoRow icon={<Building2 size={18} color="#708F96" />} label="Property" value={getPropertyName()} />
-        </GlassCard>
+          <InfoRow colors={colors} icon={<Mail size={20} color="#708F96" />} label="Email Address" value={profile?.email || user?.email || 'Not set'} />
+          <InfoRow colors={colors} icon={<Shield size={20} color="#708F96" />} label="Role" value={getRoleDisplay()} />
+          <InfoRow colors={colors} icon={<Building2 size={20} color="#708F96" />} label="Property" value={getPropertyName()} />
+        </WidgetCard>
 
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* ── Photo Modal ── */}
-      <Modal visible={showPhotoModal} transparent animationType="fade" onRequestClose={() => setShowPhotoModal(false)}>
-        <View style={s.modalOverlay}>
-          <SafeBlurView intensity={60} tint="dark" style={s.modalContent}>
-            <LinearGradient colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0.2)']} style={StyleSheet.absoluteFillObject} />
+      {/* ── Photo Options Modal (Standard) ── */}
+      <Modal visible={showPhotoMenu} transparent animationType="slide" onRequestClose={() => setShowPhotoMenu(false)}>
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} activeOpacity={1} onPress={() => setShowPhotoMenu(false)}>
+          <TouchableOpacity activeOpacity={1} style={[s.sheetContent, { backgroundColor: isDark ? '#1e293b' : '#ffffff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: insets.bottom > 0 ? insets.bottom : 24 }]}>
             <View style={s.modalHeader}>
-              <Text style={[s.modalTitle, { color: colors.text }]}>Update Photo</Text>
-              <TouchableOpacity onPress={() => setShowPhotoModal(false)}>
+              <Text style={[s.modalTitle, { color: colors.text }]}>Profile picture</Text>
+              <TouchableOpacity onPress={() => setShowPhotoMenu(false)}>
                 <X size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
+            
+            <View style={s.sheetOptionsRow}>
+              <TouchableOpacity style={s.sheetOptionIconBtn} onPress={handlePhotoCapture} activeOpacity={0.7}>
+                <View style={s.sheetIconCircle}>
+                  <Camera size={24} color={colors.text} />
+                </View>
+                <Text style={[s.sheetOptionText, { color: colors.textSecondary }]}>Camera</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={s.modalOption} onPress={handlePhotoCapture} activeOpacity={0.7}>
-              <Camera size={22} color="#708F96" />
-              <Text style={[s.modalOptionText, { color: colors.text }]}>Take Photo</Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={s.sheetOptionIconBtn} onPress={handlePhotoPick} activeOpacity={0.7}>
+                <View style={s.sheetIconCircle}>
+                  <ImageIcon size={24} color={colors.text} />
+                </View>
+                <Text style={[s.sheetOptionText, { color: colors.textSecondary }]}>Gallery</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={s.modalOption} onPress={handlePhotoPick} activeOpacity={0.7}>
-              <Phone size={22} color="#708F96" />
-              <Text style={[s.modalOptionText, { color: colors.text }]}>Choose from Library</Text>
-            </TouchableOpacity>
-          </SafeBlurView>
+              {profile?.user_photo_url && (
+                <TouchableOpacity style={s.sheetOptionIconBtn} onPress={() => { setShowPhotoMenu(false); setShowFullPhoto(true); }} activeOpacity={0.7}>
+                  <View style={s.sheetIconCircle}>
+                    <ImageIcon size={24} color={colors.text} />
+                  </View>
+                  <Text style={[s.sheetOptionText, { color: colors.textSecondary }]}>View Photo</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── View Full Photo Modal ── */}
+      <Modal visible={showFullPhoto} transparent animationType="fade" onRequestClose={() => setShowFullPhoto(false)}>
+        <View style={[s.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
+          <TouchableOpacity style={s.fullPhotoClose} onPress={() => setShowFullPhoto(false)}>
+            <X size={30} color="#fff" />
+          </TouchableOpacity>
+          {profile?.user_photo_url && (
+             <Image source={{ uri: profile.user_photo_url }} style={{ width: '100%', height: '80%', resizeMode: 'contain' }} />
+          )}
         </View>
       </Modal>
     </View>
   );
 }
+
+// ─── Widget Component ────────────────────────────────────────────────────────
+const WidgetCard = ({ children, style, isDark }: { children: React.ReactNode; style?: any; isDark: boolean }) => (
+  <View style={[
+    s.widget,
+    { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' },
+    style
+  ]}>
+    {children}
+  </View>
+);
+
+// ─── Info Row (read-only) ──────────────────────────────────────────────────
+const InfoRow = ({ icon, label, value, colors }: { icon: React.ReactNode; label: string; value: string; colors: any }) => (
+  <View style={s.infoRow}>
+    <View style={s.widgetIconWrap}>{icon}</View>
+    <View style={{ flex: 1 }}>
+      <Text style={[s.widgetLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <Text style={[s.widgetValue, { color: colors.text }]} numberOfLines={1}>{value}</Text>
+    </View>
+  </View>
+);
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
@@ -416,18 +470,17 @@ const s = StyleSheet.create({
     paddingTop: 24,
   },
 
-  // Glass Card
-  glassCard: {
+  // ─── Widget ────────────────────────────────────────────────────────
+  widget: {
+    padding: 18,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    padding: 18,
     marginBottom: 16,
-    overflow: 'hidden',
   },
   sectionLabel: {
     fontSize: 10,
-        letterSpacing: 1.2,
+    fontWeight: '700',
+    letterSpacing: 1.2,
     marginBottom: 16,
     textTransform: 'uppercase',
   },
@@ -513,20 +566,21 @@ const s = StyleSheet.create({
     fontSize: 14,
       },
 
-  // Save button
-  saveBtn: {
+  // Action button
+  actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: 8,
     marginTop: 20,
     paddingVertical: 14,
     borderRadius: 14,
     backgroundColor: '#708F96',
   },
-  saveBtnText: {
+  actionBtnText: {
     fontSize: 14,
-        color: '#fff',
+    fontWeight: '700',
+    color: '#fff',
   },
 
   // Info rows
@@ -535,25 +589,28 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    borderTopColor: 'rgba(112,143,150,0.1)',
   },
-  infoIconWrap: {
-    width: 38,
-    height: 38,
+  widgetIconWrap: {
+    width: 42,
+    height: 42,
     borderRadius: 12,
     backgroundColor: 'rgba(112,143,150,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
-  infoLabel: {
+  widgetLabel: {
     fontSize: 11,
-        letterSpacing: 0.5,
+    fontWeight: '700',
+    letterSpacing: 0.5,
     marginBottom: 2,
+    textTransform: 'uppercase',
   },
-  infoValue: {
-    fontSize: 14,
-      },
+  widgetValue: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
 
   // Modal
   modalOverlay: {
@@ -574,20 +631,44 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   modalTitle: {
-    fontSize: 18,
-      },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    fontSize: 20,
+    fontWeight: '600',
   },
-  modalOptionText: {
-    fontSize: 15,
-      },
+  sheetContent: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  sheetOptionsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 32,
+  },
+  sheetOptionIconBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(150,150,150,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sheetOptionText: {
+    fontSize: 13,
+  },
+  fullPhotoClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 10,
+  }
 });

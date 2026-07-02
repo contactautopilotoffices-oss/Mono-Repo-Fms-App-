@@ -10,7 +10,7 @@ export interface Property {
   totalTickets: number;
   // Aggregated metrics
   healthScore: number; // 0-100
-  healthStatus: 'good' | 'warning' | 'critical';
+  healthStatus: 'good' | 'warning' | 'critical' | 'optimal';
   checklist: { 
     completed: number; 
     total: number;
@@ -20,6 +20,10 @@ export interface Property {
     diesel: number;    // Litres consumed today
     electricity: number; // kVAh consumed today
     trend: number;    // % change vs avg
+  };
+  water: {
+    quantity: number; // Units consumed this month
+    cost: number;     // Cost this month
   };
   tickets: { day: string; count: number }[];
   // Backwards compatibility / legacy fields

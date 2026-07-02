@@ -1,8 +1,8 @@
 /**
- * gamification.ts — Types and demo data for the gamified MST UI.
+ * gamification.ts — Types and fallback data for the gamified MST/Staff UI.
  *
  * In production, real data comes from useGamification hook + backend.
- * This file provides fallback shapes and mock data.
+ * This file provides fallback shapes, mock data, and mapping helpers.
  */
 
 export interface UserStats {
@@ -45,6 +45,29 @@ export interface Quest {
   reward: number;
   progress: number;
   total: number;
+}
+
+export interface GamificationBadgeInput {
+  code: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  tier: string;
+  points_bonus: number;
+  earned_at: string;
+}
+
+export interface GamificationNextInput {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  tier: string;
+  criteria?: Record<string, unknown>;
+  points_bonus: number;
 }
 
 export const defaultMstUser: UserStats = {
@@ -124,3 +147,40 @@ export const defaultQuests: Quest[] = [
   { id: 'q2', title: 'Log diesel reading', reward: 20, progress: 1, total: 1 },
   { id: 'q3', title: 'Update meter reading', reward: 20, progress: 0, total: 1 },
 ];
+
+function tierColor(tier?: string | null): string {
+  switch (tier?.toLowerCase()) {
+    case 'bronze':
+      return '#CD7F32';
+    case 'silver':
+      return '#C0C0C0';
+    case 'gold':
+      return '#FFD700';
+    case 'platinum':
+      return '#3ED6F7';
+    default:
+      return '#F59E0B';
+  }
+}
+
+export function mapBadgesToAchievements(badges: GamificationBadgeInput[]): Achievement[] {
+  return badges.map((b) => ({
+    id: b.code,
+    name: b.name,
+    description: b.description,
+    icon: b.icon || 'award',
+    unlocked: true,
+    tint: b.color || tierColor(b.tier),
+  }));
+}
+
+export function mapNextAchievementsToAchievements(next: GamificationNextInput[]): Achievement[] {
+  return next.map((a) => ({
+    id: a.id || a.code,
+    name: a.name,
+    description: a.description,
+    icon: a.icon || 'lock-closed',
+    unlocked: false,
+    tint: a.color || tierColor(a.tier),
+  }));
+}

@@ -38,6 +38,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
   const userRole = membership?.properties?.[0]?.role || membership?.org_role || 'tenant';
   const isTenant = userRole === 'tenant';
   const isSuperTenant = userRole === 'super_tenant';
+  const isMst = userRole === 'mst' || userRole === 'master_admin';
 
   const activeTab = propActiveTab || 'dashboard';
 
@@ -55,7 +56,6 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
     { label: 'Requests', icon: 'ticket-outline', route: isTenant || isSuperTenant ? 'tenant/requests' : 'tickets' },
     { label: 'Visitors', icon: 'walk-outline', route: 'visitors' },
     { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-    { label: 'Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
     { label: 'Stock', icon: 'business-outline', route: 'stock' },
     { label: 'Diesel', icon: 'water-outline', route: 'diesel', color: '#F97316' },
     { label: 'Electricity', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
@@ -66,7 +66,7 @@ export default function MobileFooter({ activeTab: propActiveTab, onMorePress, mo
     { label: 'Notifications', icon: 'notifications-outline', action: () => {} },
   ];
 
-  const menuItems = moreMenuItems ?? defaultMoreMenuItems;
+  const menuItems = moreMenuItems ?? defaultMoreMenuItems.filter((item) => !(isMst && item.route === 'flow-map'));
 
   return (
     <View style={styles.container}>

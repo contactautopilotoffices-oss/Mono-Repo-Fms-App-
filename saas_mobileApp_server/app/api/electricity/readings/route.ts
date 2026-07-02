@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     const admin = createAdminClient();
     let query = admin
       .from("electricity_readings")
-      .select("*, meter:electricity_meters(*)")
+      .select("*, meter:electricity_meters(*), user:users(full_name)")
       .eq("property_id", propertyId);
 
     if (meterId) query = query.eq("meter_id", meterId);

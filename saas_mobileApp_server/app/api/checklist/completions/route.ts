@@ -77,16 +77,18 @@ export async function POST(request: NextRequest) {
       .eq("template_id", body.template_id)
       .order("order_index", { ascending: true });
 
+    let createdItems = [];
     if (templateItems && templateItems.length > 0) {
       const itemsPayload = templateItems.map((item: any) => ({
         completion_id: data.id,
         checklist_item_id: item.id,
         is_checked: false,
       }));
-      await admin.from("sop_completion_items").insert(itemsPayload);
+      const { data: insertedItems } = await admin.from("sop_completion_items").insert(itemsPayload).select("*");
+      createdItems = insertedItems || itemsPayload;
     }
 
-    return NextResponse.json({ completion: data });
+    return NextResponse.json({ completion: { ...data, items: createdItems } });
   } catch (error) {
     console.error("[saas-mobile-server] checklist completions POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

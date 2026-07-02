@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { getValidToken } from '@/services/cassandra/cassandraAuthService';
 import { getWebSocketUrl } from '@/services/cassandra/cassandraAuthService';
+import { AuthSession } from '@/context/AuthContext';
+import { requestAudioPermissionWithSettings } from '@/utils/permissions';
 import { toast } from '@/lib/toast';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -357,8 +359,8 @@ export function useCassandraVoice(
     const { Audio } = av;
 
     try {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
+      const isGranted = await requestAudioPermissionWithSettings();
+      if (!isGranted) {
         onError?.('Microphone permission denied.');
         setVoiceState('error');
         return;

@@ -7,7 +7,9 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { User, Session } from '@supabase/supabase-js';
 
@@ -135,6 +137,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Fast path: return cached data without a loading state flash
       const cached = await loadCachedMembership(userId);
       if (cached) {
+        // Validate selected property immediately from cache to prevent 403s on stale data
+        const currentPropId = useDashboardStore.getState().selectedPropertyId;
+        const hasAccess = cached.properties?.some((p: any) => p.id === currentPropId);
+        if (!hasAccess && cached.properties && cached.properties.length > 0) {
+          useDashboardStore.getState().setSelectedPropertyId(cached.properties[0].id);
+        }
+        
         setMembership(cached);
         // Even with cache hit, we still fetch in background to refresh,
         // but we don't block the UI.
@@ -252,10 +261,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           properties: builtProperties,
         };
 
-        // Always initialize dashboardStore with the first property from fresh membership data.
-        // This overrides any stale persisted propertyId from a previous session.
+        // Validate or initialize dashboardStore selectedPropertyId
+        // This overrides any stale persisted propertyId from a previous session,
+        // but preserves it if the user still has access.
         if (builtProperties.length > 0) {
-          useDashboardStore.getState().setSelectedPropertyId(builtProperties[0].id);
+          const currentPropId = useDashboardStore.getState().selectedPropertyId;
+          const hasAccess = builtProperties.some((p) => p.id === currentPropId);
+          if (!hasAccess) {
+            useDashboardStore.getState().setSelectedPropertyId(builtProperties[0].id);
+          }
         }
 
         await persistMembershipCache(userId, membershipData);
@@ -457,7 +471,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const resetPassword = useCallback(
     async (email: string) => {
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      const resetUrl = Linking.createURL('/reset-password');
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: resetUrl,
+      });
       if (error) throw new Error(error.message);
     },
     [supabase]

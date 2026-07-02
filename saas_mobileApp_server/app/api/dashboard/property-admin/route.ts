@@ -70,8 +70,8 @@ export async function GET(request: NextRequest) {
     const bulkQueries = Promise.all([
       // Property Name (only if single)
       isAll 
-        ? Promise.resolve({ data: { name: 'All Properties Overview' } })
-        : admin.from('properties').select('name').eq('id', propertyId).single(),
+        ? Promise.resolve({ data: { name: 'All Properties Overview', image_url: null } })
+        : admin.from('properties').select('name, image_url').eq('id', propertyId).single(),
         
       // Recent Tickets
       admin.from('tickets')
@@ -129,8 +129,9 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Build the per-property parallel queries
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
     const perPropQueries = Promise.all(propIds.map(async (pid) => {
-      const [elec, elecMonthly, diesel, health, attention, funnel, ppm, ppmSchedules] = await Promise.all([
+      const [elec, elecMonthly, diesel, water, health, attention, funnel, ppm, ppmSchedules] = await Promise.all([
         // Last reading (for trend calculation)
         admin.from('electricity_readings')
           .select('final_units, computed_units, created_at')
@@ -142,7 +143,7 @@ export async function GET(request: NextRequest) {
         admin.from('electricity_readings')
           .select('computed_units, final_units, created_at')
           .eq('property_id', pid)
-          .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
+          .gte('created_at', monthStart)
           .order('created_at', { ascending: true }),
         admin.from('diesel_readings')
           .select('closing_diesel_level, computed_consumed_litres')
@@ -150,6 +151,11 @@ export async function GET(request: NextRequest) {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle(),
+        // Water readings for current month
+        admin.from('water_readings')
+          .select('quantity, computed_cost')
+          .eq('property_id', pid)
+          .gte('created_at', monthStart),
         admin.rpc('get_property_health_score', { p_property_id: pid }),
         admin.rpc('get_attention_items', { p_property_id: pid, p_limit: 10 }),
         admin.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }),
@@ -159,7 +165,7 @@ export async function GET(request: NextRequest) {
           .eq('property_id', pid)
           .order('planned_date', { ascending: true })
       ]);
-      return { elec, elecMonthly, diesel, health, attention, funnel, ppm, ppmSchedules };
+      return { elec, elecMonthly, diesel, water, health, attention, funnel, ppm, ppmSchedules };
     }));
 
     // Wait for all queries to execute
@@ -205,6 +211,8 @@ export async function GET(request: NextRequest) {
     let totalDieselLevel = 0;
     let totalDieselConsumption = 0;
     let dieselCount = 0;
+    let totalWaterQuantity = 0;
+    let totalWaterCost = 0;
     let healthSum = 0;
     let attentionArr: any[] = [];
     let funnelCounts: Record<string, number> = {};
@@ -234,6 +242,10 @@ export async function GET(request: NextRequest) {
         totalDieselLevel += (res.diesel.data.closing_diesel_level || 0);
         totalDieselConsumption += (res.diesel.data.computed_consumed_litres || 0);
         dieselCount++;
+      }
+      if (res.water.data && Array.isArray(res.water.data)) {
+        totalWaterQuantity += (res.water.data as any[]).reduce((sum, r) => sum + (r.quantity || 0), 0);
+        totalWaterCost += (res.water.data as any[]).reduce((sum, r) => sum + (r.computed_cost || 0), 0);
       }
       if (res.health.data) healthSum += (res.health.data as number);
       if (res.attention.data) attentionArr.push(...(res.attention.data as any[]));
@@ -289,6 +301,10 @@ export async function GET(request: NextRequest) {
       dieselStats: {
         level: dieselCount > 0 ? Math.round(totalDieselLevel / dieselCount) : 0,
         consumption: Math.round(totalDieselConsumption),
+      },
+      waterStats: {
+        quantity: Math.round(totalWaterQuantity),
+        cost: Math.round(totalWaterCost),
       },
       ppm: {
         total: pTotal,

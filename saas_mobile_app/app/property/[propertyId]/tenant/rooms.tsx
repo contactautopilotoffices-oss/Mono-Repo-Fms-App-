@@ -12,6 +12,7 @@ import {
   TextInput,
   Alert,
   Image,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +36,7 @@ import {
 import { SPACING } from '@/constants/designSystem';
 import type { MeetingRoom, MeetingRoomBooking } from '@/services/meetingRoomService';
 import { MapPin, Users, Armchair } from 'lucide-react-native';
+import { ScrollableTimePicker } from '@/components/shared/ScrollableTimePicker';
 
 function getAmenityIcon(amenity: string): string {
   const map: Record<string, string> = {
@@ -72,6 +74,14 @@ const FONT_BODY = Platform.select({
 });
 
 type TabType = 'rooms' | 'myBookings' | 'allBookings';
+
+function addMinutes(time: string, mins: number): string {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + mins;
+  const nh = Math.floor(total / 60);
+  const nm = total % 60;
+  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+}
 
 export default function TenantRoomsPage() {
   const router = useRouter();
@@ -141,6 +151,10 @@ export default function TenantRoomsPage() {
       Alert.alert('Missing Info', 'Please fill in all required fields.');
       return;
     }
+    if (bookingEndTime <= bookingStartTime) {
+      Alert.alert('Invalid Time', 'End time must be after start time.');
+      return;
+    }
     try {
       const startTime = new Date(`${bookingDate}T${bookingStartTime}`).toISOString();
       const endTime = new Date(`${bookingDate}T${bookingEndTime}`).toISOString();
@@ -157,7 +171,8 @@ export default function TenantRoomsPage() {
         Alert.alert('Success', 'Room booked successfully!');
         setShowBookingModal(false);
         resetBookingForm();
-        refetchMyBookings();
+        await refetchMyBookings();
+        setActiveTab('myBookings');
       } else {
         Alert.alert('Error', res.error || 'Could not book room. Please try again.');
       }
@@ -298,6 +313,9 @@ export default function TenantRoomsPage() {
               {item.booking_date || 'No date'} · {item.start_time || ''} - {item.end_time || ''}
               {item.start_time && item.end_time ? ` (${(new Date(`1970-01-01T${item.end_time}`).getTime() - new Date(`1970-01-01T${item.start_time}`).getTime()) / (1000 * 60 * 60)} hrs)` : ''}
             </Text>
+            {item.comment ? (
+              <Text style={styles.bookingComment} numberOfLines={2}>Comment: {item.comment}</Text>
+            ) : null}
           </View>
           <View style={[styles.statusBadge, { backgroundColor: 'rgba(16,185,129,0.15)' }]}>
             <Text style={[styles.statusText, { color: '#10B981' }]}>{item.status || 'Booked'}</Text>
@@ -404,23 +422,28 @@ export default function TenantRoomsPage() {
             <View style={styles.timeRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>Start Time *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="09:00"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
+                <ScrollableTimePicker
                   value={bookingStartTime}
-                  onChangeText={setBookingStartTime}
+                  onChange={(val) => {
+                    setBookingStartTime(val);
+                    if (bookingEndTime <= val) {
+                      setBookingEndTime(addMinutes(val, 15));
+                    }
+                  }}
+                  minHour={8}
+                  maxHour={21}
+                  minuteStep={15}
                 />
               </View>
               <View style={{ width: 12 }} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>End Time *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="10:00"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
+                <ScrollableTimePicker
                   value={bookingEndTime}
-                  onChangeText={setBookingEndTime}
+                  onChange={setBookingEndTime}
+                  minHour={8}
+                  maxHour={22}
+                  minuteStep={15}
                 />
               </View>
             </View>
@@ -558,6 +581,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Urbanist-Medium',
     color: '#94A3B8',
+  },
+  bookingComment: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Medium',
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 4,
   },
   statusBadge: {
     paddingHorizontal: 10,

@@ -39,9 +39,15 @@ export async function POST(request: NextRequest) {
 
       if (body.fileBase64) {
         const buffer = Buffer.from(body.fileBase64, "base64");
-        const ext = type === "video" ? "mp4" : "jpg";
-        const blob = new Blob([buffer], { type: type === "video" ? "video/mp4" : "image/jpeg" });
-        file = new File([blob], `${itemId}-${Date.now()}.${ext}`, { type: blob.type });
+        const ext = body.fileName
+          ? body.fileName.split(".").pop()
+          : type === "video"
+            ? "mp4"
+            : "jpg";
+        const blobType = body.contentType || (type === "video" ? "video/mp4" : "image/jpeg");
+        const fileName = body.fileName || `${itemId}-${Date.now()}.${ext}`;
+        const blob = new Blob([buffer], { type: blobType });
+        file = new File([blob], fileName, { type: blobType });
       }
     }
 

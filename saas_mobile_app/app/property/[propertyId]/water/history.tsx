@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   Alert,
 } from 'react-native';
@@ -12,10 +11,10 @@ import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { waterService, WaterReading, WaterSource } from '@/services/waterService';
+import { waterService, WaterReading, computeReadingCost } from '@/services/waterService';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { Trash2, ChevronDown } from 'lucide-react-native';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
@@ -43,7 +42,7 @@ export default function WaterHistoryScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load water data'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2 }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
   );
 
   const sources = data?.sources ?? [];
@@ -62,7 +61,7 @@ export default function WaterHistoryScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load readings'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2 }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
   );
 
   const filteredReadings = useMemo(() => {
@@ -93,18 +92,23 @@ export default function WaterHistoryScreen() {
 
   const renderItem = ({ item }: { item: WaterReading }) => {
     const sourceName = item.source?.name || sources.find(s => s.id === item.source_id)?.name || 'Unknown';
+    // Recompute display cost so existing readings with computed_cost=0 still show a value when a tariff exists.
+    const displayCost = computeReadingCost(item, sources.flatMap(s => s.water_tariffs ?? []));
     return (
       <View style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.rowLeft}>
           <Text style={[styles.rowDate, { color: colors.text }]}>
             {new Date(item.reading_date + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </Text>
-          <Text style={[styles.rowSource, { color: colors.textSecondary }]}>{sourceName}</Text>
+          <Text style={[styles.rowSource, { color: colors.textSecondary }]}>
+            {sourceName}
+            {(item as any).user?.full_name ? ` · ${(item as any).user.full_name}` : ''}
+          </Text>
         </View>
         <View style={styles.rowRight}>
           <View style={styles.rowMeta}>
             <Text style={[styles.rowQty, { color: colors.text }]}>{item.quantity} units</Text>
-            <Text style={[styles.rowCost, { color: '#10B981' }]}>₹{Math.round(item.computed_cost || 0).toLocaleString()}</Text>
+            <Text style={[styles.rowCost, { color: '#10B981' }]}>₹{Math.round(displayCost).toLocaleString()}</Text>
           </View>
           <TouchableOpacity onPress={() => handleDelete(item)} style={styles.deleteBtn}>
             <Trash2 size={16} color="#ef4444" />

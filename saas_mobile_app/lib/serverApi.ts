@@ -11,7 +11,8 @@ import { getSupabaseToken } from '@/utils/supabase/mobile-auth';
 // Configuration
 // ---------------------------------------------------------------------------
 
-const MOBILE_SERVER_URL = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://localhost:3001';
+const MOBILE_SERVER_URL = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.0.224:3000';
+console.log('[serverApi] Initialized with MOBILE_SERVER_URL:', MOBILE_SERVER_URL);
 
 // ---------------------------------------------------------------------------
 // Response type (kept identical for callers)
@@ -102,6 +103,7 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
       }
     }
 
+    console.log(`[serverApi] POST ${MOBILE_SERVER_URL}${endpoint}`);
     return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
       method: 'POST',
       headers,
@@ -181,6 +183,8 @@ async function serverGet(
         url.searchParams.set(key, String(value));
       }
     }
+
+    console.log(`[serverApi] GET ${url.toString()}`);
 
     return fetch(url.toString(), {
       method: 'GET',

@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
 
     let readingQuery = admin
       .from("water_readings")
-      .select("*, source:water_sources(name, source_type)")
+      .select("*, source:water_sources(name, source_type), user:users!water_readings_created_by_fkey(full_name)")
       .in("source_id", sourceIds);
 
     if (month) {
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 
 function getNextMonth(month: string): string {
   const [year, m] = month.split("-").map(Number);
-  const date = new Date(year, m, 1);
+  const date = new Date(Date.UTC(year, m, 1));
   return date.toISOString().split("T")[0];
 }
 
@@ -103,6 +103,36 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const savedReadings = [];
 
+    // Helper to resolve a tariff from the embedded RPC result or fallback to a direct query.
+    // The fallback protects against RPC timezone/edge-case mismatches so computed_cost is always populated.
+    async function resolveTariff(sourceId: string, readingDate: string) {
+      const { data: tariffData } = await admin.rpc("get_active_water_tariff", {
+        p_source_id: sourceId,
+        p_date: readingDate,
+      });
+      const tariffRow = Array.isArray(tariffData) ? tariffData[0] : tariffData;
+      if (tariffRow) return tariffRow as { id: string; rate_per_unit: number };
+
+      const { data: fallbackTariffs } = await admin
+        .from("water_tariffs")
+        .select("id, rate_per_unit, effective_from")
+        .eq("source_id", sourceId)
+        .lte("effective_from", readingDate)
+        .order("effective_from", { ascending: false })
+        .limit(1);
+      const fallback = (fallbackTariffs ?? [])[0];
+      if (fallback) return fallback as { id: string; rate_per_unit: number };
+
+      // No tariff active for the reading date; use the most recent tariff as a last resort.
+      const { data: latestTariff } = await admin
+        .from("water_tariffs")
+        .select("id, rate_per_unit")
+        .eq("source_id", sourceId)
+        .order("effective_from", { ascending: false })
+        .limit(1);
+      return (latestTariff ?? [])[0] as { id: string; rate_per_unit: number } | null;
+    }
+
     for (const reading of readings) {
       if (!reading.source_id || !reading.reading_date || reading.quantity === undefined) {
         return NextResponse.json({ error: "Missing reading fields" }, { status: 400 });
@@ -111,14 +141,9 @@ export async function POST(request: NextRequest) {
       const quantity = Number(reading.quantity);
 
       // Lookup active tariff for this source/date
-      const { data: tariffData } = await admin.rpc("get_active_water_tariff", {
-        p_source_id: reading.source_id,
-        p_date: reading.reading_date,
-      });
-
-      const tariffRow = (tariffData as any)?.[0];
-      const tariffRate = tariffRow?.rate_per_unit ?? 0;
-      const tariffId = tariffRow?.id ?? null;
+      const tariff = await resolveTariff(reading.source_id, reading.reading_date);
+      const tariffRate = tariff?.rate_per_unit ?? 0;
+      const tariffId = tariff?.id ?? null;
       const computedCost = quantity * tariffRate;
 
       const { data: existing } = await admin

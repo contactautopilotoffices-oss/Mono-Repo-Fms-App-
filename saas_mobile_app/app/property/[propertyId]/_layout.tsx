@@ -40,6 +40,7 @@ import {
   Wrench,
   Shield,
   ShoppingBag,
+  UtensilsCrossed,
 } from 'lucide-react-native';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -109,6 +110,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Diesel',           route: 'diesel',       icon: Fuel,            domain: 'assets' },
   { label: 'Electricity',       route: 'electricity',  icon: Zap,             domain: 'assets' },
   { label: 'Water',             route: 'water',        icon: Droplets,        domain: 'water' },
+  { label: 'Cafeteria',         route: 'cafeteria',    icon: UtensilsCrossed, domain: 'cafeteria' },
   { label: 'Stock / Inventory', route: 'stock',        icon: Package,         domain: 'stock' },
   { label: 'Procurement',       route: 'procurement',  icon: ShoppingBag,     domain: 'procurement' },
   { label: 'SOPs & Checklists', route: 'checklist',    icon: ClipboardList,   domain: 'sop' },
@@ -119,7 +121,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const NAV_SECTIONS: { label: string; routes: string[] }[] = [
   { label: 'OPERATIONS', routes: ['dashboard', 'tickets', 'flow-map', 'users', 'visitors', 'security', 'rooms'] },
-  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'water', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
+  { label: 'UTILITIES',  routes: ['diesel', 'electricity', 'water', 'cafeteria', 'stock', 'procurement', 'checklist', 'ppm', 'reports'] },
 ];
 
 // ---- Get User Initials ----

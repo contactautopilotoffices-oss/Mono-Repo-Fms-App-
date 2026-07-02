@@ -279,6 +279,51 @@ export function isDue(
   return { due: true, label: "Due", status: "due" };
 }
 
+export function getNextHourlySlotStart(
+  frequency: string,
+  startTime: string | null,
+  endTime: string | null,
+  now: Date,
+): Date | null {
+  const intervalH = parseHourlyInterval(frequency);
+  if (!intervalH || !startTime || !endTime) return null;
+
+  const ist = getISTDateParts(now);
+  const nowMins = ist.totalMins;
+  const [sH, sM] = startTime.slice(0, 5).split(":").map(Number);
+  const [eH, eM] = endTime.slice(0, 5).split(":").map(Number);
+  const startMins = sH * 60 + sM;
+  const endMins = eH * 60 + eM;
+  const isOvernight = endMins <= startMins;
+
+  let baselineDateStr = ist.isoDate;
+  if (isOvernight && nowMins < endMins) {
+    const yesterday = new Date(now.getTime() - 86400000);
+    baselineDateStr = getISTDateParts(yesterday).isoDate;
+  }
+
+  const baselineStart = new Date(
+    `${baselineDateStr}T${startTime.slice(0, 5)}:00+05:30`,
+  );
+  const windowDurationMins = isOvernight
+    ? 1440 - startMins + endMins
+    : endMins - startMins;
+
+  const slots: Date[] = [];
+  let t = 0;
+  while (t + intervalH * 60 <= windowDurationMins) {
+    slots.push(new Date(baselineStart.getTime() + t * 60 * 1000));
+    t += intervalH * 60;
+  }
+
+  const nextToday = slots.find((s) => s > now);
+  if (nextToday) return nextToday;
+
+  const tomorrow = new Date(now.getTime() + 86400000);
+  const tomorrowStr = getISTDateParts(tomorrow).isoDate;
+  return new Date(`${tomorrowStr}T${startTime.slice(0, 5)}:00+05:30`);
+}
+
 export function getDueStatus(
   frequency: string,
   lastCompletionDate: string | null,

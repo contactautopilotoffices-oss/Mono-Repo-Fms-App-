@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Trash2, AlertTriangle, Save, Pencil, Clock, ChevronDown, Droplets } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { WaterSource, WaterReading, WaterTariff } from '@/services/waterService';
+import { WaterSource, WaterReading, WaterTariff, computeReadingCost, toDateStr } from '@/services/waterService';
 import { CustomDatePicker } from '@/components/shared/CustomDatePicker';
 
 interface WaterLoggerCardProps {
@@ -36,9 +36,11 @@ export function WaterLoggerCard({
   const sourceTariffs = useMemo(() => tariffs.filter(t => t.source_id === source.id), [tariffs, source.id]);
 
   const activeTariff = useMemo(() => {
-    const sorted = [...sourceTariffs].sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1));
-    return sorted[0] || null;
-  }, [sourceTariffs]);
+    const sorted = [...sourceTariffs].sort((a, b) =>
+      toDateStr(a.effective_from) < toDateStr(b.effective_from) ? 1 : -1
+    );
+    return sorted.find(t => toDateStr(t.effective_from) <= readingDateStr) || sorted[0] || null;
+  }, [sourceTariffs, readingDateStr]);
 
   const unitLabel = source.source_type === 'jar' ? 'Jars' : 'Loads';
   const typeLabel = source.source_type === 'jar' ? 'Drinking Water' : 'Tanker Water';
@@ -49,13 +51,13 @@ export function WaterLoggerCard({
   );
 
   const mtdUnits = useMemo(() =>
-    mtdReadings.reduce((sum, r) => sum + (r.quantity || 0), 0),
+    mtdReadings.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0),
     [mtdReadings]
   );
 
   const mtdCost = useMemo(() =>
-    mtdReadings.reduce((sum, r) => sum + (r.computed_cost || 0), 0),
-    [mtdReadings]
+    mtdReadings.reduce((sum, r) => sum + computeReadingCost(r, sourceTariffs), 0),
+    [mtdReadings, sourceTariffs]
   );
 
   // Pre-fill if current reading exists

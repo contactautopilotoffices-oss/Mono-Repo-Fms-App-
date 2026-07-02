@@ -121,12 +121,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Send notifications
-    const results = [];
-    for (const notif of notificationsToSend) {
-      const result = await sendPushNotification(notif);
-      results.push(result);
-    }
+    // 4. Web app backend handles push notifications
+    const results: any[] = [];
+
 
     return NextResponse.json({
       success: true,

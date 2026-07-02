@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { createAnonClient } from "@/lib/supabase/client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordTicketResolution } from "@/lib/gamification/scoring";
 
 /**
  * POST /api/tickets/[id]/resolve
@@ -124,20 +125,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       new_value: finalStatus,
     });
 
-    // Send push notification to tenant if pending validation
-    if (finalStatus === "pending_validation") {
-      const { sendPushNotification, NOTIFICATION_TYPES } = await import("@/lib/notificationService");
-      sendPushNotification({
-        userId: ticket.raised_by,
-        propertyId: ticket.property_id,
-        organizationId: ticket.organization_id,
-        type: NOTIFICATION_TYPES.TICKET_CREATED, // Using existing type
-        title: "Work Completed — Your Approval Needed",
-        message: `Your request "${ticket.title}" has been resolved. Please review and confirm.`,
-        ticketId: ticket.id,
-        priority: ticket.priority === "critical" || ticket.priority === "urgent" ? "HIGH" : "NORMAL",
-      }).catch(err => console.warn("[Push] Failed to send notification:", err));
-    }
+    // Update gamification scores
+    const slaMet =
+      !ticket.sla_breached &&
+      (!ticket.sla_deadline || new Date(ticket.sla_deadline) >= new Date(now));
+    await recordTicketResolution(admin, { ...ticket, status: finalStatus, resolved_at: now }, auth.user.id, {
+      slaMet,
+    });
+
+    // Web app backend handles push notifications, so we do not send them here to avoid duplicates.
 
     return NextResponse.json({
       success: true,

@@ -15,6 +15,7 @@ import {
   Alert,
   RefreshControl,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useGlobalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors, DesignTokens } from '@/constants/Colors';
 import { toast } from '@/lib/toast';
+import { requestCameraPermissionWithSettings } from '@/utils/permissions';
 import { LinearGradient } from 'expo-linear-gradient';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import SafeBlurView from '@/components/ui/SafeBlurView';
@@ -761,8 +763,8 @@ function CheckInForm({
 
   const handleTakePhoto = async () => {
     setTakingPhoto(true);
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
+    const isGranted = await requestCameraPermissionWithSettings();
+    if (!isGranted) {
       toast.error('Camera permission required');
       setTakingPhoto(false);
       return;
@@ -1239,7 +1241,7 @@ export default function VisitorsScreen() {
   const { data, isLoading, isFetching, refetch } = useServerQuery(
     [...queryKeys.property.visitors(propertyId), statusFilter, dateFilter, customFromDate.toISOString(), customToDate.toISOString()],
     fetchVisitors,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
   );
 
   const visitors = data?.visitors ?? [];

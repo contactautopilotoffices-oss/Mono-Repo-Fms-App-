@@ -4,6 +4,7 @@
 
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import { requestAudioPermissionWithSettings } from '@/utils/permissions';
 
 const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const GROQ_WHISPER_MODEL = 'whisper-large-v3';
@@ -11,8 +12,7 @@ const GROQ_WHISPER_MODEL = 'whisper-large-v3';
 let currentRecording: Audio.Recording | null = null;
 
 export async function requestAudioPermission(): Promise<boolean> {
-  const { status } = await Audio.requestPermissionsAsync();
-  return status === 'granted';
+  return await requestAudioPermissionWithSettings();
 }
 
 export async function startRecording(): Promise<boolean> {

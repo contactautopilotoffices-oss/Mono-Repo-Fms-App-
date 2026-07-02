@@ -48,15 +48,29 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const publicUrl = urlData.publicUrl;
 
     // Update user profile with photo URL
-    const anonClient = createAnonClient(auth.token);
-    const { error: updateError } = await anonClient
+    const { data: updatedUsers, error: updateError } = await supabase
       .from("users")
       .update({ user_photo_url: publicUrl })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
 
     if (updateError) {
       console.error("[users/[id]/photo] update error:", updateError);
       return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });
+    }
+
+    if (!updatedUsers || updatedUsers.length === 0) {
+      // User doesn't exist in public.users yet, create them
+      const { error: insertError } = await supabase.from("users").insert({
+        id,
+        email: auth.user.email || "",
+        full_name: auth.user.email?.split("@")[0] || "User",
+        user_photo_url: publicUrl,
+      });
+      if (insertError) {
+        console.error("[users/[id]/photo] insert error:", insertError);
+        return NextResponse.json({ error: "Failed to create profile" }, { status: 500 });
+      }
     }
 
     return NextResponse.json({

@@ -21,25 +21,25 @@ import {
   Platform,
   Image,
   Dimensions,
-  Linking,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
-import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
+import { useGlobalSearchParams, useRouter, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeIn, SlideInDown } from "react-native-reanimated";
+import { requestCameraPermissionWithSettings, requestMediaLibraryPermissionWithSettings } from '@/utils/permissions';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/context";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors } from "@/constants/Colors";
-import SafeBlurView from "@/components/ui/SafeBlurView";
 
 import { LoggersMenu } from "@/components/shared/LoggersMenu";
 import { checklistService } from "@/services/checklistService";
-import { isDue, getCompletionSlot, computeSlotTime, parseHourlyInterval as getHourlyInterval, isWithinTimeWindow, fmt12h, getISTDateParts } from "@/utils/checklistTime";
+import { isDue, getCompletionSlot, computeSlotTime, getNextHourlySlotStart, parseHourlyInterval as getHourlyInterval, isWithinTimeWindow, fmt12h, fmtRemaining, getISTDateParts } from "@/utils/checklistTime";
 import { processAndStampImage } from "@/utils/mediaProcessor";
 
 import {
   CheckSquare,
+  Check,
   Plus,
   ClipboardList,
   Play,
@@ -66,7 +66,8 @@ import {
   Repeat,
   Lock,
   Eye,
-  Video,
+  Film,
+  Download,
   LayoutGrid,
   Square,
   Loader2,
@@ -76,7 +77,11 @@ import {
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
+import { File, Paths } from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import Svg, { Circle as SvgCircle } from "react-native-svg";
+import * as ExpoAV from "expo-av";
+import MediaViewerModal from "@/components/shared/MediaViewerModal";
 import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from "@/utils/queryKeys";
 
@@ -123,7 +128,7 @@ interface SOPCompletionItem {
   checked_at?: string;
   checked_by?: string;
   checklist_item_id: string;
-  checked_by_user?: { full_name: string };
+  checked_by_user?: { full_name: string } | { full_name: string }[];
   admin_rating?: number | null;
 }
 
@@ -227,7 +232,7 @@ function computeDueStatus(
     startTime || null,
     endTime || null,
     lastCompletedAt || null,
-    completions.find((c) => c.status === "pending")?.started_at,
+    completions.find((c) => c.status === "in_progress")?.created_at,
     refDate
   );
   return result as { due: boolean; label: string; status: DueStatus };
@@ -377,14 +382,6 @@ function formatRelative(dateStr: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function fmtRemaining(ms: number): string {
-  const totalSecs = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
 function getSlotWindow(
   slotTime: string | null | undefined,
   frequency: string | undefined | null,
@@ -489,10 +486,10 @@ function StatusBadge({ status, label }: { status: DueStatus; label: string }) {
   const { theme } = useTheme();
   const sysColors = Colors[theme];
   const badgeColors: Record<string, { bg: string; text: string }> = {
-    due: { bg: "#718f9620", text: sysColors.primary },
+    due: { bg: "#F59E0B20", text: "#F59E0B" },
     missed: { bg: "#EF444420", text: sysColors.error || sysColors.warning },
     completed: { bg: "#10B98120", text: sysColors.success },
-    upcoming: { bg: "#F59E0B20", text: "#F59E0B" },
+    upcoming: { bg: "#3B82F620", text: "#3B82F6" },
     paused: { bg: "#6B728020", text: "#6B7280" },
   };
   const c = badgeColors[status] || badgeColors.upcoming;
@@ -527,6 +524,7 @@ const TemplateCard = ({
   ds,
   lastDone,
   inProgress,
+  liveNow,
   onPress,
   onStart,
 }: {
@@ -534,23 +532,36 @@ const TemplateCard = ({
   ds: DueStatusEntry;
   lastDone?: SOPCompletion;
   inProgress?: SOPCompletion;
+  liveNow: Date;
   onPress: () => void;
   onStart: () => void;
 }) => {
+  const { theme } = useTheme();
+  const colors = Colors[theme];
   const isPaused = !template.is_running;
   const displayStatus: DueStatus = isPaused ? "paused" : (ds.status || (inProgress ? "due" : "upcoming"));
+  const intervalH = getHourlyInterval(template.frequency);
+  const showCountdown =
+    displayStatus === "upcoming" &&
+    intervalH !== null &&
+    !!template.start_time &&
+    !!template.end_time;
+  const nextSlot = showCountdown
+    ? getNextHourlySlotStart(template.frequency, template.start_time, template.end_time, liveNow)
+    : null;
+  const countdownMs = nextSlot ? nextSlot.getTime() - liveNow.getTime() : 0;
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
-      <SafeBlurView intensity={40} style={[styles.historyCard, { marginBottom: 12 }]} tint="dark">
+      <View style={[styles.historyCard, { marginBottom: 12, backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.historyCardRow}>
           <View style={styles.historyCardContent}>
-            <Text style={styles.historyTitle}>{template.title}</Text>
-            <Text style={styles.historyMeta}>
+            <Text style={[styles.historyTitle, { color: colors.text }]}>{template.title}</Text>
+            <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>
               {getFrequencyLabel(template.frequency)}
               {template.start_time ? ` · ${fmt12h(template.start_time)}` : ""}
             </Text>
             {!!template.description && (
-              <Text style={[styles.historyMeta, { marginTop: 4 }]} numberOfLines={2}>
+              <Text style={[styles.historyMeta, { marginTop: 4, color: colors.textSecondary }]} numberOfLines={2}>
                 {template.description}
               </Text>
             )}
@@ -558,25 +569,33 @@ const TemplateCard = ({
             <StatusBadge status={displayStatus} label={ds.label} />
 
             {!!lastDone?.completion_date && (
-              <Text style={[styles.historyMeta, { marginTop: 6 }]}>
+              <Text style={[styles.historyMeta, { marginTop: 6, color: colors.textSecondary }]}>
                 Last done {formatRelative(lastDone.completion_date)}
               </Text>
             )}
-            {!!ds.label && !isPaused && (
-              <Text style={[styles.historyMeta, { marginTop: 2 }]}>
+            {!!ds.label && !isPaused && !showCountdown && (
+              <Text style={[styles.historyMeta, { marginTop: 2, color: colors.textSecondary }]}>
                 {ds.label}
               </Text>
             )}
+            {showCountdown && countdownMs > 0 && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
+                <Clock size={12} color={colors.primary} />
+                <Text style={{ fontSize: 12, fontFamily: "Urbanist-Bold", color: colors.primary }}>
+                  Starts in {fmtRemaining(countdownMs)}
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.historyCardRight}>
-            <TouchableOpacity style={styles.startBtn} onPress={onStart}>
+            <TouchableOpacity style={[styles.startBtn, { backgroundColor: colors.primary }]} onPress={onStart}>
               <Play size={14} color="#FFFFFF" />
               <Text style={styles.startBtnText}>{inProgress ? "Resume" : isPaused ? "Start" : "Start"}</Text>
             </TouchableOpacity>
-            <ChevronRight size={18} color="rgba(255,255,255,0.55)" />
+            <ChevronRight size={18} color={colors.textSecondary} />
           </View>
         </View>
-      </SafeBlurView>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -585,15 +604,24 @@ const HistoryListCard = ({
   item,
   templates,
   dueStatusMap,
+  liveNow,
   onStart,
   onView,
 }: {
   item: HistoryItem;
   templates: SOPTemplate[];
   dueStatusMap: Record<string, DueStatusEntry>;
-  onStart: (template: SOPTemplate, inProgress?: SOPCompletion) => void;
+  liveNow: Date;
+  onStart: (
+    template: SOPTemplate,
+    inProgress?: SOPCompletion,
+    backfillDate?: string,
+    backfillSlot?: string,
+  ) => void;
   onView: (comp: SOPCompletion) => void;
 }) => {
+  const { theme } = useTheme();
+  const colors = Colors[theme];
   if (item.type === "template") {
     const template = item.data;
     const inProgress = template.completions.find((comp: SOPCompletion) => comp.status === "in_progress");
@@ -609,6 +637,7 @@ const HistoryListCard = ({
               new Date(a.completed_at || a.completion_date || 0).getTime()
           )[0]}
         inProgress={inProgress}
+        liveNow={liveNow}
         onPress={() => {
           if (inProgress) onView(inProgress);
         }}
@@ -620,18 +649,49 @@ const HistoryListCard = ({
   if (item.type === "completion") {
     const completion = item.data;
     const template = templates.find((entry) => entry.id === completion.template_id);
+    const isLate = completion.is_late === true;
+    const statusColor = isLate ? "#F59E0B" : "#10B981";
+    const iconBg = isLate ? "#FEF3C7" : "#D1FAE5";
+    const completedTime = completion.completed_at
+      ? new Date(completion.completed_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+      : completion.slot_time
+      ? fmt12h(completion.slot_time)
+      : "N/A";
+    const userName =
+      completion.user?.full_name ||
+      (completion as any).completed_by_user?.full_name ||
+      "Unknown";
+
     return (
       <TouchableOpacity onPress={() => onView(completion)} activeOpacity={0.85}>
-        <SafeBlurView intensity={40} style={[styles.historyCard, { marginBottom: 12 }]} tint="dark">
+        <View style={[styles.historyCard, { marginBottom: 12, backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.historyCardRow}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: iconBg, justifyContent: "center", alignItems: "center" }}>
+              <Check size={22} color={statusColor} strokeWidth={2.5} />
+            </View>
             <View style={styles.historyCardContent}>
-              <Text style={styles.historyTitle}>{template?.title || "Checklist Completion"}</Text>
-              <Text style={styles.historyMeta}>
-                {completion.status.replace("_", " ").toUpperCase()}
-                {completion.completion_date ? ` · ${formatRelative(completion.completion_date)}` : ""}
-              </Text>
-              {!!completion.slot_time && (
-                <Text style={styles.historyMeta}>{fmt12h(completion.slot_time)}</Text>
+              <Text style={[styles.historyTitle, { color: colors.text }]}>{template?.title || "Checklist Completion"}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 3 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                  <Clock size={12} color={isLate ? statusColor : colors.textSecondary} />
+                  <Text style={{ fontSize: 12, color: isLate ? statusColor : colors.textSecondary, fontFamily: "Urbanist-Medium" }}>
+                    {completedTime}
+                  </Text>
+                </View>
+                <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.textTertiary }} />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                  <User size={12} color={statusColor} />
+                  <Text style={{ fontSize: 12, color: statusColor, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
+                    {userName}
+                  </Text>
+                </View>
+              </View>
+              {isLate && (
+                <View style={{ alignSelf: "flex-start", marginTop: 6, backgroundColor: "#FEF3C7", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 9, fontFamily: "Urbanist-ExtraBold", color: "#F59E0B", letterSpacing: 0.5, textTransform: "uppercase" }}>
+                    LATE
+                  </Text>
+                </View>
               )}
               {completion.admin_rating ? (
                 <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 2 }}>
@@ -639,47 +699,60 @@ const HistoryListCard = ({
                     <Star
                       key={star}
                       size={10}
-                      color={star <= completion.admin_rating! ? "#FBBF24" : "rgba(255,255,255,0.2)"}
+                      color={star <= completion.admin_rating! ? "#FBBF24" : colors.textTertiary}
                       fill={star <= completion.admin_rating! ? "#FBBF24" : "none"}
                     />
                   ))}
-                  <Text style={{ fontSize: 9, color: "rgba(255,255,255,0.5)", marginLeft: 4 }}>
+                  <Text style={{ fontSize: 9, color: colors.textSecondary, marginLeft: 4 }}>
                     {completion.admin_rating === 1 ? "Needs Work" : completion.admin_rating === 2 ? "Acceptable" : "Excellent"}
                   </Text>
                 </View>
               ) : null}
             </View>
             <View style={styles.historyCardRight}>
-              <Eye size={16} color="#FFFFFF" />
+              <ChevronRight size={18} color={colors.textSecondary} />
             </View>
           </View>
-        </SafeBlurView>
+        </View>
       </TouchableOpacity>
     );
   }
 
   const missed = item.data;
   return (
-    <SafeBlurView intensity={40} style={[styles.historyCard, { marginBottom: 12 }]} tint="dark">
+    <View style={[styles.historyCard, { marginBottom: 12, backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.historyCardRow}>
         <View style={styles.historyCardContent}>
-          <Text style={styles.historyTitle}>{missed.template.title}</Text>
-          <Text style={styles.historyMeta}>Missed on {formatRelative(missed.date)}</Text>
-          <Text style={styles.historyMeta}>{missed.label}</Text>
+          <Text style={[styles.historyTitle, { color: colors.text }]}>{missed.template.title}</Text>
+          <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>Missed on {formatRelative(missed.date)}</Text>
+          <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>{missed.label}</Text>
         </View>
         <View style={styles.historyCardRight}>
-          <TouchableOpacity style={styles.startBtn} onPress={() => onStart(missed.template)}>
+          <TouchableOpacity
+            style={[styles.startBtn, { backgroundColor: colors.primary }]}
+            onPress={() =>
+              onStart(
+                missed.template,
+                undefined,
+                missed.date,
+                missed.slotTime || undefined,
+              )
+            }
+          >
             <RotateCcw size={14} color="#FFFFFF" />
             <Text style={styles.startBtnText}>Retry</Text>
           </TouchableOpacity>
         </View>
       </View>
-    </SafeBlurView>
+    </View>
   );
 }
 
 export default function ChecklistScreen() {
-  const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
+  const { propertyId, startTemplateId } = useGlobalSearchParams<{
+    propertyId: string;
+    startTemplateId?: string;
+  }>();
   const { theme } = useTheme();
   const { user, membership } = useAuth();
   const router = useRouter();
@@ -725,6 +798,35 @@ export default function ChecklistScreen() {
   // History detail
   const [historyCompletion, setHistoryCompletion] =
     useState<SOPCompletion | null>(null);
+  const [mediaViewer, setMediaViewer] = useState<
+    { uri: string; type: "photo" | "video" } | null
+  >(null);
+
+  const handleDownloadMedia = async (uri: string, type: "photo" | "video") => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Media library permission is needed to save files."
+        );
+        return;
+      }
+      const ext = type === "video" ? "mp4" : "jpg";
+      const mimeType = type === "video" ? "video/mp4" : "image/jpeg";
+      const fileName = `autopilot_${type}_${Date.now()}.${ext}`;
+      const destFile = Paths.cache.createFile(fileName, mimeType);
+      await File.downloadFileAsync(uri, destFile, { idempotent: true });
+      await MediaLibrary.saveToLibraryAsync(destFile.uri);
+      Alert.alert(
+        "Saved",
+        `${type === "video" ? "Video" : "Photo"} saved to gallery.`
+      );
+    } catch (err: any) {
+      console.error("[checklist] download media error:", err);
+      Alert.alert("Download Failed", err.message || "Could not save the file.");
+    }
+  };
 
   // Template form state
   const [tplTitle, setTplTitle] = useState("");
@@ -820,7 +922,7 @@ export default function ChecklistScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.checklist(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
   );
 
   const templates = data?.templates ?? [];
@@ -1071,7 +1173,7 @@ export default function ChecklistScreen() {
     }
 
     rawItems.sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date) * -1;
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
       return b.ts - a.ts;
     });
 
@@ -1105,6 +1207,12 @@ export default function ChecklistScreen() {
   const fetchAll = useCallback(async () => {
     await refetch();
   }, [refetch]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAll();
+    }, [fetchAll])
+  );
 
   const fetchTemplates = fetchAll;
 
@@ -1242,6 +1350,16 @@ export default function ChecklistScreen() {
     }
   };
 
+  // Auto-start a checklist scanned from the QR scanner
+  useEffect(() => {
+    if (!startTemplateId || !templates.length || isStarting) return;
+    const template = templates.find((t) => t.id === startTemplateId);
+    if (!template) return;
+    // Clear the deep-link param so it doesn't re-trigger
+    router.setParams({ startTemplateId: undefined });
+    handleStartChecklist(template);
+  }, [startTemplateId, templates, isStarting]);
+
   const initItemStates = (template: SOPTemplate, completion: SOPCompletion) => {
     const states: Record<
       string,
@@ -1288,7 +1406,11 @@ export default function ChecklistScreen() {
             : {}),
         };
         await checklistService.updateCompletion(activeCompletion.id, {
-          item: { completionItemId: compItem.id, ...updates },
+          item: {
+            completionItemId: compItem.id,
+            checklist_item_id: item.id,
+            ...updates,
+          },
         });
       }
     } catch {
@@ -1311,7 +1433,7 @@ export default function ChecklistScreen() {
     }));
     try {
       await checklistService.updateCompletion(activeCompletion.id, {
-        item: { completionItemId: compItem.id, comment },
+        item: { completionItemId: compItem.id, checklist_item_id: item.id, comment },
       });
     } catch {}
   };
@@ -1328,20 +1450,14 @@ export default function ChecklistScreen() {
     }));
     try {
       await checklistService.updateCompletion(activeCompletion.id, {
-        item: { completionItemId: compItem.id, value },
+        item: { completionItemId: compItem.id, checklist_item_id: item.id, value },
       });
     } catch {}
   };
 
   const handlePhotoCapture = async (item: ChecklistItem) => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission required",
-        "Camera access is needed to capture photos",
-      );
-      return;
-    }
+    const isGranted = await requestCameraPermissionWithSettings();
+    if (!isGranted) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images"],
       quality: 0.8,
@@ -1353,11 +1469,8 @@ export default function ChecklistScreen() {
   };
 
   const handleVideoCapture = async (item: ChecklistItem) => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission required", "Camera access needed for video");
-      return;
-    }
+    const isGranted = await requestCameraPermissionWithSettings();
+    if (!isGranted) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["videos"],
       quality: 0.8,
@@ -1370,11 +1483,8 @@ export default function ChecklistScreen() {
   };
 
   const handleGallerySelect = async (item: ChecklistItem) => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission required", "Gallery access is needed");
-      return;
-    }
+    const isGranted = await requestMediaLibraryPermissionWithSettings();
+    if (!isGranted) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images", "videos"],
       quality: 0.8,
@@ -1847,7 +1957,7 @@ export default function ChecklistScreen() {
     return liveNow.getTime() > slotEnd.getTime();
   }, [activeTemplate, activeCompletion, liveNow, runnerWindowClosed]);
 
-  const runnerIsReadOnly = false; // Logic updated per user request to allow editing anytime
+  const runnerIsReadOnly = activeCompletion?.status === "completed";
 
   const runnerCheckedCount = useMemo(() => {
     if (!activeCompletion || !activeTemplate) return 0;
@@ -1884,7 +1994,7 @@ export default function ChecklistScreen() {
     const sectionKeys = Object.keys(sections);
 
     return (
-      <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={{ flex: 1 }}
@@ -2075,6 +2185,7 @@ export default function ChecklistScreen() {
 
           {/* Items */}
           <FlashList
+            style={{ flex: 1 }}
             data={sectionKeys}
             keyExtractor={(s) => s}
             contentContainerStyle={{
@@ -2085,32 +2196,52 @@ export default function ChecklistScreen() {
             showsVerticalScrollIndicator={false}
             estimatedItemSize={180}
             ListFooterComponent={
-              <TouchableOpacity
-                style={{
-                  backgroundColor: "#64748B",
-                  borderRadius: 24,
-                  opacity: runnerIsReadOnly || runnerCheckedCount === 0 ? 0.5 : 1,
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  paddingVertical: 14,
-                  marginTop: 16,
-                  marginBottom: 32,
-                }}
-                onPress={handleCompleteChecklist}
-                disabled={runnerIsReadOnly || runnerCheckedCount === 0 || isSaving}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Text style={{ fontSize: 12, fontFamily: "Urbanist-Bold", color: "#FFFFFF", textTransform: 'uppercase', letterSpacing: 1, marginRight: 8 }}>
-                      {runnerIsReadOnly ? "READ ONLY" : `${runnerCheckedCount}/${totalItems} DONE`}
+              <View style={{ marginTop: 16, marginBottom: 32, gap: 12 }}>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: "#64748B",
+                    borderRadius: 24,
+                    opacity: runnerIsReadOnly || runnerCheckedCount === 0 ? 0.5 : 1,
+                    flexDirection: "row",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    paddingVertical: 14,
+                  }}
+                  onPress={handleCompleteChecklist}
+                  disabled={runnerIsReadOnly || runnerCheckedCount === 0 || isSaving}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Text style={{ fontSize: 12, fontFamily: "Urbanist-Bold", color: "#FFFFFF", textTransform: 'uppercase', letterSpacing: 1, marginRight: 8 }}>
+                        {runnerIsReadOnly ? "READ ONLY" : `${runnerCheckedCount}/${totalItems} DONE`}
+                      </Text>
+                      {!runnerIsReadOnly && <ChevronRight size={14} color="#FFFFFF" strokeWidth={3} />}
+                    </>
+                  )}
+                </TouchableOpacity>
+                
+                {!runnerIsReadOnly && (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: "transparent",
+                      borderRadius: 24,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      flexDirection: "row",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      paddingVertical: 14,
+                    }}
+                    onPress={() => setView("history")}
+                  >
+                    <Text style={{ fontSize: 12, fontFamily: "Urbanist-Bold", color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      SAVE FOR LATER
                     </Text>
-                    {!runnerIsReadOnly && <ChevronRight size={14} color="#FFFFFF" strokeWidth={3} />}
-                  </>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </View>
             }
             renderItem={({ item: section }) => (
               <View style={{ marginBottom: 16 }}>
@@ -2139,7 +2270,7 @@ export default function ChecklistScreen() {
                       <TouchableOpacity
                         style={{ flexDirection: 'row', alignItems: 'flex-start' }}
                         onPress={() =>
-                          itemType === "checkbox" || itemType === "yes_no"
+                          itemType === "checkbox"
                             ? toggleItem(checkItem)
                             : null
                         }
@@ -2381,7 +2512,7 @@ export default function ChecklistScreen() {
                           {state.video && (
                             <View style={{ width: 100, height: 75, borderRadius: 12, overflow: "hidden", backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, justifyContent: "center", alignItems: "center" }}>
                               <Play size={20} color="white" fill="rgba(255,255,255,0.4)" />
-                              <View style={{ position: "absolute", bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: "rgba(59, 130, 246, 0.8)", borderRadius: 4 }}>
+                              <View style={{ position: "absolute", bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: colors.primary, borderRadius: 4 }}>
                                 <Text style={{ color: "white", fontSize: 7, fontWeight: "bold" }}>VIDEO</Text>
                               </View>
                               <TouchableOpacity
@@ -2402,23 +2533,29 @@ export default function ChecklistScreen() {
                             style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
                             {state.photoUploading ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Camera size={18} color={colors.textTertiary} />}
-                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>CAPTURE</Text>
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>
+                              {state.photoUploading ? "UPLOADING..." : "CAPTURE"}
+                            </Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             onPress={() => !runnerIsReadOnly && handleGallerySelect(checkItem)}
                             disabled={runnerIsReadOnly || state.photoUploading || state.videoUploading}
                             style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
-                            <Paperclip size={18} color={colors.textTertiary} />
-                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>GALLERY</Text>
+                            {(state.photoUploading || state.videoUploading) ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Paperclip size={18} color={colors.textTertiary} />}
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>
+                              {(state.photoUploading || state.videoUploading) ? "UPLOADING..." : "GALLERY"}
+                            </Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             onPress={() => !runnerIsReadOnly && handleVideoCapture(checkItem)}
                             disabled={runnerIsReadOnly || state.videoUploading}
                             style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 1, borderColor: colors.border }}
                           >
-                            {state.videoUploading ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Video size={18} color={colors.textTertiary} />}
-                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>15S VIDEO</Text>
+                            {state.videoUploading ? <ActivityIndicator size="small" color={colors.textTertiary} /> : <Film size={18} color={colors.textTertiary} />}
+                            <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textTertiary, textTransform: "uppercase", letterSpacing: 1, marginTop: 8 }}>
+                              {state.videoUploading ? "UPLOADING..." : "15S VIDEO"}
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -2438,8 +2575,23 @@ export default function ChecklistScreen() {
     const template = templates.find(
       (t) => t.id === historyCompletion.template_id,
     );
+    const completedAuditItems = (template?.items || []).filter((it) => {
+      const ci = historyCompletion.items?.find(
+        (c) => c.checklist_item_id === it.id,
+      );
+      if (!ci) return false;
+      if (it.type === "text" || it.type === "number")
+        return !!ci.value?.trim();
+      if (it.type === "yes_no") return !!ci.value;
+      return !!ci.is_checked;
+    });
+    const auditScore = Math.round(
+      (completedAuditItems.length /
+        Math.max(template?.items?.length || 1, 1)) *
+        100,
+    );
     return (
-      <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View
           style={[
             runnerStyles.header,
@@ -2467,7 +2619,7 @@ export default function ChecklistScreen() {
             </TouchableOpacity>
             
             <View style={[runnerStyles.headerTitle, { flex: 1 }]}>
-              <Text style={[runnerStyles.headerTitleText, { color: colors.text, fontSize: 20 }]}>
+              <Text style={[runnerStyles.headerTitleText, { color: colors.text, fontSize: 18 }]}>
                 {template?.title || "Checklist"}
               </Text>
               
@@ -2484,6 +2636,22 @@ export default function ChecklistScreen() {
                       : "Unknown"}
                   </Text>
                 </View>
+                {(() => {
+                  const slotRange = getCompletionSlot(
+                    historyCompletion.completed_at || historyCompletion.created_at,
+                    template?.frequency,
+                    template?.start_time,
+                    historyCompletion.slot_time,
+                  );
+                  return slotRange ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Clock size={12} color={colors.textSecondary} />
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: "Urbanist-Medium", textTransform: "uppercase" }}>
+                        {slotRange}
+                      </Text>
+                    </View>
+                  ) : null;
+                })()}
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   <User size={12} color={colors.textSecondary} />
                   <Text style={{ fontSize: 11, color: colors.textSecondary, fontFamily: "Urbanist-Medium", textTransform: "uppercase" }}>
@@ -2519,12 +2687,13 @@ export default function ChecklistScreen() {
           </View>
         </View>
         <FlashList
+          style={{ flex: 1 }}
           data={(template?.items || []) as any[]}
           keyExtractor={(item) => (item as any).id}
           contentContainerStyle={{
             paddingHorizontal: 16,
             paddingTop: 16,
-            paddingBottom: 120,
+            paddingBottom: 200,
           }}
           estimatedItemSize={180}
           ListHeaderComponent={
@@ -2536,11 +2705,11 @@ export default function ChecklistScreen() {
                 </Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
                   <Text style={{ fontSize: 24, fontFamily: "Poppins-Bold", color: colors.text, lineHeight: 28 }}>
-                    {Math.round(((historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0) / Math.max((template?.items?.length || 1), 1)) * 100)}%
+                    {auditScore}%
                   </Text>
                   <View style={{ backgroundColor: colors.border, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
                     <Text style={{ fontSize: 11, fontFamily: "Urbanist-Bold", color: colors.textSecondary }}>
-                      {historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0}/{template?.items?.length || 0} PTS
+                      {completedAuditItems.length}/{template?.items?.length || 0} PTS
                     </Text>
                   </View>
                 </View>
@@ -2549,7 +2718,7 @@ export default function ChecklistScreen() {
                     height: '100%', 
                     backgroundColor: colors.success, 
                     borderRadius: 3, 
-                    width: `${Math.round(((historyCompletion?.items?.filter(ci => ci.is_checked)?.length || 0) / Math.max((template?.items?.length || 1), 1)) * 100)}%` 
+                    width: `${auditScore}%` 
                   }} />
                 </View>
               </View>
@@ -2564,6 +2733,14 @@ export default function ChecklistScreen() {
             const compItem = historyCompletion.items?.find(
               (ci) => ci.checklist_item_id === item.id,
             );
+            const itemCompleted = (() => {
+              if (!compItem) return false;
+              if (item.type === "text" || item.type === "number")
+                return !!compItem.value?.trim();
+              if (item.type === "yes_no") return !!compItem.value;
+              return !!compItem.is_checked;
+            })();
+            const itemTimestamp = compItem?.checked_at || (historyCompletion as any).completed_at || (historyCompletion as any).created_at;
             return (
               <View
                 style={[
@@ -2585,14 +2762,14 @@ export default function ChecklistScreen() {
                           width: 24,
                           height: 24,
                           borderRadius: 12,
-                          borderWidth: compItem?.is_checked ? 2 : 1,
-                          borderColor: compItem?.is_checked ? colors.success : colors.border,
+                          borderWidth: itemCompleted ? 2 : 1,
+                          borderColor: itemCompleted ? colors.success : colors.border,
                           justifyContent: 'center',
                           alignItems: 'center',
                           marginTop: 2,
                         }}
                       >
-                        {compItem?.is_checked ? (
+                        {itemCompleted ? (
                           <CheckCircle2 size={16} color={colors.success} strokeWidth={3} />
                         ) : (
                           <Circle size={14} color={colors.textTertiary} />
@@ -2615,20 +2792,24 @@ export default function ChecklistScreen() {
                         )}
                         
                         {/* User info inline */}
-                        {compItem?.checked_by_user && (
-                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8, gap: 12 }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                              <User size={10} color={colors.textSecondary} />
-                              <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
-                                {compItem.checked_by_user.full_name}
-                              </Text>
-                            </View>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                              <Clock size={10} color={colors.textSecondary} />
-                              <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
-                                {compItem.checked_at ? new Date(compItem.checked_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""}
-                              </Text>
-                            </View>
+                        {(compItem?.checked_by_user || compItem?.checked_at) && (
+                          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 8, gap: 12, flexWrap: "wrap" }}>
+                            {compItem?.checked_by_user && (
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <User size={10} color={colors.textSecondary} />
+                                <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
+                                  {Array.isArray(compItem.checked_by_user) ? compItem.checked_by_user[0]?.full_name : compItem.checked_by_user?.full_name}
+                                </Text>
+                              </View>
+                            )}
+                            {itemTimestamp && (
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <Clock size={10} color={colors.textSecondary} />
+                                <Text style={{ fontSize: 10, color: colors.textSecondary, fontFamily: "Urbanist-Bold", textTransform: "uppercase" }}>
+                                  {new Date(itemTimestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                                </Text>
+                              </View>
+                            )}
                           </View>
                         )}
                       </View>
@@ -2648,26 +2829,45 @@ export default function ChecklistScreen() {
                         <Eye size={12} color={colors.textSecondary} />
                         <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, letterSpacing: 0.5 }}>VISUAL PROOF</Text>
                       </View>
-                      
-                      <TouchableOpacity onPress={() => Linking.openURL(compItem.photo_url || "")}>
+
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        onPress={() => compItem.photo_url && setMediaViewer({ uri: compItem.photo_url, type: 'photo' })}
+                      >
                         <View style={{ borderRadius: 12, overflow: 'hidden', height: 180 }}>
                           <Image source={{ uri: compItem.photo_url }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
                           <View style={{ position: "absolute", bottom: 8, left: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Camera size={10} color="#FFF" />
                             <Text style={{ color: "#FFF", fontSize: 10, fontFamily: "Urbanist-Bold" }}>Photo</Text>
                           </View>
-                          {compItem.checked_at && (
+                          {itemTimestamp && (
                             <View style={{ position: "absolute", bottom: 8, right: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
                               <Text style={{ color: "#FFF", fontSize: 9, fontFamily: "Urbanist-Medium" }}>
-                                {new Date(compItem.checked_at).toLocaleString("en-US", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                                {new Date(itemTimestamp).toLocaleString("en-US", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
                               </Text>
                             </View>
                           )}
+                          <View style={{ position: "absolute", top: 8, right: 8, flexDirection: 'row', gap: 6 }}>
+                            <TouchableOpacity
+                              onPress={() => compItem.photo_url && setMediaViewer({ uri: compItem.photo_url, type: 'photo' })}
+                              style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: 'center', alignItems: 'center' }}
+                              activeOpacity={0.7}
+                            >
+                              <Maximize2 size={14} color="#FFF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => compItem.photo_url && handleDownloadMedia(compItem.photo_url, 'photo')}
+                              style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: 'center', alignItems: 'center' }}
+                              activeOpacity={0.7}
+                            >
+                              <Download size={14} color="#FFF" />
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       </TouchableOpacity>
                     </View>
                   )}
-                  
+
                   {/* Video Proof */}
                   {compItem?.video_url && (
                     <View style={{ marginTop: 16, marginLeft: 36 }}>
@@ -2675,13 +2875,49 @@ export default function ChecklistScreen() {
                         <Eye size={12} color={colors.textSecondary} />
                         <Text style={{ fontSize: 10, fontFamily: "Urbanist-Bold", color: colors.textSecondary, letterSpacing: 0.5 }}>VIDEO PROOF</Text>
                       </View>
-                      
-                      <TouchableOpacity onPress={() => Linking.openURL(compItem.video_url || "")}>
-                        <View style={{ borderRadius: 12, overflow: 'hidden', height: 140, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
-                          <Play size={32} color={colors.textTertiary} />
+
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        onPress={() => compItem.video_url && setMediaViewer({ uri: compItem.video_url, type: 'video' })}
+                      >
+                        <View style={{ borderRadius: 12, overflow: 'hidden', height: 180, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
+                          <ExpoAV.Video
+                            source={{ uri: compItem.video_url }}
+                            style={{ position: "absolute", width: "100%", height: "100%" }}
+                            resizeMode={ExpoAV.ResizeMode.COVER}
+                            shouldPlay={false}
+                            isLooping={false}
+                            useNativeControls={false}
+                          />
+                          <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: 'center', alignItems: 'center' }}>
+                            <Play size={26} color="#FFF" fill="#FFF" />
+                          </View>
                           <View style={{ position: "absolute", bottom: 8, left: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <Video size={10} color="#FFF" />
+                            <Film size={10} color="#FFF" />
                             <Text style={{ color: "#FFF", fontSize: 10, fontFamily: "Urbanist-Bold" }}>Video</Text>
+                          </View>
+                          {itemTimestamp && (
+                            <View style={{ position: "absolute", bottom: 8, right: 8, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                              <Text style={{ color: "#FFF", fontSize: 9, fontFamily: "Urbanist-Medium" }}>
+                                {new Date(itemTimestamp).toLocaleString("en-US", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                              </Text>
+                            </View>
+                          )}
+                          <View style={{ position: "absolute", top: 8, right: 8, flexDirection: 'row', gap: 6 }}>
+                            <TouchableOpacity
+                              onPress={() => compItem.video_url && setMediaViewer({ uri: compItem.video_url, type: 'video' })}
+                              style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: 'center', alignItems: 'center' }}
+                              activeOpacity={0.7}
+                            >
+                              <Maximize2 size={14} color="#FFF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => compItem.video_url && handleDownloadMedia(compItem.video_url, 'video')}
+                              style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: 'center', alignItems: 'center' }}
+                              activeOpacity={0.7}
+                            >
+                              <Download size={14} color="#FFF" />
+                            </TouchableOpacity>
                           </View>
                         </View>
                       </TouchableOpacity>
@@ -2720,25 +2956,25 @@ export default function ChecklistScreen() {
 
   // ── Main View ──
   return (
-    <View style={[styles.container, { backgroundColor: "#0B0B0F" }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Top nav */}
-      <View style={[styles.topNav, { paddingTop: Math.max(insets.top, 16) }]}>
+      <View style={[styles.topNav, { paddingTop: Math.max(insets.top, 16), borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.navIconBtn}
+          style={[styles.navIconBtn, { backgroundColor: colors.surface }]}
         >
-          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.topNavTitle}>Checklists</Text>
+        <Text style={[styles.topNavTitle, { color: colors.text }]}>Checklists</Text>
         <TouchableOpacity
           onPress={() =>
             router.push(`/property/${propertyId}/checklist/scan` as any)
           }
-          style={styles.navIconBtn}
+          style={[styles.navIconBtn, { backgroundColor: colors.surface }]}
         >
-          <Maximize2 size={20} color="#FFFFFF" />
+          <Maximize2 size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -2746,39 +2982,31 @@ export default function ChecklistScreen() {
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >
-          <ActivityIndicator size="large" color="#718f96" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : view === "templates" && isAdmin ? (
         <FlashList
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 200 }}
           data={filteredTemplates as SOPTemplate[]}
           keyExtractor={(item) => (item as SOPTemplate).id}
           estimatedItemSize={120}
-          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#718f96" />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
           ListHeaderComponent={
             <View style={{ marginBottom: 16 }}>
-              <LinearGradient
-                colors={[
-                  "rgba(59, 130, 246, 0.15)",
-                  "rgba(255, 255, 255, 0.03)",
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={styles.headerCard}
-              >
+              <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.headerTop}>
                   <View style={styles.headerLeft}>
-                    <View style={styles.headerIconWrap}>
-                      <ClipboardList size={18} color="#FFFFFF" />
+                    <View style={[styles.headerIconWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)' }]}>
+                      <ClipboardList size={18} color={colors.text} />
                     </View>
-                    <Text style={styles.headerTitle}>
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>
                       {isAdmin ? "Checklist Manager" : "My Checklists"}
                     </Text>
                   </View>
                   {isAdmin && (
                     <TouchableOpacity
-                      style={styles.addBtn}
+                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
                       onPress={() => {
                         resetTemplateForm();
                         setShowCreateTemplate(true);
@@ -2793,36 +3021,39 @@ export default function ChecklistScreen() {
                   <TouchableOpacity
                     style={[
                       styles.toggleTab,
+                      { backgroundColor: colors.surface },
+                      view === "history" && [styles.toggleTabActive, { backgroundColor: colors.primary + "20", borderColor: colors.primary }],
                     ]}
                     onPress={() => setView("history")}
                   >
-                    <History size={12} color="rgba(255,255,255,0.8)" />
-                    <Text style={styles.toggleTabText}>History</Text>
+                    <History size={12} color={colors.textSecondary} />
+                    <Text style={[styles.toggleTabText, { color: view === "history" ? colors.primary : colors.text }]}>History</Text>
                   </TouchableOpacity>
                   {isAdmin && (
                     <TouchableOpacity
                       style={[
                         styles.toggleTab,
-                        view === "templates" && styles.toggleTabActive,
+                        { backgroundColor: colors.surface },
+                        view === "templates" && [styles.toggleTabActive, { backgroundColor: colors.primary + "20", borderColor: colors.primary }],
                       ]}
                       onPress={() => setView("templates")}
                     >
-                      <LayoutGrid size={12} color="rgba(255,255,255,0.8)" />
-                      <Text style={styles.toggleTabText}>Templates</Text>
+                      <LayoutGrid size={12} color={colors.textSecondary} />
+                      <Text style={[styles.toggleTabText, { color: view === "templates" ? colors.primary : colors.text }]}>Templates</Text>
                     </TouchableOpacity>
                   )}
                 </View>
-              </LinearGradient>
+              </View>
             </View>
           }
           ListEmptyComponent={
             <View style={{ alignItems: "center", paddingTop: 80, gap: 12 }}>
-              <ClipboardList size={48} color="rgba(255,255,255,0.2)" />
-              <Text style={{ fontSize: 16, fontWeight: "700", color: "#FFF" }}>
+              <ClipboardList size={48} color={colors.textTertiary} />
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text }}>
                 No templates yet
               </Text>
               <TouchableOpacity
-                style={styles.startBtn}
+                style={[styles.startBtn, { backgroundColor: colors.primary }]}
                 onPress={() => {
                   resetTemplateForm();
                   setShowCreateTemplate(true);
@@ -2844,23 +3075,16 @@ export default function ChecklistScreen() {
           }
           renderItem={({ item: template }) => {
             const ds = dueStatusMap[template.id];
-            const lastDone = template.completions
-              .filter((c) => c.status === "completed")
-              .sort(
-                (a, b) =>
-                  new Date(b.completed_at || b.completion_date || 0).getTime() -
-                  new Date(a.completed_at || a.completion_date || 0).getTime(),
-              )[0];
             const inProgress = template.completions.find(
               (c) => c.status === "in_progress",
             );
             return (
               <View style={{ marginBottom: 12 }}>
-                <SafeBlurView intensity={40} style={[styles.historyCard]} tint="dark">
+                <View style={[styles.historyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <View style={styles.historyCardRow}>
                     <View style={styles.historyCardContent}>
-                      <Text style={styles.historyTitle}>{template.title}</Text>
-                      <Text style={styles.historyMeta}>
+                      <Text style={[styles.historyTitle, { color: colors.text }]}>{template.title}</Text>
+                      <Text style={[styles.historyMeta, { color: colors.textSecondary }]}>
                         {getFrequencyLabel(template.frequency)}
                         {template.start_time ? ` · ${fmt12h(template.start_time)}` : ""}
                       </Text>
@@ -2868,7 +3092,7 @@ export default function ChecklistScreen() {
                     </View>
                     <View style={styles.historyCardRight}>
                       <TouchableOpacity
-                        style={[styles.startBtn, { marginBottom: 6 }]}
+                        style={[styles.startBtn, { marginBottom: 6, backgroundColor: colors.primary }]}
                         onPress={() => handleStartChecklist(template, inProgress)}
                       >
                         <Play size={14} color="#FFFFFF" />
@@ -2880,15 +3104,15 @@ export default function ChecklistScreen() {
                         <TouchableOpacity
                           onPress={() => openEditTemplate(template)}
                         >
-                          <Edit3 size={16} color="rgba(255,255,255,0.6)" />
+                          <Edit3 size={16} color={colors.textSecondary} />
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => handleToggleRunning(template)}
                         >
                           {template.is_running ? (
-                            <Pause size={16} color="rgba(255,255,255,0.6)" />
+                            <Pause size={16} color={colors.textSecondary} />
                           ) : (
-                            <PlayCircle size={16} color="rgba(255,255,255,0.6)" />
+                            <PlayCircle size={16} color={colors.textSecondary} />
                           )}
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -2899,7 +3123,7 @@ export default function ChecklistScreen() {
                       </View>
                     </View>
                   </View>
-                </SafeBlurView>
+                </View>
               </View>
             );
           }}
@@ -2907,9 +3131,9 @@ export default function ChecklistScreen() {
       ) : (
         <FlashList
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 200 }}
           data={filteredHistoryList}
-          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor="#718f96" />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
           keyExtractor={(item, idx) =>
             item.type === "date_header"
               ? `header-${item.date}`
@@ -2922,27 +3146,19 @@ export default function ChecklistScreen() {
           estimatedItemSize={120}
           ListHeaderComponent={
             <View style={{ marginBottom: 16 }}>
-              <LinearGradient
-                colors={[
-                  "rgba(59, 130, 246, 0.15)",
-                  "rgba(255, 255, 255, 0.03)",
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={styles.headerCard}
-              >
+              <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.headerTop}>
                   <View style={styles.headerLeft}>
-                    <View style={styles.headerIconWrap}>
-                      <ClipboardList size={18} color="#FFFFFF" />
+                    <View style={[styles.headerIconWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)' }]}>
+                      <ClipboardList size={18} color={colors.text} />
                     </View>
-                    <Text style={styles.headerTitle}>
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>
                       {isAdmin ? "Checklist Manager" : "My Checklists"}
                     </Text>
                   </View>
                   {isAdmin && (
                     <TouchableOpacity
-                      style={styles.addBtn}
+                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
                       onPress={() => {
                         resetTemplateForm();
                         setShowCreateTemplate(true);
@@ -2957,27 +3173,29 @@ export default function ChecklistScreen() {
                   <TouchableOpacity
                     style={[
                       styles.toggleTab,
-                      view === "history" && styles.toggleTabActive,
+                      { backgroundColor: colors.surface },
+                      view === "history" && [styles.toggleTabActive, { backgroundColor: colors.primary + "20", borderColor: colors.primary }],
                     ]}
                     onPress={() => setView("history")}
                   >
-                    <History size={12} color="rgba(255,255,255,0.8)" />
-                    <Text style={styles.toggleTabText}>History</Text>
+                    <History size={12} color={colors.textSecondary} />
+                    <Text style={[styles.toggleTabText, { color: view === "history" ? colors.primary : colors.text }]}>History</Text>
                   </TouchableOpacity>
                   {isAdmin && (
                     <TouchableOpacity
                       style={[
                         styles.toggleTab,
-                        view === "templates" && styles.toggleTabActive,
+                        { backgroundColor: colors.surface },
+                        view === "templates" && [styles.toggleTabActive, { backgroundColor: colors.primary + "20", borderColor: colors.primary }],
                       ]}
                       onPress={() => setView("templates")}
                     >
-                      <LayoutGrid size={12} color="rgba(255,255,255,0.8)" />
-                      <Text style={styles.toggleTabText}>Templates</Text>
+                      <LayoutGrid size={12} color={colors.textSecondary} />
+                      <Text style={[styles.toggleTabText, { color: view === "templates" ? colors.primary : colors.text }]}>Templates</Text>
                     </TouchableOpacity>
                   )}
                 </View>
-              </LinearGradient>
+              </View>
               <View style={styles.filterRow}>
                 {(
                   [
@@ -2989,12 +3207,19 @@ export default function ChecklistScreen() {
                 ).map((f) => {
                   const label = f.charAt(0).toUpperCase() + f.slice(1);
                   const count = historyCounts[f] || 0;
+                  const active = historyFilter === f;
+                  
+                  let themeColor = colors.primary;
+                  if (f === 'completed') themeColor = colors.success || '#10B981';
+                  if (f === 'missed') themeColor = colors.error || '#EF4444';
+                  if (f === 'due') themeColor = colors.warning || '#F59E0B';
+                  
                   return (
                   <TouchableOpacity
                     key={f}
                     style={[
                       styles.filterChip,
-                      historyFilter === f && styles.filterChipActive,
+                      { backgroundColor: active ? themeColor + "18" : colors.surface, borderColor: active ? themeColor : colors.border },
                       { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 16 }
                     ]}
                     onPress={() => setHistoryFilter(f)}
@@ -3002,7 +3227,7 @@ export default function ChecklistScreen() {
                     <Text
                       style={[
                         styles.filterChipText,
-                        historyFilter === f && { color: "#FFFFFF" },
+                        { color: active ? themeColor : colors.textSecondary },
                         { fontSize: 11, fontFamily: "Urbanist-Bold", letterSpacing: 0.5 }
                       ]}
                     >
@@ -3015,14 +3240,14 @@ export default function ChecklistScreen() {
           }
           ListEmptyComponent={
             <View style={{ alignItems: "center", paddingTop: 60, gap: 12 }}>
-              <History size={48} color="rgba(255,255,255,0.2)" />
-              <Text style={{ fontSize: 16, fontWeight: "700", color: "#FFF" }}>
+              <History size={48} color={colors.textTertiary} />
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text }}>
                 No records
               </Text>
               <Text
                 style={{
                   fontSize: 13,
-                  color: "rgba(255,255,255,0.5)",
+                  color: colors.textSecondary,
                   textAlign: "center",
                 }}
               >
@@ -3040,14 +3265,14 @@ export default function ChecklistScreen() {
                   paddingHorizontal: 16,
                   marginTop: 16,
                   marginBottom: 8,
-                  backgroundColor: "rgba(15, 23, 42, 0.5)",
+                  backgroundColor: colors.surface,
                   alignSelf: "flex-start",
                   borderRadius: 16,
                   borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.1)",
+                  borderColor: colors.border,
                 }}>
                   <Text style={{
-                    color: "#94A3B8",
+                    color: colors.textSecondary,
                     fontSize: 12,
                     fontFamily: "Urbanist-Bold",
                     letterSpacing: 1
@@ -3062,6 +3287,7 @@ export default function ChecklistScreen() {
                 item={item}
                 templates={templates}
                 dueStatusMap={dueStatusMap}
+                liveNow={liveNow}
                 onStart={handleStartChecklist}
                 onView={async (comp) => {
                   // Fetch completion with items for detail view
@@ -3069,7 +3295,14 @@ export default function ChecklistScreen() {
                     const res = await checklistService.fetchTemplateCompletions(propertyId as string, comp.template_id, 50);
                     const completionWithItems = res.completions.find((c) => c.id === comp.id);
                     if (completionWithItems) {
-                      setHistoryCompletion(completionWithItems);
+                      // Merge with original comp so we keep any fields the server query may miss
+                      setHistoryCompletion({
+                        ...comp,
+                        ...completionWithItems,
+                        items: completionWithItems.items?.length ? completionWithItems.items : comp.items,
+                        user: completionWithItems.user || (comp as any).user || (comp as any).completed_by_user,
+                        slot_time: completionWithItems.slot_time ?? comp.slot_time ?? null,
+                      });
                     } else {
                       setHistoryCompletion(comp); // fallback
                     }
@@ -3594,6 +3827,13 @@ export default function ChecklistScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <MediaViewerModal
+        visible={!!mediaViewer}
+        uri={mediaViewer?.uri || null}
+        type={mediaViewer?.type || 'photo'}
+        onClose={() => setMediaViewer(null)}
+      />
     </View>
   );
 }
@@ -3612,14 +3852,12 @@ const styles = StyleSheet.create({
   topNavTitle: {
     fontSize: 18,
     fontFamily: "Poppins-Bold",
-    color: "#FFFFFF",
     letterSpacing: -0.5,
   },
   navIconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.05)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -3629,7 +3867,6 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
   },
   headerTop: {
     flexDirection: "row",
@@ -3642,21 +3879,18 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
   headerTitle: {
     fontSize: 20,
     fontFamily: "Poppins-Bold",
-    color: "#FFFFFF",
     letterSpacing: -0.3,
   },
   addBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -3669,17 +3903,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)",
   },
   toggleTabActive: {
-    backgroundColor: "rgba(59,130,246,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(59,130,246,0.5)",
   },
   toggleTabText: {
     fontSize: 12,
     fontFamily: "Urbanist-Bold",
-    color: "#FFFFFF",
   },
 
   statsGrid: {
@@ -3709,24 +3939,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "transparent",
   },
   filterChipActive: {
-    backgroundColor: "rgba(59, 130, 246, 0.2)",
-    borderColor: "#718f96",
+    borderWidth: 1,
   },
   filterChipText: {
     fontSize: 12,
     fontFamily: "Urbanist-Medium",
-    color: "rgba(255,255,255,0.6)",
   },
 
   historyCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(255,255,255,0.02)",
     padding: 14,
     marginBottom: 10,
   },
@@ -3736,7 +3960,6 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -3744,13 +3967,11 @@ const styles = StyleSheet.create({
   historyTitle: {
     fontSize: 14,
     fontFamily: "Poppins-Bold",
-    color: "#718f96",
     marginBottom: 2,
   },
   historyMeta: {
     fontSize: 11,
     fontFamily: "Urbanist-Medium",
-    color: "rgba(255,255,255,0.5)",
   },
 
   historyCardRight: { alignItems: "flex-end", gap: 8 },
@@ -3769,7 +3990,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
     minWidth: 90,
-    backgroundColor: "rgba(255,255,255,0.1)",
   },
   startBtnText: {
     color: "#FFFFFF",

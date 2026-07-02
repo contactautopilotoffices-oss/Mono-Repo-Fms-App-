@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     }
 
     const admin = createAdminClient();
-    let query = admin.from("diesel_readings").select("*").eq("property_id", propertyId);
+    let query = admin.from("diesel_readings").select("*, user:users(full_name)").eq("property_id", propertyId);
 
     if (generatorId) query = query.eq("generator_id", generatorId);
     if (fromDate) query = query.gte("reading_date", fromDate);

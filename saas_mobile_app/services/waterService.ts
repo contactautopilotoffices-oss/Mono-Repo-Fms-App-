@@ -63,6 +63,35 @@ export interface WaterAnalyticsData {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+export function toDateStr(value: string | null | undefined): string {
+  return value ? value.split('T')[0] : '';
+}
+
+export function computeReadingCost(reading: WaterReading, allTariffs: WaterTariff[]): number {
+  const quantity = Number(reading.quantity) || 0;
+  const computedCost = Number(reading.computed_cost);
+  if (computedCost > 0) return computedCost;
+
+  // Fallback to the rate that was stored on the reading itself
+  const storedRate = Number(reading.tariff_rate_used);
+  if (storedRate > 0 && quantity > 0) return quantity * storedRate;
+
+  const sourceTariffs = allTariffs.filter(t => t.source_id === reading.source_id);
+  if (sourceTariffs.length === 0 || quantity === 0) return 0;
+
+  const rDate = toDateStr(reading.reading_date);
+  const sorted = [...sourceTariffs].sort((a, b) =>
+    toDateStr(a.effective_from) < toDateStr(b.effective_from) ? 1 : -1
+  );
+  const active = sorted.find(t => toDateStr(t.effective_from) <= rDate) || sorted[0];
+  const rate = Number(active?.rate_per_unit) || 0;
+  return quantity * rate;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 

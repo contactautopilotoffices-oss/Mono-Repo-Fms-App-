@@ -9,6 +9,8 @@ import {
   ScrollView,
   Platform,
   Modal,
+  Image,
+  Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +58,18 @@ const FONT_BODY = Platform.select({
   android: 'Urbanist',
   default: 'Urbanist',
 });
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function formatDashboardRemainingHours(hours: number): string {
+  const num = typeof hours === 'string' ? parseFloat(hours) : hours;
+  const h = Math.floor(num);
+  const m = Math.round((num - h) * 60);
+  
+  if (h === 0) return `${m} MINS LEFT`;
+  if (m === 0) return `${h} HR${h !== 1 ? 'S' : ''} LEFT`;
+  return `${h} HR${h !== 1 ? 'S' : ''} ${m} MINS LEFT`;
+}
 
 interface TenantDashboardProps {
   propertyId: string;
@@ -161,8 +175,15 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               <Ionicons name="menu" size={22} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>{initials}</Text>
+            <View style={[styles.avatarCircle, user?.user_metadata?.avatar_url && { backgroundColor: 'transparent' }]}>
+              {user?.user_metadata?.avatar_url ? (
+                <Image 
+                  source={{ uri: user.user_metadata.avatar_url }} 
+                  style={{ width: '100%', height: '100%', borderRadius: 100 }} 
+                />
+              ) : (
+                <Text style={styles.avatarText}>{initials}</Text>
+              )}
             </View>
 
             <View style={{ flexShrink: 1 }}>
@@ -368,7 +389,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
               title="Meeting Rooms"
               description="Reserve meeting spaces & conference rooms with ease."
               statusLine="ROOM BOOKING"
-              rightStatusText={remainingHours !== null ? `${remainingHours} HRS LEFT` : undefined}
+              rightStatusText={remainingHours !== null ? formatDashboardRemainingHours(remainingHours) : undefined}
               delay={280}
               onPress={() => router.push(`/property/${propertyId}/rooms` as any)}
             />
@@ -428,7 +449,7 @@ export default function TenantDashboard({ propertyId, isSuperTenant }: TenantDas
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <View style={styles.drawerFooter}>
+            <View style={[styles.drawerFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
               <TouchableOpacity
                 style={styles.signOutBtn}
                 onPress={() => {

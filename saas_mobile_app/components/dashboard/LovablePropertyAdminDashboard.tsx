@@ -79,6 +79,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const vmsStats = data?.vmsStats ?? { total: 0, in: 0, out: 0 };
   const vendorStats = data?.vendorStats ?? { revenue: 0, commission: 0 };
   const dieselStats = data?.dieselStats ?? { level: 0, consumption: 0 };
+  const waterStats = data?.waterStats ?? { quantity: 0, cost: 0 };
   const healthScore = data?.healthScore ?? 100;
   const attentionItems = data?.attentionItems ?? [];
   const tenantUserIds = data?.tenantUserIds ?? [];
@@ -451,7 +452,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Vendor Revenue */}
-          <GlassTile label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/vendor`)}>
+          <GlassTile label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/cafeteria`)}>
             <View style={styles.tileTopRow}>
               <View>
                 <Text style={styles.tileMetricMid}>₹{vendorStats.revenue.toLocaleString()}</Text>
@@ -477,6 +478,23 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Level</Text>
                 <Text style={{ color: '#F59E0B', fontSize: 16, fontWeight: '800' }}>{dieselStats.level}%</Text>
+              </View>
+            </View>
+          </GlassTile>
+
+          {/* Water */}
+          <GlassTile label="Water Usage" icon="water" delay={420} onPress={() => router.push(`/property/${propertyId}/water`)}>
+            <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
+              <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(14,165,233,0.1)', borderWidth: 2, borderColor: 'rgba(14,165,233,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="water" size={24} color="#0EA5E9" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{waterStats.quantity.toLocaleString()} Units</Text>
+                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Cost</Text>
+                <Text style={{ color: '#0EA5E9', fontSize: 16, fontWeight: '800' }}>₹{Math.round(waterStats.cost).toLocaleString()}</Text>
               </View>
             </View>
           </GlassTile>

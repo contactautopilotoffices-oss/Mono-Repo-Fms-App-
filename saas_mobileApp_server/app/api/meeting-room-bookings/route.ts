@@ -3,6 +3,14 @@ import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyMeetingRoomBookedUser, notifyMeetingRoomBookedAdmin } from "@/lib/whatsapp/whatsappService";
 
+function formatHours(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h === 0) return `${m} minute${m !== 1 ? "s" : ""}`;
+  if (m === 0) return `${h} hour${h !== 1 ? "s" : ""}`;
+  return `${h} hour${h !== 1 ? "s" : ""} ${m} minute${m !== 1 ? "s" : ""}`;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
@@ -59,6 +67,7 @@ export async function POST(request: NextRequest) {
     const date = body.date;
     const startTime = body.startTime;
     const endTime = body.endTime;
+    const comment = body.comment || null;
 
     if (!meetingRoomId || !propertyId || !date || !startTime || !endTime) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -103,7 +112,7 @@ export async function POST(request: NextRequest) {
       if (remaining < durationHours) {
         return NextResponse.json(
           {
-            error: `Insufficient ${credit.company_id ? "company " : ""}meeting room credits. You need ${durationHours}h but only have ${remaining}h remaining.`
+            error: `Insufficient ${credit.company_id ? "company " : ""}meeting room credits. You need ${formatHours(durationHours)} but only have ${formatHours(remaining)} remaining.`
           },
           { status: 402 }
         );
@@ -141,6 +150,7 @@ export async function POST(request: NextRequest) {
         booking_date: date,
         start_time: startTime,
         end_time: endTime,
+        comment,
         status: "confirmed"
       })
       .select("*")

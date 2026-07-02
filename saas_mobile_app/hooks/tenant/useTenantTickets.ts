@@ -84,6 +84,7 @@ export function useTenantTickets(propertyId: string | undefined, userId: string 
     enabled: !!propertyId,
     initialPageParam: 0,
     staleTime: 1000 * 60 * 5, // 5 minutes cache
+    refetchOnMount: 'always',
   });
 
   // Flatten the pages into a single array

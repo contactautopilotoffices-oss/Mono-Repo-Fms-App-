@@ -23,20 +23,36 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const urlOrgId = url.searchParams.get("orgId");
     
-    let resolvedOrgId = urlOrgId;
+    // 1. Check if user is an org-level admin (for any org, or specifically the requested one)
+    const { data: orgMembership } = await admin
+      .from('organization_memberships')
+      .select('organization_id, role')
+      .eq('user_id', userId)
+      .or('is_active.eq.true,is_active.is.null')
+      .in('role', ['org_super_admin', 'org_admin', 'owner', 'super_tenant'])
+      .limit(1)
+      .maybeSingle();
 
-    if (!resolvedOrgId) {
-      // 1. Resolve Org ID
-      const { data: orgMembership } = await admin
-        .from('organization_memberships')
-        .select('organization_id')
+    const isOrgAdmin = !!orgMembership;
+    const resolvedOrgId = urlOrgId || orgMembership?.organization_id;
+
+    let propIdsAllowed: string[] | null = null;
+    if (!isOrgAdmin) {
+      // If not an org admin, check if they are a property admin and restrict to their properties
+      const { data: propMemberships } = await admin
+        .from('property_memberships')
+        .select('property_id, role')
         .eq('user_id', userId)
-        .or('is_active.eq.true,is_active.is.null')
-        .in('role', ['org_super_admin', 'org_admin', 'owner', 'super_tenant'])
-        .limit(1)
-        .maybeSingle();
-      
-      resolvedOrgId = orgMembership?.organization_id;
+        .or('is_active.eq.true,is_active.is.null');
+
+      const allowedRoles = ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'];
+      const filteredMemberships = (propMemberships || []).filter(m => allowedRoles.includes(m.role?.toLowerCase() || ''));
+
+      if (filteredMemberships.length > 0) {
+        propIdsAllowed = filteredMemberships.map(m => m.property_id);
+      } else {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+      }
     }
 
     // 2. Fetch Organizations
@@ -60,6 +76,10 @@ export async function GET(request: NextRequest) {
       propQuery = propQuery.eq('organization_id', resolvedOrgId);
     }
     
+    if (propIdsAllowed) {
+      propQuery = propQuery.in('id', propIdsAllowed);
+    }
+    
     const { data: propData } = await propQuery;
 
     const propertiesList = propData ?? [];
@@ -75,12 +95,14 @@ export async function GET(request: NextRequest) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     // 4. Parallel fetch stats for properties
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
     const [
       { data: ticketData },
       { data: sopData },
       { data: dieselData },
       { data: electricData },
       { data: historicalElectricData },
+      { data: waterData },
       { data: userData }
     ] = await Promise.all([
       admin.from('tickets').select('property_id, status, created_at, priority').in('property_id', propIds),
@@ -88,6 +110,7 @@ export async function GET(request: NextRequest) {
       admin.from('diesel_readings').select('property_id, computed_consumed_litres').in('property_id', propIds),
       admin.from('electricity_readings').select('property_id, final_units').in('property_id', propIds),
       admin.from('electricity_readings').select('property_id, final_units, created_at').in('property_id', propIds).gte('created_at', thirtyDaysAgo),
+      admin.from('water_readings').select('property_id, quantity, computed_cost').in('property_id', propIds).gte('created_at', monthStart),
       admin.from('users').select('id, full_name, email, phone').limit(100)
     ]);
 
@@ -96,6 +119,7 @@ export async function GET(request: NextRequest) {
     const sopMap = new Map();
     const energyMap = new Map();
     const energyTrendMap = new Map();
+    const waterMap = new Map();
 
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const sevenDaysAgo = new Date();
@@ -105,6 +129,7 @@ export async function GET(request: NextRequest) {
       ticketMap.set(id, { open: 0, resolved: 0, total: 0, urgent: 0, history: new Map() });
       sopMap.set(id, { completed: 0, total: 0 });
       energyMap.set(id, { diesel: 0, electricity: 0 });
+      waterMap.set(id, { quantity: 0, cost: 0 });
     });
 
     (ticketData ?? []).forEach((t: any) => {
@@ -140,6 +165,14 @@ export async function GET(request: NextRequest) {
       if (c) c.electricity += (e.final_units || 0);
     });
 
+    (waterData ?? []).forEach((w: any) => {
+      const c = waterMap.get(w.property_id);
+      if (c) {
+        c.quantity += (w.quantity || 0);
+        c.cost += (w.computed_cost || 0);
+      }
+    });
+
     propIds.forEach((id: string) => {
       const propReadings = (historicalElectricData ?? [])
         .filter((r: any) => r.property_id === id)
@@ -156,6 +189,7 @@ export async function GET(request: NextRequest) {
       const t = ticketMap.get(p.id)!;
       const s = sopMap.get(p.id)!;
       const e = energyMap.get(p.id)!;
+      const w = waterMap.get(p.id)!;
 
       const ticketScore = Math.max(0, 40 - (t.urgent * 5) - (t.open * 2));
       const sopScore = s.total > 0 ? (s.completed / s.total) * 30 : 30;
@@ -184,6 +218,10 @@ export async function GET(request: NextRequest) {
           diesel: Math.round(e.diesel),
           electricity: Math.round(e.electricity),
           trend: energyTrendMap.get(p.id) ?? 0,
+        },
+        water: {
+          quantity: Math.round(w.quantity),
+          cost: Math.round(w.cost),
         },
         tickets: dayNames.map(d => ({
           day: d,

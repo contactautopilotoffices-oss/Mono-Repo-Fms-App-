@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Platform, ActivityIndicator, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Platform, ActivityIndicator, Image, Dimensions, TextInput } from 'react-native';
 import Svg, { Path, Circle, Rect, G, Defs, Pattern, Line } from 'react-native-svg';
-import { Camera } from 'lucide-react-native';
+import { Camera, ChevronDown } from 'lucide-react-native';
+
 
 export interface Room {
   id: string;
@@ -23,7 +24,7 @@ interface MeetingRoomCardProps {
   room: Room;
   slots: Slot[];
   selectedDate: string;
-  onBook: (room: Room, startTime: string, endTime: string) => Promise<void>;
+  onBook: (room: Room, startTime: string, endTime: string, comment?: string) => Promise<void>;
 }
 
 function RoomIcon({ color }: { color: string }) {
@@ -78,15 +79,67 @@ const formatTimeForDisplay = (timeString: string) => {
   return `${h12.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${ampm}`;
 };
 
-export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRoomCardProps) {
+function addMinutes(time: string, mins: number): string {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + mins;
+  const nh = Math.floor(total / 60);
+  const nm = total % 60;
+  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+}
+
+export function MeetingRoomCard({ room, slots: apiSlots, selectedDate, onBook }: MeetingRoomCardProps) {
+  const dynamicTimelineSlots = React.useMemo(() => {
+    if (!apiSlots || apiSlots.length === 0) {
+      const defaultSlots = [];
+      for (let h = 9; h <= 18; h++) {
+        for (let m = 0; m < 60; m += 15) {
+          defaultSlots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+        }
+      }
+      defaultSlots.push('19:00');
+      return defaultSlots;
+    }
+
+    let minHour = 24;
+    let maxHour = 0;
+
+    apiSlots.forEach(slot => {
+      const startH = parseInt(slot.start_time.split(':')[0], 10);
+      const endH = parseInt(slot.end_time.split(':')[0], 10);
+      const endM = parseInt(slot.end_time.split(':')[1], 10);
+      
+      if (startH < minHour) minHour = startH;
+      if (endH > maxHour) maxHour = endH;
+      if (endM > 0 && endH >= maxHour) {
+         maxHour = endH + 1;
+      }
+    });
+
+    if (minHour < 0 || minHour > 23) minHour = 9;
+    if (maxHour < 0 || maxHour > 24) maxHour = 18;
+
+    const computedSlots = [];
+    for (let h = minHour; h < maxHour; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        computedSlots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    computedSlots.push(`${String(maxHour).padStart(2, '0')}:00`);
+    return computedSlots;
+  }, [apiSlots]);
+
   const [isCustomTime, setIsCustomTime] = useState(false);
   const [customStart, setCustomStart] = useState('09:00');
   const [customEnd, setCustomEnd] = useState('10:00');
+  const [customComment, setCustomComment] = useState('');
   const [customError, setCustomError] = useState('');
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
   
-  const [pendingBooking, setPendingBooking] = useState<{ start: string; end: string } | null>(null);
-  const [partialConfirm, setPartialConfirm] = useState<{ start: string; end: string } | null>(null);
+  const [showStartDropdown, setShowStartDropdown] = useState(false);
+  const [showEndDropdown, setShowEndDropdown] = useState(false);
+  
+  const [pendingBooking, setPendingBooking] = useState<{ start: string; end: string; comment: string } | null>(null);
+  const [partialConfirm, setPartialConfirm] = useState<{ start: string; end: string; comment: string } | null>(null);
   const [isBooking, setIsBooking] = useState(false);
 
   // Determine availability for a specific time range
@@ -135,12 +188,6 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
 
   const handleCustomBook = () => {
     setCustomError('');
-    // Simple validation format HH:MM
-    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-    if (!timeRegex.test(customStart) || !timeRegex.test(customEnd)) {
-        setCustomError('Invalid time format (HH:MM)');
-        return;
-    }
 
     const startMins = timeToMins(customStart);
     const endMins = timeToMins(customEnd);
@@ -163,15 +210,16 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
       return;
     }
 
-    setPendingBooking({ start: formattedStart, end: formattedEnd });
+    setPendingBooking({ start: formattedStart, end: formattedEnd, comment: customComment.trim() });
   };
 
-  const confirmBooking = async (start: string, end: string) => {
+  const confirmBooking = async (start: string, end: string, comment?: string) => {
     setIsBooking(true);
-    await onBook(room, start, end);
+    await onBook(room, start, end, comment);
     setIsBooking(false);
     setPendingBooking(null);
     setPartialConfirm(null);
+    setCustomComment('');
   };
 
   return (
@@ -237,30 +285,83 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
 
         {isCustomTime ? (
             <View style={styles.customTimeBox}>
-                <View style={styles.customTimeRow}>
-                    <View style={styles.timeInputCol}>
-                        <Text style={styles.timeLabel}>Start (HH:MM)</Text>
-                        <TextInput 
-                            style={styles.timeInput}
-                            value={customStart}
-                            onChangeText={setCustomStart}
-                            placeholder="09:00"
-                            placeholderTextColor="#666"
-                            keyboardType="numbers-and-punctuation"
-                        />
+                <View style={[styles.customTimeRow, { zIndex: 10 }]}>
+                    {/* Start Time */}
+                    {/* Start Time */}
+                    <View style={styles.dropdownContainer}>
+                        <Text style={styles.timeLabel}>Start Time</Text>
+                        <TouchableOpacity 
+                            style={styles.dropdownBtn}
+                            onPress={() => { setShowStartDropdown(true); setShowEndDropdown(false); }}
+                        >
+                            <Text style={styles.dropdownBtnText}>{formatTimeForDisplay(customStart)}</Text>
+                            <ChevronDown color="rgba(255,255,255,0.5)" size={16} />
+                        </TouchableOpacity>
                     </View>
-                    <View style={styles.timeInputCol}>
-                        <Text style={styles.timeLabel}>End (HH:MM)</Text>
-                        <TextInput 
-                            style={styles.timeInput}
-                            value={customEnd}
-                            onChangeText={setCustomEnd}
-                            placeholder="10:00"
-                            placeholderTextColor="#666"
-                            keyboardType="numbers-and-punctuation"
-                        />
+                    
+                    {/* End Time */}
+                    <View style={styles.dropdownContainer}>
+                        <Text style={styles.timeLabel}>End Time</Text>
+                        <TouchableOpacity 
+                            style={styles.dropdownBtn}
+                            onPress={() => { setShowEndDropdown(true); setShowStartDropdown(false); }}
+                        >
+                            <Text style={styles.dropdownBtnText}>{formatTimeForDisplay(customEnd)}</Text>
+                            <ChevronDown color="rgba(255,255,255,0.5)" size={16} />
+                        </TouchableOpacity>
                     </View>
                 </View>
+
+                {/* Dropdown Modal */}
+                <Modal visible={showStartDropdown || showEndDropdown} transparent animationType="fade">
+                  <TouchableOpacity 
+                    style={styles.modalOverlay} 
+                    activeOpacity={1} 
+                    onPress={() => { setShowStartDropdown(false); setShowEndDropdown(false); }}
+                  >
+                    <View style={styles.modalDropdownContainer}>
+                      <Text style={styles.modalTitle}>{showStartDropdown ? 'Select Start Time' : 'Select End Time'}</Text>
+                      <ScrollView style={{ maxHeight: 300, width: '100%' }} showsVerticalScrollIndicator={true}>
+                        {(showStartDropdown ? dynamicTimelineSlots.slice(0, -1) : dynamicTimelineSlots.filter(s => s > customStart)).map(slot => (
+                           <TouchableOpacity
+                             key={slot}
+                             style={[styles.dropdownItem, slot === (showStartDropdown ? customStart : customEnd) && styles.dropdownItemSelected]}
+                             onPress={() => {
+                                if (showStartDropdown) {
+                                   setCustomStart(slot);
+                                   if (slot >= customEnd) setCustomEnd(addMinutes(slot, 60));
+                                   setShowStartDropdown(false);
+                                } else {
+                                   setCustomEnd(slot);
+                                   setShowEndDropdown(false);
+                                }
+                             }}
+                           >
+                             <Text style={[styles.dropdownItemText, slot === (showStartDropdown ? customStart : customEnd) && styles.dropdownItemTextSelected]}>
+                               {formatTimeForDisplay(slot)}
+                             </Text>
+                           </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <TouchableOpacity style={styles.modalCloseBtn} onPress={() => { setShowStartDropdown(false); setShowEndDropdown(false); }}>
+                          <Text style={styles.modalCloseBtnText}>Close</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </Modal>
+
+                <Text style={styles.inputLabel}>Comment (optional)</Text>
+                <TextInput
+                  style={styles.commentInput}
+                  placeholder="e.g. Project review with design team"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  value={customComment}
+                  onChangeText={setCustomComment}
+                  multiline
+                  numberOfLines={2}
+                  maxLength={200}
+                />
+
                 {!!customError && <Text style={styles.errorText}>{customError}</Text>}
                 <TouchableOpacity onPress={handleCustomBook} style={styles.customBookBtn}>
                     <Text style={styles.customBookBtnText}>Book Custom Time</Text>
@@ -268,9 +369,9 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
             </View>
         ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.slotsScroll}>
-                {slots.length === 0 ? (
+                {apiSlots.length === 0 ? (
                     <Text style={styles.noSlotsText}>No predefined slots. Use Custom Time.</Text>
-                ) : slots.map((slot, i) => {
+                ) : apiSlots.map((slot, i) => {
                     const avail = getSlotAvailability(slot.start_time, slot.end_time);
                     const isBooked = avail.type === 'BOOKED';
                     const isPartial = avail.type === 'PARTIAL';
@@ -284,9 +385,9 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
                             onPress={() => {
                                 if (!isBooked && avail.availableTime) {
                                     if (isPartial) {
-                                        setPartialConfirm(avail.availableTime);
+                                        setPartialConfirm({ ...avail.availableTime, comment: '' });
                                     } else {
-                                        setPendingBooking(avail.availableTime);
+                                        setPendingBooking({ ...avail.availableTime, comment: '' });
                                     }
                                 }
                             }}
@@ -349,6 +450,9 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
                       <>
                         <Text style={styles.modalDesc}>{room.name} on {selectedDate}</Text>
                         <Text style={styles.modalTime}>{formatTimeForDisplay(pendingBooking.start)} - {formatTimeForDisplay(pendingBooking.end)}</Text>
+                        {pendingBooking.comment ? (
+                          <Text style={styles.modalComment} numberOfLines={2}>Comment: {pendingBooking.comment}</Text>
+                        ) : null}
                       </>
                   ) : null}
 
@@ -364,7 +468,7 @@ export function MeetingRoomCard({ room, slots, selectedDate, onBook }: MeetingRo
                           style={styles.modalConfirm} 
                           onPress={() => {
                               const b = pendingBooking || partialConfirm;
-                              if (b) confirmBooking(b.start, b.end);
+                              if (b) confirmBooking(b.start, b.end, b.comment);
                           }}
                           disabled={isBooking}
                       >
@@ -512,6 +616,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
+  inputLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    fontWeight: 'bold',
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  commentInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    color: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    textAlignVertical: 'top',
+    minHeight: 56,
+  },
   customBookBtn: {
     backgroundColor: '#708F96',
     paddingVertical: 10,
@@ -524,6 +647,76 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  customTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 16,
+  },
+  dropdownContainer: {
+    flex: 1,
+  },
+  dropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  dropdownBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalDropdownContainer: {
+    backgroundColor: '#1E2330',
+    borderRadius: 16,
+    width: '80%',
+    maxWidth: 320,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    maxHeight: '80%',
+  },
+  modalCloseBtn: {
+    padding: 16,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  modalCloseBtnText: {
+    color: '#708F96',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  dropdownItemSelected: {
+    backgroundColor: 'rgba(112,143,150,0.15)',
+  },
+  dropdownItemText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+  },
+  dropdownItemTextSelected: {
+    color: '#FFF',
+    fontWeight: 'bold',
+  },
+  timeLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    fontWeight: 'bold',
+    marginBottom: 6,
   },
   slotsScroll: {
     gap: 8,
@@ -612,6 +805,12 @@ const styles = StyleSheet.create({
     color: '#708F96',
     textAlign: 'center',
     marginBottom: 24,
+  },
+  modalComment: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    marginBottom: 16,
   },
   modalActions: {
     flexDirection: 'row',

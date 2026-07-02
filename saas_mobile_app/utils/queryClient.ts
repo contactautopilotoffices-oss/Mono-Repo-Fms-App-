@@ -36,6 +36,7 @@ export const queryClient = new QueryClient({
       gcTime: 1000 * 60 * 60 * 24, // Cache kept for 24 hours
       retry: 2,
       refetchOnWindowFocus: false, // Mobile uses AppState, not window focus
+      refetchOnMount: 'always', // Always refresh cached data when a screen mounts
       networkMode: 'offlineFirst',
     },
     mutations: {

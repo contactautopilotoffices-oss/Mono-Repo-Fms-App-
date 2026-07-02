@@ -19,6 +19,7 @@ export interface SuperAdminProperty {
   healthStatus: 'optimal' | 'warning' | 'critical';
   checklist: { completed: number; total: number; percent: number };
   energy: { diesel: number; electricity: number; trend: number };
+  water: { quantity: number; cost: number };
   tickets: { day: string; count: number }[];
   status: 'optimal' | 'warning' | 'critical';
 }

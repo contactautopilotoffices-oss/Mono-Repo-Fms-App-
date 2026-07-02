@@ -63,7 +63,7 @@ export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
 const styles = StyleSheet.create({
   wrapper: {
     marginTop: SPACING.md,
-    marginHorizontal: SPACING.xl,
+    marginHorizontal: 0,
   },
   card: {
     borderRadius: CARD_SURFACES.cardRadius,

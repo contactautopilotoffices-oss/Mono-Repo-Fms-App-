@@ -66,8 +66,12 @@ export default function LovableSuperAdminDashboard() {
   const orgRole = membership?.org_role?.toLowerCase() || '';
   const isSuperAdmin = ['org_super_admin', 'master_admin', 'owner'].includes(orgRole) || user?.email?.toLowerCase() === LOVABLE_EMAIL?.toLowerCase();
   
+  const isPropertyAdminOnAny = membership?.properties?.some(p => 
+    ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(p.role?.toLowerCase() || '')
+  ) ?? false;
+
   // Access control
-  const hasAccess = isSuperAdmin || ['org_admin', 'property_admin'].includes(orgRole);
+  const hasAccess = isSuperAdmin || ['org_admin'].includes(orgRole) || (isPropertyAdminOnAny && (membership?.properties?.length ?? 0) > 1);
 
   // orgId — use membership from AuthContext (already fetched), fall back to org_memberships query
   const orgId = membership?.org_id ?? '';
@@ -101,7 +105,9 @@ export default function LovableSuperAdminDashboard() {
   const [consoleSearchQuery, setConsoleSearchQuery] = useState('');
 
   // Use cached data for instant load, fetch in background
-  const properties = cachedProperties.length > 0 ? cachedProperties : (membership?.properties?.map(p => ({
+  const properties = cachedProperties.length > 0 ? cachedProperties : (membership?.properties?.filter(p => 
+    isSuperAdmin || ['org_admin'].includes(orgRole) || ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(p.role?.toLowerCase() || '')
+  ).map(p => ({
     id: p.id,
     name: p.name,
     code: p.code,
@@ -114,6 +120,7 @@ export default function LovableSuperAdminDashboard() {
     healthStatus: 'optimal' as const,
     checklist: { completed: 0, total: 1, percent: 100 },
     energy: { diesel: 0, electricity: 0, trend: 0 },
+    water: { quantity: 0, cost: 0 },
     tickets: [],
     status: 'optimal' as const,
   })) ?? []);

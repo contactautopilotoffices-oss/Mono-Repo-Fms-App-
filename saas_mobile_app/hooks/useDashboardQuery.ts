@@ -81,6 +81,11 @@ export interface DieselStats {
   consumption: number;
 }
 
+export interface WaterStats {
+  quantity: number;
+  cost: number;
+}
+
 export interface PpmStats {
   total: number;
   done: number;
@@ -112,6 +117,7 @@ export interface DashboardData {
   vmsStats: VmsStats;
   vendorStats: VendorStats;
   dieselStats: DieselStats;
+  waterStats: WaterStats;
   healthScore: number;
   attentionItems: AttentionItem[];
   tenantUserIds: string[];
@@ -187,6 +193,7 @@ export function useDashboardQuery(
     gcTime,
     enabled: enabled && !!propertyId && propertyId !== 'all',
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
     retry: 2,
     networkMode: 'offlineFirst',
   });

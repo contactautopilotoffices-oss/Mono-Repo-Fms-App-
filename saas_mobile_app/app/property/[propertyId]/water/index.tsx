@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  useWindowDimensions,
   RefreshControl,
   Alert,
 } from 'react-native';
@@ -14,7 +13,7 @@ import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { waterService, WaterSource, WaterTariff } from '@/services/waterService';
+import { waterService, WaterSource, WaterTariff, computeReadingCost } from '@/services/waterService';
 import { WaterLoggerCard } from '@/components/water/WaterLoggerCard';
 import { WaterSourceModal } from '@/components/water/WaterSourceModal';
 import { WaterTariffModal } from '@/components/water/WaterTariffModal';
@@ -33,18 +32,23 @@ export default function WaterLoggerScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
 
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showSourceModal, setShowSourceModal] = useState(false);
   const [editingSource, setEditingSource] = useState<WaterSource | null>(null);
   const [showTariffModal, setShowTariffModal] = useState(false);
+  const [selectedSourceId, setSelectedSourceId] = useState<string>('all');
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
 
   const monthOptions = useMemo(() => {
     const opts: { label: string; value: string }[] = [];
     const now = new Date();
     for (let i = 0; i < 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const value = d.toISOString().slice(0, 7);
+      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       opts.push({
         value,
         label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
@@ -65,7 +69,7 @@ export default function WaterLoggerScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load water data'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2 }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
   );
 
   // Extract tariffs from sources (embedded) + flatten
@@ -79,13 +83,23 @@ export default function WaterLoggerScreen() {
     return list;
   }, [sources]);
 
+  const filteredReadings = useMemo(() => {
+    if (selectedSourceId === 'all') return readings;
+    return readings.filter(r => r.source_id === selectedSourceId);
+  }, [readings, selectedSourceId]);
+
+  const visibleSources = useMemo(() => {
+    if (selectedSourceId === 'all') return sources;
+    return sources.filter(s => s.id === selectedSourceId);
+  }, [sources, selectedSourceId]);
+
   const mtdExpense = useMemo(() => {
-    return readings.reduce((sum, r) => sum + (r.computed_cost || 0), 0);
-  }, [readings]);
+    return filteredReadings.reduce((sum, r) => sum + computeReadingCost(r, tariffs), 0);
+  }, [filteredReadings, tariffs]);
 
   const mtdQuantity = useMemo(() => {
-    return readings.reduce((sum, r) => sum + (r.quantity || 0), 0);
-  }, [readings]);
+    return filteredReadings.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+  }, [filteredReadings]);
 
   const handleSaveReading = useCallback(async (payload: { source_id: string; reading_date: string; quantity: number }) => {
     const res = await waterService.submitReading({
@@ -191,9 +205,37 @@ export default function WaterLoggerScreen() {
               ))}
             </View>
           )}
-          <Text style={[styles.mtdLabel, { color: colors.textSecondary }]}>
-            MTD: ₹{mtdExpense.toLocaleString()}
-          </Text>
+
+          {/* Source Filter */}
+          <TouchableOpacity
+            style={[styles.monthPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setShowSourcePicker(!showSourcePicker)}
+          >
+            <Ionicons name="filter-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.monthText, { color: colors.text }]}>
+              {selectedSourceId === 'all' ? 'All Sources' : sources.find(s => s.id === selectedSourceId)?.name || 'Source'}
+            </Text>
+            <Ionicons name={showSourcePicker ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textSecondary} />
+          </TouchableOpacity>
+          {showSourcePicker && (
+            <View style={[styles.sourceDropdown, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.monthOption, selectedSourceId === 'all' && { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+                onPress={() => { setSelectedSourceId('all'); setShowSourcePicker(false); }}
+              >
+                <Text style={[styles.monthOptionText, { color: colors.text }]}>All Sources</Text>
+              </TouchableOpacity>
+              {sources.map((s) => (
+                <TouchableOpacity
+                  key={s.id}
+                  style={[styles.monthOption, selectedSourceId === s.id && { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
+                  onPress={() => { setSelectedSourceId(s.id); setShowSourcePicker(false); }}
+                >
+                  <Text style={[styles.monthOptionText, { color: colors.text }]}>{s.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       </View>
 
@@ -210,7 +252,9 @@ export default function WaterLoggerScreen() {
             <Droplets size={28} color="#0EA5E9" />
           </View>
           <View style={styles.widgetContent}>
-            <Text style={[styles.widgetLabel, { color: colors.textSecondary }]}>Month to Date Expense</Text>
+            <Text style={[styles.widgetLabel, { color: colors.textSecondary }]}>
+              {selectedSourceId === 'all' ? 'Month to Date Expense' : `${sources.find(s => s.id === selectedSourceId)?.name || 'Source'} Expense`}
+            </Text>
             <Text style={[styles.widgetValue, { color: colors.text }]}>₹{mtdExpense.toLocaleString()}</Text>
             <Text style={[styles.widgetSub, { color: colors.textTertiary }]}>
               {mtdQuantity.toLocaleString()} units logged
@@ -260,7 +304,7 @@ export default function WaterLoggerScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          sources.map((source) => (
+          visibleSources.map((source) => (
             <WaterLoggerCard
               key={source.id}
               source={source}
@@ -359,6 +403,17 @@ const styles = StyleSheet.create({
     top: 44,
     left: 16,
     right: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    zIndex: 100,
+    overflow: 'hidden',
+  },
+  sourceDropdown: {
+    position: 'absolute',
+    top: 44,
+    right: 0,
+    minWidth: 180,
+    maxWidth: 260,
     borderRadius: 14,
     borderWidth: 1,
     zIndex: 100,

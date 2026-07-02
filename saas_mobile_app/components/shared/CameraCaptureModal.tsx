@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { requestCameraPermissionWithSettings } from '@/utils/permissions';
 
 interface CameraCaptureModalProps {
   isOpen: boolean;
@@ -26,8 +27,8 @@ export default function CameraCaptureModal({ isOpen, onClose, onCapture, title =
   const launchCamera = async () => {
     setIsLaunching(true);
     try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
+      const isGranted = await requestCameraPermissionWithSettings();
+      if (!isGranted) {
         setCapturedImage(null);
         setIsLaunching(false);
         return;

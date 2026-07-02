@@ -61,12 +61,13 @@ export default function GlobalBottomNav() {
 
   const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
   const isSoftServicesStaff = (propRole.includes('soft_service') || propRole.includes('housekeeping')) && !isManager;
+  const isSecurity = propRole.includes('security');
 
   // Detect active tab from current pathname
   const activeTab = useMemo(() => {
     if (!pathname) return 'more';
     const p = pathname.toLowerCase();
-    if (p.endsWith('/dashboard') || p.endsWith('/property/' + propertyId?.toLowerCase()) || p.match(/\/property\/[^\/]+$/)) return 'dashboard';
+    if (p.endsWith('/dashboard') || p.endsWith('/security') || p.endsWith('/property/' + propertyId?.toLowerCase()) || p.match(/\/property\/[^\/]+$/)) return 'dashboard';
     if (p.includes('/tickets')) return 'tickets';
     if (p.includes('/stock')) return 'stock';
     if (p.includes('/checklist')) return 'checklist';
@@ -89,15 +90,15 @@ export default function GlobalBottomNav() {
         <SafeBlurView intensity={80} style={[styles.navPill, { paddingBottom: insets.bottom > 0 ? insets.bottom + 6 : 14 }]} tint="dark">
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
-            onPress={() => navigate('dashboard')}
+            onPress={() => navigate(isSecurity ? 'security' : 'dashboard')}
             activeOpacity={0.7}
           >
             <Ionicons
-              name={activeTab === 'dashboard' ? 'grid' : 'grid-outline'}
+              name={activeTab === 'dashboard' ? (isSecurity ? 'shield' : 'grid') : (isSecurity ? 'shield-outline' : 'grid-outline')}
               size={22}
               color={activeTab === 'dashboard' ? '#FFF' : 'rgba(255,255,255,0.4)'}
             />
-            <Text style={[styles.navLabel, activeTab === 'dashboard' && styles.navLabelActive]}>Dashboard</Text>
+            <Text style={[styles.navLabel, activeTab === 'dashboard' && styles.navLabelActive]}>{isSecurity ? 'Overview' : 'Dashboard'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity

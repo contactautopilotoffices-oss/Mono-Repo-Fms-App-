@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Platform, Alert } from 'react-native';
 import { Audio } from 'expo-av';
+import { requestAudioPermissionWithSettings } from '@/utils/permissions';
 
 // ---------------------------------------------------------------------------
 // Voice Recording Hook
@@ -67,9 +68,9 @@ export function useVoiceRecording(): UseVoiceRecordingReturn {
     }
 
     try {
-      const { status } = await Audio.requestPermissionsAsync();
-      setPermissionGranted(status === 'granted');
-      return status === 'granted';
+      const isGranted = await requestAudioPermissionWithSettings();
+      setPermissionGranted(isGranted);
+      return isGranted;
     } catch {
       setPermissionGranted(false);
       return false;

@@ -23,6 +23,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { stockService } from '@/services/stockService';
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from 'react-native';
 
 interface StockItem {
   id: string;
@@ -69,6 +71,9 @@ export default function StockScannerModal({
   userId,
 }: StockScannerModalProps) {
   const insets = useSafeAreaInsets();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const colors = Colors[colorScheme ?? 'light'];
   const [permission, requestPermission] = useCameraPermissions();
   const [scanMode, setScanMode] = useState<ScanMode>('camera');
   const [loading, setLoading] = useState(false);
@@ -376,17 +381,17 @@ export default function StockScannerModal({
     const accentColor = isIN ? '#10B981' : '#EF4444';
 
     return (
-      <View style={styles.queueItem}>
+        <View style={[styles.queueItem, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
         {/* Top row: index badge, item name, stock info, remove button */}
         <View style={styles.queueItemTop}>
           <View style={styles.queueIndexBadge}>
             <Text style={styles.queueIndexBadgeText}>{index + 1}</Text>
           </View>
           <View style={styles.queueItemNameGroup}>
-            <Text style={styles.queueItemName} numberOfLines={1}>
+            <Text style={[styles.queueItemName, { color: isDark ? '#FFF' : '#111827' }]} numberOfLines={1}>
               {item.name}
             </Text>
-            <Text style={styles.queueItemMeta}>
+            <Text style={[styles.queueItemMeta, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>
               {item.item_code || item.id.slice(0, 8)}
             </Text>
           </View>
@@ -457,8 +462,8 @@ export default function StockScannerModal({
 
           <View style={styles.queueQtyRow}>
             <View style={styles.queueQtyLabelGroup}>
-              <Text style={[styles.queueQtyLabel, { color: '#10B981' }]}>QTY</Text>
-              <Text style={[styles.queueQtyUnit, { color: 'rgba(255,255,255,0.4)' }]}>
+              <Text style={[styles.queueQtyLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>QTY</Text>
+              <Text style={[styles.queueQtyUnit, { color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }]}>
                 ({item.unit || 'units'})
               </Text>
             </View>
@@ -470,7 +475,7 @@ export default function StockScannerModal({
                 <Ionicons name="remove" size={18} color="#10B981" />
               </TouchableOpacity>
               <TextInput
-                style={styles.queueQtyInput}
+                style={[styles.queueQtyInput, { color: isDark ? '#FFF' : '#111827', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'transparent' }]}
                 value={String(item.qty)}
                 onChangeText={v => {
                   const n = parseInt(v);
@@ -495,7 +500,7 @@ export default function StockScannerModal({
   // ─── Main Render ─────────────────────────────────────────────────────────────
   return (
     <Modal visible={isOpen} animationType="slide" transparent={false} onRequestClose={handleClose}>
-      <SafeAreaView style={[styles.container, { backgroundColor: '#000' }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
@@ -509,21 +514,7 @@ export default function StockScannerModal({
               </View>
             )}
           </View>
-          {queue.length > 0 ? (
-            <TouchableOpacity
-              style={[styles.submitAllBtn, isSubmitting && styles.submitAllBtnDisabled]}
-              onPress={handleSubmitAll}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Text style={styles.submitAllBtnText}>SUBMIT {queue.length}</Text>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <View style={{ width: 64 }} />
-          )}
+          <View style={{ width: 36 }} />
         </View>
 
         {/* Mode Tabs */}
@@ -665,7 +656,7 @@ export default function StockScannerModal({
           {/* ── Manual Mode ── */}
           {scanMode === 'manual' && (
             <ScrollView style={styles.manualWrapper} contentContainerStyle={{ padding: 16 }}>
-              <View style={styles.manualCard}>
+              <View style={[styles.manualCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
                 <Text style={styles.manualTitle}>Enter Item Code</Text>
                 <Text style={styles.manualSub}>
                   Type the item code or barcode value (auto-searches after 8+ characters)
@@ -702,7 +693,7 @@ export default function StockScannerModal({
           {queue.length > 0 && (
             <Animated.View style={[
               styles.queueSection,
-              { height: queueHeightAnim, backgroundColor: '#0F172A' },
+              { height: queueHeightAnim, backgroundColor: colors.background },
             ]}>
               {/* Drag Handle */}
               <View {...panResponder.panHandlers}>
@@ -745,13 +736,12 @@ export default function StockScannerModal({
                 </TouchableOpacity>
               </View>
 
-              {/* Item List */}
               <FlatList
                 data={queue}
                 keyExtractor={item => item.id}
                 renderItem={renderQueueItem}
                 style={styles.queueList}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 24) + 20 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
                 showsVerticalScrollIndicator={false}
                 ListFooterComponent={
                   <TouchableOpacity
@@ -763,6 +753,20 @@ export default function StockScannerModal({
                   </TouchableOpacity>
                 }
               />
+              
+              <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: Math.max(insets.bottom, 16), backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }}>
+                <TouchableOpacity
+                  style={[styles.submitAllBtn, { width: '100%', justifyContent: 'center', paddingVertical: 14, borderRadius: 16 }, isSubmitting && styles.submitAllBtnDisabled]}
+                  onPress={handleSubmitAll}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={[styles.submitAllBtnText, { fontSize: 14 }]}>SUBMIT {queue.length} ITEM{queue.length !== 1 ? 'S' : ''}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </Animated.View>
           )}
 
@@ -783,7 +787,7 @@ export default function StockScannerModal({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090C11' },
+  container: { flex: 1 },
 
   // Header
   header: {
@@ -906,7 +910,9 @@ const styles = StyleSheet.create({
 
   // Manual
   manualWrapper: { flex: 1 },
-  manualCard: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 20, gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  manualCard: {
+    borderRadius: 20, padding: 20, gap: 12, borderWidth: 1,
+  },
   manualTitle: { color: '#FFF', fontSize: 18, fontWeight: '800' },
   manualSub: { color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 18 },
   manualInput: {
@@ -923,7 +929,6 @@ const styles = StyleSheet.create({
   // Queue Section
   queueSection: {
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    backgroundColor: '#090C11',
     overflow: 'hidden',
   },
   dragHandleArea: {
@@ -957,8 +962,8 @@ const styles = StyleSheet.create({
 
   // Queue Item (full card)
   queueItem: {
-    padding: 16, borderRadius: 16, marginBottom: 12,
-    backgroundColor: '#111827', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
+    padding: 18, borderRadius: 20, marginBottom: 16,
+    borderWidth: 1,
   },
   queueItemTop: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
@@ -973,8 +978,8 @@ const styles = StyleSheet.create({
     fontSize: 12, fontWeight: '800', color: '#10B981',
   },
   queueItemNameGroup: { flex: 1, minWidth: 0 },
-  queueItemName: { fontSize: 15, fontWeight: '800', marginBottom: 2, color: '#FFF' },
-  queueItemMeta: { fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.4)' },
+  queueItemName: { fontSize: 15, fontWeight: '800', marginBottom: 2 },
+  queueItemMeta: { fontSize: 11, fontWeight: '500' },
   queueRemoveBtn: {
     width: 28, height: 28, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.08)',

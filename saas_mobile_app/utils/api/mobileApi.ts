@@ -24,7 +24,7 @@ export const getCurrentUserId = _getCurrentUserId;
 // ---------------------------------------------------------------------
 // Mobile API base URL
 // ---------------------------------------------------------------------
-export const MOBILE_API_BASE = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://localhost:3001';
+export const MOBILE_API_BASE = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.0.224:3000';
 // ---------------------------------------------------------------------
 // Typed API Response shapes
 // ---------------------------------------------------------------------
@@ -120,7 +120,7 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (!(options.body instanceof FormData)) {
+  if (options.body && typeof options.body === 'string') {
     headers['Content-Type'] = 'application/json';
   }
 
@@ -515,6 +515,10 @@ export function getRoleAllowedPaths(role: string, propertyId: string): string[] 
     paths.push(`${basePath}/diesel`);
     paths.push(`${basePath}/electricity`);
   }
+  if (capabilities.water) {
+    paths.push(`${basePath}/water`);
+    paths.push(`${basePath}/water/analytics`);
+  }
   if (capabilities.procurement || capabilities.stock) {
     paths.push(`${basePath}/stock`);
     paths.push(`${basePath}/stock/scan`);
@@ -522,6 +526,7 @@ export function getRoleAllowedPaths(role: string, propertyId: string): string[] 
   if (capabilities.reports) paths.push(`${basePath}/reports`);
   if (capabilities.security) paths.push(`${basePath}/security`);
   if (capabilities.sop) paths.push(`${basePath}/checklist`);
+  if (capabilities.cafeteria) paths.push(`${basePath}/cafeteria`);
   paths.push(`${basePath}/checklist/scan`);
 
   // Common pages every logged-in user can reach
@@ -529,12 +534,15 @@ export function getRoleAllowedPaths(role: string, propertyId: string): string[] 
 
   // Admin-level roles get blanket access to all property pages
   if (PROPERTY_ADMIN_ROLES.includes(role)) {
-    return [
+    return Array.from(new Set([
+      ...paths,
       `${basePath}`,
       `${basePath}/dashboard`,
       `${basePath}/checklist`,
       `${basePath}/checklist/scan`,
-    ];
+      `${basePath}/water`,
+      `${basePath}/water/analytics`,
+    ]));
   }
 
   return paths;
@@ -560,6 +568,9 @@ export function getRoleDefaultPath(role: string, propertyId: string): string {
   }
   if (['tenant', 'super_tenant'].includes(normalizedRole)) {
     return `/property/${propertyId}/tenant`;
+  }
+  if (normalizedRole === 'vendor') {
+    return `/property/${propertyId}/cafeteria`;
   }
   if (normalizedRole === 'security') {
     return `/property/${propertyId}/security`;

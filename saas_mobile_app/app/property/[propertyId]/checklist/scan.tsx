@@ -4,23 +4,19 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   ScrollView,
 } from 'react-native';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '@/context';
+import { Colors } from '@/constants/Colors';
 import { checklistService } from '@/services/checklistService';
-import { LinearGradient } from 'expo-linear-gradient';
-import SafeBlurView from '@/components/ui/SafeBlurView';
 import ScannerView from '@/components/shared/ScannerView';
 import {
   ClipboardList,
   Play,
   RotateCcw,
-  CheckCircle2,
-  AlertTriangle,
-  Calendar,
   Clock,
 } from 'lucide-react-native';
 
@@ -42,6 +38,9 @@ export default function ChecklistScanScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
+  const colors = Colors[theme];
+  const isDark = theme === 'dark';
 
   const [state, setState] = useState<ScreenState>('scanning');
   const [template, setTemplate] = useState<SOPTemplate | null>(null);
@@ -90,8 +89,8 @@ export default function ChecklistScanScreen() {
 
   const handleOpen = () => {
     if (!template) return;
-    // Navigate to checklist index; user can then start it normally
-    router.push(`/property/${propertyId}/checklist` as any);
+    // Navigate to checklist index and trigger auto-start for this template
+    router.push(`/property/${propertyId}/checklist?startTemplateId=${template.id}` as any);
   };
 
   const handleReset = () => {
@@ -114,54 +113,50 @@ export default function ChecklistScanScreen() {
   if (!template) return null;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <LinearGradient colors={['#0f172a', '#1e1b4b', '#0f172a']} style={StyleSheet.absoluteFillObject} />
-
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {/* Header */}
-      <SafeBlurView intensity={40} tint="dark" style={[styles.header, { borderColor: 'rgba(255,255,255,0.08)' }]}>
-        <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.1)']} style={StyleSheet.absoluteFillObject} />
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
-          <Text style={{ color: '#E6EBEE', fontSize: 22 }}>✕</Text>
+      <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.card }]}>
+        <TouchableOpacity style={[styles.headerBtn, { backgroundColor: colors.surface }]} onPress={() => router.back()}>
+          <Text style={{ color: colors.text, fontSize: 22 }}>✕</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Checklist Found</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Checklist Found</Text>
         <View style={{ width: 40 }} />
-      </SafeBlurView>
+      </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <SafeBlurView intensity={40} tint="dark" style={[styles.card, { borderColor: 'rgba(255,255,255,0.08)' }]}>
-          <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFillObject} />
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.cardInner}>
-            <View style={[styles.iconWrap, { backgroundColor: 'rgba(112,143,150,0.15)' }]}>
-              <ClipboardList size={28} color="#708F96" />
+            <View style={[styles.iconWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)' }]}>
+              <ClipboardList size={28} color={colors.primary} />
             </View>
-            <Text style={styles.templateTitle}>{template.title}</Text>
-            {template.description && <Text style={styles.templateDesc}>{template.description}</Text>}
+            <Text style={[styles.templateTitle, { color: colors.text }]}>{template.title}</Text>
+            {template.description && <Text style={[styles.templateDesc, { color: colors.textSecondary }]}>{template.description}</Text>}
 
             <View style={styles.metaRow}>
               {template.frequency && (
-                <View style={styles.metaBadge}>
-                  <RotateCcw size={12} color="#94A3B8" />
-                  <Text style={styles.metaText}>{template.frequency}</Text>
+                <View style={[styles.metaBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <RotateCcw size={12} color={colors.textSecondary} />
+                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>{template.frequency}</Text>
                 </View>
               )}
               {template.start_time && template.end_time && (
-                <View style={styles.metaBadge}>
-                  <Clock size={12} color="#94A3B8" />
-                  <Text style={styles.metaText}>{template.start_time} - {template.end_time}</Text>
+                <View style={[styles.metaBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Clock size={12} color={colors.textSecondary} />
+                  <Text style={[styles.metaText, { color: colors.textSecondary }]}>{template.start_time} - {template.end_time}</Text>
                 </View>
               )}
             </View>
           </View>
-        </SafeBlurView>
+        </View>
 
-        <TouchableOpacity style={styles.openBtn} onPress={handleOpen}>
+        <TouchableOpacity style={[styles.openBtn, { backgroundColor: colors.primary }]} onPress={handleOpen}>
           <Play size={18} color="#FFFFFF" />
           <Text style={styles.openBtnText}>Open Checklist</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.rescanBtn} onPress={handleReset}>
-          <RotateCcw size={14} color="#64748B" />
-          <Text style={styles.rescanText}>Scan Another</Text>
+          <RotateCcw size={14} color={colors.textSecondary} />
+          <Text style={[styles.rescanText, { color: colors.textSecondary }]}>Scan Another</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -173,20 +168,20 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingTop: 8, paddingBottom: 100, gap: 14 },
 
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, marginBottom: 8, borderBottomWidth: 1, borderRadius: 0 },
-  headerBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 16, fontFamily: 'Poppins-Bold', color: '#E6EBEE' },
+  headerBtn: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 16, fontFamily: 'Poppins-Bold' },
 
   card: { borderRadius: 20, borderWidth: 1, overflow: 'hidden' },
   cardInner: { padding: 24, alignItems: 'center', position: 'relative', zIndex: 1 },
   iconWrap: { width: 64, height: 64, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  templateTitle: { fontSize: 20, fontFamily: 'Poppins-Bold', color: '#E6EBEE', textAlign: 'center' },
-  templateDesc: { fontSize: 13, fontFamily: 'Urbanist-Medium', color: '#94A3B8', textAlign: 'center', marginTop: 6, lineHeight: 18 },
+  templateTitle: { fontSize: 20, fontFamily: 'Poppins-Bold', textAlign: 'center' },
+  templateDesc: { fontSize: 13, fontFamily: 'Urbanist-Medium', textAlign: 'center', marginTop: 6, lineHeight: 18 },
   metaRow: { flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' },
-  metaBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  metaText: { fontSize: 11, fontFamily: 'Urbanist-Bold', color: '#94A3B8' },
+  metaBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1 },
+  metaText: { fontSize: 11, fontFamily: 'Urbanist-Bold' },
 
-  openBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#708F96', paddingVertical: 16, borderRadius: 16 },
+  openBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 16 },
   openBtnText: { fontSize: 15, fontFamily: 'Poppins-Bold', color: '#FFFFFF' },
   rescanBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
-  rescanText: { fontSize: 13, fontFamily: 'Urbanist-Bold', color: '#64748B' },
+  rescanText: { fontSize: 13, fontFamily: 'Urbanist-Bold' },
 });

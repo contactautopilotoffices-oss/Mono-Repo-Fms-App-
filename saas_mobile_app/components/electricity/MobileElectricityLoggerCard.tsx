@@ -46,15 +46,18 @@ export function MobileElectricityLoggerCard({
   const [editPtSecondary, setEditPtSecondary] = useState('');
   const [editMeterConstant, setEditMeterConstant] = useState('');
 
+  const [isFlipped, setIsFlipped] = useState(false);
+
   const flipValue = useSharedValue(0);
 
   const toggleFlip = () => {
-    flipValue.value = withTiming(flipValue.value === 0 ? 1 : 0, { duration: 400 });
+    const nextFlipped = !isFlipped;
+    setIsFlipped(nextFlipped);
+    flipValue.value = withTiming(nextFlipped ? 1 : 0, { duration: 400 });
   };
 
   const frontAnimatedStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipValue.value, [0, 1], [0, 180]);
-    // Avoid layout shifts by not toggling position. Use opacity for smooth hiding.
     const opacity = interpolate(flipValue.value, [0, 0.5, 0.5, 1], [1, 1, 0, 0]);
     return {
       transform: [
@@ -203,7 +206,7 @@ export function MobileElectricityLoggerCard({
 
   return (
     <View style={styles.container}>
-      <Animated.View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, frontAnimatedStyle]}>
+      <Animated.View pointerEvents={isFlipped ? 'none' : 'auto'} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, frontAnimatedStyle]}>
         {/* Left Side Status Strip */}
         <View style={[styles.statusStrip, { backgroundColor: hasValidReading ? colors.primary : colors.border }]} />
 
@@ -314,7 +317,7 @@ export function MobileElectricityLoggerCard({
       </Animated.View>
 
       {/* Back side: Meter Constant Configuration */}
-      <Animated.View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, backAnimatedStyle]}>
+      <Animated.View pointerEvents={isFlipped ? 'auto' : 'none'} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }, backAnimatedStyle]}>
         <View style={styles.cardContent}>
           <View style={styles.backHeader}>
             <View>

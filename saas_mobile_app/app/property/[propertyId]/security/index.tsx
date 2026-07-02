@@ -17,6 +17,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  Modal,
+  Image,
+  StatusBar,
 } from 'react-native';
 import { useRouter, useGlobalSearchParams, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +30,10 @@ import { useAuth } from '@/hooks/useAuth';
 import { vmsService } from '@/services/vmsService';
 import { ticketService } from '@/services/ticketService';
 import SafeBlurView from '@/components/ui/SafeBlurView';
+import SignOutModal from '@/components/ui/SignOutModal';
+import NotificationModal from '@/components/notifications/NotificationModal';
+import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
+import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
 import {
   Shield,
   Users,
@@ -67,6 +74,14 @@ interface VisitorLog {
   checkin_time: string;
   checkout_time?: string;
   status: 'checked_in' | 'checked_out';
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
 }
 
 // ─── KPI Card Component ──────────────────────────────────────────────────────
@@ -154,7 +169,38 @@ export default function SecurityDashboard() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, signOut, membership } = useAuth();
+
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [showSignOut, setShowSignOut] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+
+  const fullName = user?.user_metadata?.full_name || 'Officer';
+  const firstName = fullName.split(' ')[0];
+  const initials = getInitials(fullName);
+
+  const drawerSections = [
+    {
+      title: 'SECURITY',
+      items: [
+        { label: 'Overview', route: 'security', icon: 'shield-outline' as const },
+        { label: 'Requests', route: 'tickets?category=security_incident', icon: 'ticket-outline' as const },
+        { label: 'Check In / Out', route: 'security/checkin', icon: 'log-in-outline' as const, color: '#10b981' },
+        { label: 'Visitor Registry', route: 'visitors', icon: 'people-outline' as const },
+        { label: 'Diesel', route: 'diesel', icon: 'flame-outline' as const },
+        { label: 'Water', route: 'water', icon: 'water-outline' as const },
+        { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' as const },
+      ]
+    },
+    {
+      title: 'SYSTEM',
+      items: [
+        { label: 'Settings', route: 'settings', icon: 'settings-outline' as const },
+        { label: 'Profile', route: 'profile', icon: 'person-outline' as const },
+      ]
+    }
+  ];
 
   // ── Fetch Data ──────────────────────────────────────────────────────────
   const fetchStats = useCallback(async () => {
@@ -201,7 +247,7 @@ export default function SecurityDashboard() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.security(propertyId),
     fetchStats,
-    { staleTime: 1000 * 60 }
+    { staleTime: 1000 * 60, refetchOnMount: 'always' }
   );
 
   const stats = data?.stats ?? { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 };
@@ -238,23 +284,49 @@ export default function SecurityDashboard() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0F1521' }}>
+      <StatusBar barStyle="light-content" />
       <Stack.Screen options={{ headerShown: false }} />
       <LinearGradient colors={['#0F1521', '#121824', '#090d16']} style={StyleSheet.absoluteFillObject} />
 
       {/* Modern Header - Same as other pages */}
-      <SafeBlurView intensity={80} tint="dark" style={[styles.modernHeader, { paddingTop: insets.top + 10 }]}>
-        <View style={styles.headerTop}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <View style={styles.headerIconCenter}>
-            <Shield size={22} color="#3B82F6" />
+      <Animated.View entering={FadeInUp.duration(500)} style={[styles.header, { paddingTop: insets.top + 16 }]}>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity style={styles.iconPill} onPress={() => setShowDrawer(true)} activeOpacity={0.8}>
+              <Ionicons name="menu" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={[styles.avatarCircle, user?.user_metadata?.avatar_url && { backgroundColor: 'transparent' }]}>
+              {user?.user_metadata?.avatar_url ? (
+                <Image 
+                  source={{ uri: user.user_metadata.avatar_url }} 
+                  style={{ width: '100%', height: '100%', borderRadius: 100 }} 
+                />
+              ) : (
+                <Text style={styles.avatarText}>{initials}</Text>
+              )}
+            </View>
+
+            <View style={{ flexShrink: 1 }}>
+              <Text style={styles.headerGreeting} numberOfLines={1}>
+                Hey, {firstName}
+              </Text>
+              <Text style={styles.headerProperty} numberOfLines={1}>
+                Security Portal
+              </Text>
+            </View>
           </View>
-          <Text style={styles.headerTitleMain}>Security</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <Text style={styles.headerSubtitle}>Officer Portal</Text>
-      </SafeBlurView>
+
+          <View style={styles.headerRight}>
+            <TouchableOpacity 
+              style={styles.iconPill} 
+              activeOpacity={0.8}
+              onPress={() => setShowNotifications(true)}
+            >
+              <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
+              {stats.securityAlerts > 0 && <View style={styles.notificationDot} />}
+            </TouchableOpacity>
+          </View>
+      </Animated.View>
 
       {/* Live Badge */}
       <View style={styles.liveBadge}>
@@ -306,6 +378,14 @@ export default function SecurityDashboard() {
         <Text style={styles.sectionTitle}>Quick Access</Text>
         <View style={styles.quickActions}>
           <QuickAction
+            label="Check In / Out"
+            icon={<UserCheck size={22} color="#10B981" />}
+            color="#10B981"
+            bgColor="rgba(16,185,129,0.15)"
+            onPress={() => router.push(`/property/${propertyId}/visitors` as any)}
+            delay={280}
+          />
+          <QuickAction
             label="Visitors"
             icon={<Users size={22} color="#3B82F6" />}
             color="#3B82F6"
@@ -313,6 +393,8 @@ export default function SecurityDashboard() {
             onPress={() => router.push(`/property/${propertyId}/visitors` as any)}
             delay={300}
           />
+        </View>
+        <View style={styles.quickActions}>
           <QuickAction
             label="Incidents"
             icon={<AlertTriangle size={22} color="#F59E0B" />}
@@ -370,25 +452,74 @@ export default function SecurityDashboard() {
         )}
       </ScrollView>
 
-      {/* Bottom Tab Bar - Same as other pages */}
-      <SafeBlurView intensity={60} tint="dark" style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
-        <LinearGradient colors={['rgba(15,21,33,0.95)', 'rgba(15,21,33,0.98)']} style={StyleSheet.absoluteFill} />
-        <View style={styles.bottomNavInner}>
-          {[
-            { icon: <Home size={22} color="#708F96" />, label: 'Home', route: `/property/${propertyId}` },
-            { icon: <FileText size={22} color="#708F96" />, label: 'Requests', route: `/property/${propertyId}/tickets` },
-            { icon: <Shield size={22} color="#3B82F6" />, label: 'Security', route: `/property/${propertyId}/security`, active: true },
-            { icon: <Box size={22} color="#708F96" />, label: 'Stock', route: `/property/${propertyId}/stock` },
-            { icon: <Settings2 size={22} color="#708F96" />, label: 'Settings', route: `/property/${propertyId}/settings` },
-          ].map((item) => (
-            <TouchableOpacity key={item.label} style={styles.navItem} onPress={() => router.push(item.route as any)}>
-              {item.active && <View style={styles.activeDot} />}
-              {item.icon}
-              <Text style={[styles.navLabel, item.active && styles.navLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          ))}
+      {/* Bottom Nav is handled by GlobalBottomNav in _layout.tsx */}
+
+      {/* Modals */}
+      <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
+      <CassandraSessionModal visible={showChat} onClose={() => setShowChat(false)} orgId={membership?.org_id || ''} propertyId={propertyId!} />
+      
+      <NotificationModal 
+        visible={showNotifications} 
+        onClose={() => setShowNotifications(false)} 
+        propertyId={propertyId!} 
+        role="tenant"
+      />
+
+      {/* Drawer */}
+      <Modal visible={showDrawer} transparent animationType="fade" onRequestClose={() => setShowDrawer(false)}>
+        <View style={{ flex: 1, flexDirection: 'row' }}>
+          <View style={[styles.drawerPanel, { paddingTop: insets.top + 16, backgroundColor: '#0a0a0a' }]}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerLogoContainer}>
+                <AutopilotLogo size={54} variant="light" />
+              </View>
+              <TouchableOpacity onPress={() => setShowDrawer(false)} style={styles.drawerCloseBtn}>
+                <Ionicons name="close" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.drawerBadge}>
+              <Text style={styles.drawerBadgeText}>SECURITY</Text>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1, marginTop: 12 }}>
+              {drawerSections.map((section, idx) => (
+                <View key={section.title} style={{ marginBottom: 16 }}>
+                  <Text style={styles.drawerSectionLabel}>{section.title}</Text>
+                  {section.items.map((item) => (
+                    <TouchableOpacity
+                      key={item.label}
+                      style={styles.drawerItem}
+                      onPress={() => {
+                        setShowDrawer(false);
+                        router.push(`/property/${propertyId}/${item.route}` as any);
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                        <Ionicons name={item.icon as any} size={20} color={item.color || "rgba(255,255,255,0.6)"} />
+                        <Text style={[styles.drawerItemLabel, item.color && { color: item.color }]}>{item.label}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+            <View style={[styles.drawerFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              <TouchableOpacity
+                style={styles.signOutBtn}
+                onPress={() => {
+                  setShowDrawer(false);
+                  setShowSignOut(true);
+                }}
+              >
+                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                <Text style={styles.signOutText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.drawerOverlay} activeOpacity={1} onPress={() => setShowDrawer(false)} />
         </View>
-      </SafeBlurView>
+      </Modal>
+
     </View>
   );
 }
@@ -397,36 +528,68 @@ export default function SecurityDashboard() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  modernHeader: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.12)',
-  },
-  headerTop: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  backBtn: {
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  iconPill: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  headerIconCenter: {
+  avatarCircle: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(59,130,246,0.15)',
+    borderRadius: 20,
+    backgroundColor: '#708F96',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitleMain: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
-  headerSubtitle: { fontSize: 12, color: '#708F96', fontWeight: '600' },
+  avatarText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Poppins-Bold',
+  },
+  headerGreeting: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.6)',
+    fontFamily: 'Urbanist-Medium',
+  },
+  headerProperty: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Poppins-Bold',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#EF4444',
+  },
   settingsBtn: {
     width: 44,
     height: 44,
@@ -526,12 +689,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  visitorInfo: { flex: 1 },
+visitorInfo: { flex: 1 },
   visitorName: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
   visitorMeta: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 2 },
   visitorTime: { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   visitorStatus: { alignItems: 'flex-end' },
-  statusBadge: { fontSize: 11, fontWeight: '600' },
+  statusBadge: { fontSize: 12, fontWeight: '700' },
+  drawerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+  drawerPanel: { width: '80%', maxWidth: 320, backgroundColor: '#0a0a0a', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.1)' },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 24, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', marginBottom: 8, gap: 8 },
+  drawerBadge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginLeft: 24,
+    marginBottom: 8,
+  },
+  drawerBadgeText: {
+    color: '#3B82F6',
+    fontSize: 10,
+    fontFamily: 'Urbanist-Bold',
+    letterSpacing: 1.2,
+  },
+  drawerLogoContainer: {
+    marginTop: -8,
+  },
+  drawerCloseBtn: { padding: 4 },
+  drawerSectionLabel: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Bold',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 1.2,
+    marginBottom: 8,
+    marginLeft: 24,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  drawerItemLabel: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Urbanist-SemiBold' },
+  drawerFooter: { padding: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  signOutBtn: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  signOutText: { color: '#EF4444', fontSize: 15, fontFamily: 'Urbanist-SemiBold' },
   bottomNav: {
     flexDirection: 'row',
     paddingTop: 8,

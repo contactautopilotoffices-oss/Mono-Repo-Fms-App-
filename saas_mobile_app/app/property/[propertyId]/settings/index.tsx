@@ -55,7 +55,7 @@ let AudioModule: any = null;
 let NotificationsModule: any = null;
 
 if (Platform.OS !== 'web') {
-  CameraModule = require('expo-camera');
+  CameraModule = require('expo-camera').Camera;
   AudioModule = require('expo-av').Audio;
   NotificationsModule = require('expo-notifications');
 }
@@ -87,7 +87,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
 
   const [locationEnabled, setLocationEnabled] = useState(true);
-  const [dashboardBg, setDashboardBg] = useState<DashboardBgKey | string>('night');
+  const [dashboardBg, setDashboardBg] = useState<DashboardBgKey | string>('default');
   const [showBgPicker, setShowBgPicker] = useState(false);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
 
@@ -177,16 +177,15 @@ export default function SettingsScreen() {
   const requestCamera = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.camera === 'granted' || perms.camera === 'denied') {
-        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]);
+      // If already granted, send user to Settings so they can disable it if desired.
+      if (perms.camera === 'granted') {
+        Linking.openSettings();
         return;
       }
-      const { status } = await CameraModule.requestCameraPermissionsAsync();
-      setPerms(p => ({ ...p, camera: status }));
-      if (status !== 'granted') {
+      const result = await CameraModule.requestCameraPermissionsAsync();
+      setPerms(p => ({ ...p, camera: result.status }));
+      // If still not granted and the system dialog can't/won't be shown again, offer Settings.
+      if (result.status !== 'granted' && (Platform.OS === 'ios' || result.canAskAgain === false)) {
         Alert.alert('Permission Required', 'Camera access is needed for scanning and photo features.', [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -200,16 +199,13 @@ export default function SettingsScreen() {
   const requestAudio = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.audio === 'granted' || perms.audio === 'denied') {
-        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]);
+      if (perms.audio === 'granted') {
+        Linking.openSettings();
         return;
       }
-      const { status } = await AudioModule.requestPermissionsAsync();
-      setPerms(p => ({ ...p, audio: status }));
-      if (status !== 'granted') {
+      const result = await AudioModule.requestPermissionsAsync();
+      setPerms(p => ({ ...p, audio: result.status }));
+      if (result.status !== 'granted' && (Platform.OS === 'ios' || result.canAskAgain === false)) {
         Alert.alert('Permission Required', 'Microphone access is needed for voice features.', [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -223,16 +219,13 @@ export default function SettingsScreen() {
   const requestNotifications = async () => {
     if (Platform.OS === 'web') return;
     try {
-      if (perms.notifications === 'granted' || perms.notifications === 'denied') {
-        Alert.alert('Permission Settings', 'Please change this in your device Settings.', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ]);
+      if (perms.notifications === 'granted') {
+        Linking.openSettings();
         return;
       }
-      const { status } = await NotificationsModule.requestPermissionsAsync();
-      setPerms(p => ({ ...p, notifications: status }));
-      if (status !== 'granted') {
+      const result = await NotificationsModule.requestPermissionsAsync();
+      setPerms(p => ({ ...p, notifications: result.status }));
+      if (result.status !== 'granted' && (Platform.OS === 'ios' || result.canAskAgain === false)) {
         Alert.alert('Permission Required', 'Push notifications are needed for alerts.', [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -295,9 +288,9 @@ export default function SettingsScreen() {
 
   const clearBgOverride = async () => {
     await AsyncStorage.removeItem('fms_dashboard_background');
-    setDashboardBg('night');
+    setDashboardBg('default');
     setShowBgPicker(false);
-    Alert.alert('Background Reset', 'Dashboard will now use live weather or default background.');
+    Alert.alert('Background Reset', 'Dashboard will now use the default background.');
   };
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -335,15 +328,15 @@ export default function SettingsScreen() {
     return '#F59E0B';
   };
 
-  // ─── Glass Card Component ──────────────────────────────────────────────────
-  const GlassCard = ({ children, style }: { children: React.ReactNode; style?: any }) => (
-    <SafeBlurView intensity={isDark ? 50 : 60} tint={isDark ? 'dark' : 'light'} style={[styles.glassCard, style]}>
-      <LinearGradient
-        colors={isDark ? ['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.01)', 'rgba(0,0,0,0.15)'] : ['rgba(255,255,255,0.7)', 'rgba(255,255,255,0.5)', 'rgba(255,255,255,0.3)']}
-        style={StyleSheet.absoluteFillObject}
-      />
-      <View style={{ zIndex: 2 }}>{children}</View>
-    </SafeBlurView>
+  // ─── Widget Card Component ──────────────────────────────────────────────────
+  const WidgetCard = ({ children, style }: { children: React.ReactNode; style?: any }) => (
+    <View style={[
+      styles.widget,
+      { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' },
+      style
+    ]}>
+      {children}
+    </View>
   );
 
   // ─── Menu Row Component ────────────────────────────────────────────────────
@@ -366,7 +359,7 @@ export default function SettingsScreen() {
   }) => (
     <TouchableOpacity style={styles.menuRow} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.menuLeft}>
-        <View style={[styles.menuIconWrap, { backgroundColor: isDark ? 'rgba(112,143,150,0.15)' : 'rgba(112,143,150,0.1)' }]}>
+        <View style={styles.widgetIconWrap}>
           {icon}
         </View>
         <View>
@@ -388,8 +381,7 @@ export default function SettingsScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <LinearGradient colors={isDark ? ['#0B1120', '#0f172a', '#1e1b4b'] : ['#eef2f6', '#f8fafc']} style={StyleSheet.absoluteFillObject} />
+      <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
         <View style={{ flex: 1, paddingHorizontal: 16, marginTop: 24 }}>
           <SkeletonLoader type="list" count={5} />
         </View>
@@ -398,36 +390,34 @@ export default function SettingsScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <LinearGradient colors={isDark ? ['#0B1120', '#0f172a', '#1e1b4b'] : ['#eef2f6', '#f8fafc']} style={StyleSheet.absoluteFillObject} />
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
 
       {/* ── Header ── */}
-      <View style={styles.headerWrap}>
-        <LinearGradient colors={['#708F96', '#4A6670', '#2D3F47']} style={StyleSheet.absoluteFillObject} />
+      <View style={[styles.headerWrap, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderBottomWidth: 1 }]}>
         <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.backOrb} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="chevron-back" size={22} color="#fff" />
+          <TouchableOpacity style={[styles.backOrb, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]} onPress={() => router.back()} activeOpacity={0.7}>
+            <Ionicons name="chevron-back" size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Settings</Text>
           <View style={{ width: 40 }} />
         </View>
 
         {/* User card */}
         <TouchableOpacity style={styles.userCard} onPress={() => router.push(`/property/${propertyId}/profile` as any)} activeOpacity={0.8}>
-          <View style={styles.avatarRing}>
-            {userProfile?.user_photo_url ? (
-              <Image source={{ uri: userProfile.user_photo_url }} style={styles.avatarImg} />
+          <View style={[styles.avatarRing, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)' }]}>
+            {userProfile?.user_photo_url || user?.user_metadata?.avatar_url || user?.avatar ? (
+              <Image source={{ uri: userProfile?.user_photo_url || user?.user_metadata?.avatar_url || user?.avatar }} style={styles.avatarImg} />
             ) : (
-              <Text style={styles.avatarLetter}>{userProfile?.full_name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}</Text>
+              <Text style={[styles.avatarLetter, { color: colors.text }]}>{user?.user_metadata?.full_name?.[0]?.toUpperCase() || userProfile?.full_name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}</Text>
             )}
           </View>
           <View style={{ flex: 1, marginLeft: 14 }}>
-            <Text style={styles.userName} numberOfLines={1}>{userProfile?.full_name || 'User'}</Text>
-            <Text style={styles.userEmail} numberOfLines={1}>{userProfile?.email || user?.email || ''}</Text>
-            <Text style={styles.userRole}>{getRoleDisplay()}</Text>
+            <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>{user?.user_metadata?.full_name || userProfile?.full_name || 'User'}</Text>
+            <Text style={[styles.userEmail, { color: colors.textSecondary }]} numberOfLines={1}>{userProfile?.email || user?.email || ''}</Text>
+            <Text style={[styles.userRole, { color: colors.textSecondary }]}>{getRoleDisplay()}</Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.5)" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
         </TouchableOpacity>
       </View>
 
@@ -439,20 +429,22 @@ export default function SettingsScreen() {
       >
         {/* ── Property ── */}
         {property && (
-          <GlassCard>
+          <WidgetCard>
             <Text style={[styles.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>PROPERTY</Text>
             <View style={styles.propertyRow}>
-              <Building2 size={18} color="#708F96" />
+              <View style={styles.widgetIconWrap}>
+                <Building2 size={20} color="#708F96" />
+              </View>
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={[styles.propertyName, { color: colors.text }]} numberOfLines={1}>{property.name}</Text>
                 <Text style={[styles.propertyCode, { color: colors.textSecondary }]}>{property.code}</Text>
               </View>
             </View>
-          </GlassCard>
+          </WidgetCard>
         )}
 
         {/* ── Preferences ── */}
-        <GlassCard>
+        <WidgetCard>
           <Text style={[styles.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>PREFERENCES</Text>
 
           <MenuRow
@@ -474,10 +466,10 @@ export default function SettingsScreen() {
             }
             onPress={() => setShowBgPicker(true)}
           />
-        </GlassCard>
+        </WidgetCard>
 
         {/* ── Permissions ── */}
-        <GlassCard>
+        <WidgetCard>
           <Text style={[styles.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>PERMISSIONS</Text>
 
           <MenuRow
@@ -506,16 +498,16 @@ export default function SettingsScreen() {
             toggle
             toggleValue={perms.notifications === 'granted'}
           />
-        </GlassCard>
+        </WidgetCard>
 
         {/* ── Support ── */}
-        <GlassCard>
+        <WidgetCard>
           <Text style={[styles.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>SUPPORT</Text>
 
           <MenuRow icon={<Shield size={18} color="#708F96" />} title="Security" subtitle="Password and authentication" onPress={() => setShowSecurityModal(true)} />
           <MenuRow icon={<FileText size={18} color="#708F96" />} title="Terms & Privacy" subtitle="Legal information" onPress={() => {}} />
           <MenuRow icon={<HelpCircle size={18} color="#708F96" />} title="Help & Support" subtitle="Get assistance" onPress={() => {}} />
-        </GlassCard>
+        </WidgetCard>
 
         {/* ── Sign Out ── */}
         <TouchableOpacity style={[styles.signOutBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.08)' }]} onPress={handleSignOut} activeOpacity={0.8}>
@@ -653,7 +645,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontFamily: 'Poppins-Bold',
-    color: '#fff',
     letterSpacing: 0.3,
   },
   userCard: {
@@ -682,7 +673,6 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 17,
     fontFamily: 'Poppins-Bold',
-    color: '#fff',
   },
   userEmail: {
     fontSize: 12,
@@ -705,14 +695,12 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
 
-  // Glass Card
-  glassCard: {
+  // Widget Card
+  widget: {
+    padding: 18,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    padding: 18,
     marginBottom: 16,
-    overflow: 'hidden',
   },
   sectionLabel: {
     fontSize: 10,
@@ -720,6 +708,14 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 14,
     textTransform: 'uppercase',
+  },
+  widgetIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: 'rgba(112,143,150,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   // Property
@@ -744,7 +740,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 13,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    borderTopColor: 'rgba(112,143,150,0.1)',
   },
   menuLeft: {
     flexDirection: 'row',

@@ -2143,7 +2143,7 @@ export default function ElectricityScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.electricity(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
   );
 
   const [selectedSpreadsheetId, setSelectedSpreadsheetId] = useState<string | null>(null);
@@ -2700,6 +2700,7 @@ const totalUnits = filteredReadings.reduce(
                                 </Text>
                                 <Text style={{ fontSize: 11, fontFamily: 'Urbanist-Medium', color: colors.textTertiary, marginTop: 2 }}>
                                   {new Date(r.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                  {r.user?.full_name ? ` · ${r.user.full_name}` : ''}
                                   {r.notes ? ` · ${r.notes}` : ''}
                                 </Text>
                               </View>

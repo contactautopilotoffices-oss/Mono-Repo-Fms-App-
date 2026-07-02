@@ -125,19 +125,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       new_value: assigned_to,
     });
 
-    // Send push notification to assigned user
-    const { sendPushNotification, NOTIFICATION_TYPES } = await import("@/lib/notificationService");
-    sendPushNotification({
-      userId: assigned_to,
-      propertyId: ticket.property_id,
-      organizationId: ticket.organization_id,
-      type: NOTIFICATION_TYPES.TICKET_CREATED,
-      title: "New Ticket Assigned",
-      message: `Ticket #${ticket.ticket_number}: ${ticket.title}`,
-      ticketId: ticket.id,
-      priority: ticket.priority === "critical" || ticket.priority === "urgent" ? "HIGH" : "NORMAL",
-    }).catch(err => console.warn("[Push] Failed to send notification:", err));
-
+    // Web app backend handles push notifications, so we do not send them here to avoid duplicates.
     return NextResponse.json({
       success: true,
       ticket: updatedTicket,

@@ -122,7 +122,7 @@ function CardContent({
     <View style={styles.cardInner}>
       {/* Background Progress for Checklist */}
       <View style={styles.cardProgressBg}>
-        <View style={[styles.cardProgressFill, { width: `${property.checklist.percent}%` }]} />
+        <View style={[styles.cardProgressFill, { width: `${property.checklist?.percent || 0}%` }]} />
       </View>
 
       <View style={styles.cardTopRow}>
@@ -146,7 +146,7 @@ function CardContent({
           <View style={styles.cardInfoRow}>
             <Text style={styles.cardCode}>{property.code}</Text>
             <View style={styles.dot} />
-            <Text style={styles.cardChecklistLabel}>{property.checklist.percent}% Complete</Text>
+            <Text style={styles.cardChecklistLabel}>{property.checklist?.percent || 0}% Complete</Text>
           </View>
         </View>
         <View style={styles.cardRight}>
@@ -165,7 +165,15 @@ function CardContent({
         <View style={styles.energyBubble}>
           <Ionicons name="flash" size={12} color="#FFD60A" />
           <Text style={styles.energyText}>
-            {property.energy.electricity > 0 ? `${property.energy.electricity} kVAh` : `${property.energy.diesel} L`}
+            {(property.energy?.electricity || 0) > 0 ? `${property.energy?.electricity} kVAh` : `${property.energy?.diesel || 0} L`}
+          </Text>
+        </View>
+
+        {/* Water Bubble */}
+        <View style={[styles.energyBubble, { borderColor: 'rgba(14,165,233,0.25)', marginLeft: 8 }]}>
+          <Ionicons name="water" size={12} color="#0EA5E9" />
+          <Text style={[styles.energyText, { color: '#0EA5E9' }]}>
+            {(property.water?.cost || 0) > 0 ? `₹${property.water?.cost.toLocaleString()}` : '0'}
           </Text>
         </View>
       </View>

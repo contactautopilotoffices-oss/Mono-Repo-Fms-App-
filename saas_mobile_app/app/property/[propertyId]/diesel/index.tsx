@@ -1435,7 +1435,7 @@ export default function DieselScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.diesel(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
   );
 
   const generators = data?.generators ?? [];
@@ -1871,6 +1871,7 @@ export default function DieselScreen() {
                                     : '—'}
                                   {' · '}
                                   {new Date(r.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                  {r.user?.full_name ? ` · ${r.user.full_name}` : ''}
                                 </Text>
                               </View>
                               {canManage && (

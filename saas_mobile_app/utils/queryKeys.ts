@@ -76,6 +76,12 @@ const property = {
   water: (propertyId: string) => ['water', propertyId] as const,
   /** Water analytics for a property */
   waterAnalytics: (propertyId: string) => ['water-analytics', propertyId] as const,
+  /** Cafeteria revenue for a property */
+  cafeteria: (propertyId: string) => ['cafeteria', propertyId] as const,
+  /** Cafeteria revenue history for a property */
+  cafeteriaHistory: (propertyId: string) => ['cafeteria-history', propertyId] as const,
+  /** Cafeteria analytics for a property */
+  cafeteriaAnalytics: (propertyId: string) => ['cafeteria-analytics', propertyId] as const,
   /** Request reports for a property and month */
   reportsRequests: (propertyId: string, month: string) => ['reports-requests', propertyId, month] as const,
   /** Snag reports for a property */

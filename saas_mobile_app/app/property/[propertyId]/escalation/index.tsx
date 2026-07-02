@@ -151,7 +151,7 @@ export default function EscalationScreen() {
   const { data, isLoading, isFetching, refetch } = useServerQuery(
     queryKeys.property.escalation(propertyId),
     fetchAll,
-    { staleTime: 1000 * 60 * 5 },
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' },
   );
 
   const hierarchies = data?.hierarchies ?? [];

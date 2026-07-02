@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ScrollView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ScrollView, Platform, Alert, Modal, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useMeetingRoomStore } from '@/stores/meetingRoomStore';
@@ -35,6 +36,12 @@ export function RoomBookingTab({ propertyId, userId, refreshing, onRefresh }: Ro
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedCapacity, setSelectedCapacity] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [modalConfig, setModalConfig] = useState<{ visible: boolean; type: 'error' | 'success'; title: string; message: string }>({ 
+    visible: false, 
+    type: 'error', 
+    title: '', 
+    message: '' 
+  });
 
   // Generate next 14 days
   const days = Array.from({ length: 14 }, (_, i) => {
@@ -66,22 +73,48 @@ export function RoomBookingTab({ propertyId, userId, refreshing, onRefresh }: Ro
     onRefresh?.();
   };
 
-  const handleBookRoom = async (room: Room, startTime: string, endTime: string) => {
+  const handleBookRoom = async (room: Room, startTime: string, endTime: string, comment?: string) => {
     const res = await createMeetingRoomBooking({
         meetingRoomId: room.id,
         propertyId,
         date: dateStr,
         startTime,
-        endTime
+        endTime,
+        comment,
     });
 
     if (res.error) {
-        Alert.alert('Booking Failed', res.error);
+        let cleanError = res.error;
+        // Parse raw JSON errors if present e.g. "Server error 402: {"error":"..."}"
+        try {
+            const jsonStart = res.error.indexOf('{');
+            if (jsonStart !== -1) {
+                const parsed = JSON.parse(res.error.substring(jsonStart));
+                if (parsed.error) cleanError = parsed.error;
+            }
+        } catch (e) {}
+        
+        setModalConfig({
+          visible: true,
+          type: 'error',
+          title: 'Booking Failed',
+          message: cleanError
+        });
     } else {
         // Invalidate cache for this date so it refetches immediately
         invalidateDateCache(propertyId, dateStr);
         await fetchAvailability(propertyId, dateStr);
-        Alert.alert('Success', `Successfully booked ${room.name}`);
+        
+        if (onRefresh) {
+            onRefresh();
+        }
+        
+        setModalConfig({
+          visible: true,
+          type: 'success',
+          title: 'Booking Confirmed',
+          message: `Successfully booked ${room.name} for ${startTime} - ${endTime}`
+        });
     }
   };
 
@@ -184,6 +217,53 @@ export function RoomBookingTab({ propertyId, userId, refreshing, onRefresh }: Ro
           </Animated.View>
         }
       />
+      
+      {/* ── Custom Status Modal ────────────────────────────────── */}
+      <Modal
+        visible={modalConfig.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+      >
+        <Pressable 
+          style={styles.modalOverlay} 
+          onPress={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+        >
+          <Animated.View 
+            entering={FadeInDown.duration(300).springify().damping(20).stiffness(200)}
+            style={styles.modalContainer}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={[
+              styles.modalIconBox, 
+              { backgroundColor: modalConfig.type === 'error' ? 'rgba(255, 59, 48, 0.15)' : 'rgba(16, 185, 129, 0.15)' }
+            ]}>
+              <Ionicons 
+                name={modalConfig.type === 'error' ? 'alert-circle' : 'checkmark-circle'} 
+                size={36} 
+                color={modalConfig.type === 'error' ? '#FF3B30' : '#10B981'} 
+              />
+            </View>
+            <Text style={styles.modalTitle}>{modalConfig.title}</Text>
+            <Text style={styles.modalMessage}>{modalConfig.message}</Text>
+            <TouchableOpacity 
+              style={[
+                styles.modalBtn, 
+                { backgroundColor: modalConfig.type === 'error' ? 'rgba(255, 59, 48, 0.15)' : 'rgba(16, 185, 129, 0.15)' }
+              ]} 
+              onPress={() => setModalConfig(prev => ({ ...prev, visible: false }))}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                styles.modalBtnText, 
+                { color: modalConfig.type === 'error' ? '#FF3B30' : '#10B981' }
+              ]}>
+                {modalConfig.type === 'error' ? 'Understood' : 'Great'}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -200,6 +280,72 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  dateNum: {
+    fontFamily: 'Urbanist',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#8B949E',
+  },
+  dateNumActive: {
+    color: '#FFFFFF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContainer: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalIconBox: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontFamily: 'Poppins',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontFamily: 'Urbanist',
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  modalBtn: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  modalBtnText: {
+    fontFamily: 'Urbanist',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   title: {
     fontSize: 22,

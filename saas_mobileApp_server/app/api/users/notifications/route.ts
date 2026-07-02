@@ -32,7 +32,72 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, data });
+    // Enrich with photos
+    let enrichedData = data;
+    if (data && data.length > 0) {
+      const ticketIds = data.map(n => n.ticket_id).filter(Boolean);
+      const bookingIds = data.map(n => n.booking_id).filter(Boolean);
+      let userPhotoMap: Record<string, string> = {};
+      let userIdsToFetch: Set<string> = new Set();
+
+      if (ticketIds.length > 0) {
+        const { data: tickets } = await admin.from("tickets").select("id, raised_by, photo_before_url, photo_after_url").in("id", ticketIds);
+        if (tickets) {
+           tickets.forEach(t => {
+             if (t.raised_by) userIdsToFetch.add(t.raised_by);
+           });
+           userPhotoMap.ticketsData = tickets as any;
+        }
+      }
+
+      if (bookingIds.length > 0) {
+        const { data: bookings } = await admin.from("meeting_room_bookings").select("id, user_id").in("id", bookingIds);
+        if (bookings) {
+           bookings.forEach(b => {
+             if (b.user_id) userIdsToFetch.add(b.user_id);
+           });
+           userPhotoMap.bookingsData = bookings as any;
+        }
+      }
+
+      if (userIdsToFetch.size > 0) {
+         const { data: users } = await admin.from("users").select("id, user_photo_url").in("id", Array.from(userIdsToFetch));
+         users?.forEach(u => { if (u.user_photo_url) userPhotoMap[u.id] = u.user_photo_url; });
+      }
+
+      // Map back to entities
+      const ticketsData = (userPhotoMap.ticketsData as any) || [];
+      ticketsData.forEach((t: any) => {
+          if (t.raised_by && userPhotoMap[t.raised_by]) {
+             userPhotoMap[`ticket_${t.id}`] = userPhotoMap[t.raised_by];
+          }
+      });
+      const bookingsData = (userPhotoMap.bookingsData as any) || [];
+      bookingsData.forEach((b: any) => {
+          if (b.user_id && userPhotoMap[b.user_id]) {
+             userPhotoMap[`booking_${b.id}`] = userPhotoMap[b.user_id];
+          }
+      });
+      enrichedData = data.map((n: any) => {
+         let photo_url = null;
+         if (n.entity_type === "ticket" && n.ticket_id) {
+            const ticketData = ticketsData.find((t: any) => t.id === n.ticket_id);
+            const nType = (n.notification_type || "").toUpperCase();
+            if (nType.includes("RESOLVED") || nType.includes("COMPLETED")) {
+               photo_url = ticketData?.photo_after_url || null;
+            } else if (nType.includes("CREATED") || nType.includes("ASSIGNED") || nType.includes("NEW")) {
+               photo_url = ticketData?.photo_before_url || null;
+            } else {
+               photo_url = null;
+            }
+         } else {
+            photo_url = null;
+         }
+         return { ...n, photo_url };
+      });
+    }
+
+    return NextResponse.json({ success: true, data: enrichedData });
   } catch (error) {
     console.error("[saas-mobile-server] GET /api/users/notifications error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

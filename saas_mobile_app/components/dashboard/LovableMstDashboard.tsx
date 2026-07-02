@@ -24,6 +24,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useGamification } from '@/hooks/mst/useGamification';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { useQuery } from '@tanstack/react-query';
 import { queryClient } from '@/utils/queryClient';
 import SkeletonLoader from './lovable/SkeletonLoader';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
@@ -54,8 +55,11 @@ import {
   defaultMstUser,
   defaultAchievements,
   defaultLeaderboard as demoLeaderboard,
+  mapBadgesToAchievements,
+  mapNextAchievementsToAchievements,
   type UserStats,
   type LeaderRow,
+  type Achievement,
 } from '@/lib/gamification';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
 import { GlassTile } from './DashboardComponents';
@@ -92,7 +96,7 @@ interface Ticket {
   sla_due_at?: string;
 }
 
-type Tab = 'dashboard' | 'daily' | 'flow' | 'profile' | 'requests' | 'flow-map';
+type Tab = 'dashboard' | 'daily' | 'profile';
 
 interface Props {
   propertyId: string;
@@ -117,41 +121,6 @@ function TimeBlock({ val }: { val: number }) {
   return (
     <View style={styles.timeBlock}>
       <Text style={styles.timeBlockText}>{String(val).padStart(2, '0')}</Text>
-    </View>
-  );
-}
-
-function PropertyFlowTile({
-  name,
-  code,
-  active,
-}: {
-  name: string;
-  code: string;
-  active: number;
-}) {
-  return (
-    <View style={styles.flowTile}>
-      <View style={styles.flowTileInner}>
-        <View style={styles.flowTileHeader}>
-          <Ionicons name="location" size={12} color="rgba(255,255,255,0.55)" />
-          <Text style={styles.flowTileCode}>{code}</Text>
-        </View>
-        <Text style={styles.flowTileName}>{name}</Text>
-        <View style={styles.flowTileAvatars}>
-          {Array.from({ length: active }).map((_, i) => (
-            <View key={i} style={[styles.flowTileAvatar, { marginLeft: i > 0 ? -6 : 0 }]}>
-              <Text style={styles.flowTileAvatarText}>{String.fromCharCode(65 + i)}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.flowTileStatus}>
-          <View style={styles.flowTileDot} />
-          <Text style={styles.flowTileStatusText}>
-            {active} MST{active > 1 ? 's' : ''} on-site
-          </Text>
-        </View>
-      </View>
     </View>
   );
 }
@@ -556,6 +525,56 @@ const CountdownTimer = memo(function CountdownTimer() {
 type TimeFilter = 'today' | 'month' | 'all_time';
 type ScopeFilter = 'property' | 'my_tasks';
 
+function getCountDateRange(timeFilter: TimeFilter) {
+  if (timeFilter === 'all_time') return {};
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (timeFilter === 'today') {
+    const d = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return { dateFrom: `${d}T00:00:00+05:30`, dateTo: `${d}T23:59:59+05:30` };
+  }
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const d = `${monthStart.getFullYear()}-${pad(monthStart.getMonth() + 1)}-${pad(monthStart.getDate())}`;
+  return { dateFrom: `${d}T00:00:00+05:30` };
+}
+
+async function fetchTicketCountBatch(
+  propertyId: string,
+  scopeFilter: ScopeFilter,
+  timeFilter: TimeFilter,
+  userId?: string,
+) {
+  const dateRange = getCountDateRange(timeFilter);
+  const baseParams: Record<string, string> = {
+    propertyId,
+    limit: '1',
+    ...dateRange,
+  };
+  if (scopeFilter === 'my_tasks' && userId) {
+    baseParams.userId = userId;
+  }
+
+  const OPEN_STATUSES = 'open,waitlist,assigned,in_progress';
+  const CLOSED_STATUSES = 'closed,completed,resolved,pending_validation';
+
+  const [totalRes, openRes, closedRes] = await Promise.all([
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: OPEN_STATUSES }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: CLOSED_STATUSES }),
+  ]);
+
+  const getTotal = (res: any) =>
+    typeof (res?.data as any)?.total === 'number'
+      ? (res?.data as any).total
+      : ((res?.data as any)?.tickets?.length ?? 0);
+
+  return {
+    total: getTotal(totalRes),
+    open: getTotal(openRes),
+    closed: getTotal(closedRes),
+  };
+}
+
 export default function LovableMstDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
   const { user, signOut, membership } = useAuth();
@@ -594,7 +613,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     isCheckedIn: boolean;
     checklistStats?: { completed: number; total: number };
   }>(
-    queryKeys.property.mstDashboardLovable(propertyId),
+    [...queryKeys.property.mstDashboardLovable(propertyId), scopeFilter, user?.id || ''],
     async () => {
       const [propRes, ticketRes, shiftRes, checklistRes] = await Promise.all([
         serverApi.query<{ name: string }[]>({
@@ -607,6 +626,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         serverApi.get<{ tickets: Ticket[]; total: number }>('/api/tickets', {
           propertyId,
           limit: '100',
+          ...(scopeFilter === 'my_tasks' && user?.id ? { userId: user.id } : {}),
         }),
         serverApi.query<{ is_checked_in: boolean }[]>({
           table: 'resolver_stats',
@@ -676,6 +696,14 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     return result;
   }, [tickets, timeFilter, scopeFilter, user?.id]);
 
+  // Exact ticket counts — not capped by the 100-row list limit
+  const { data: exactTicketCounts } = useQuery({
+    queryKey: ['mst-dashboard-ticket-counts', propertyId, scopeFilter, timeFilter, user?.id || ''],
+    queryFn: () => fetchTicketCountBatch(propertyId, scopeFilter, timeFilter, user?.id),
+    enabled: !!propertyId,
+    staleTime: 1000 * 60 * 5,
+  });
+
   const shuffledTickets = useMemo(() => {
     // Only show open tickets on shuffled cards
     const openTickets = filteredTickets.filter(t => 
@@ -703,6 +731,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const onRefresh = () => {
     refetch();
+    queryClient.invalidateQueries({ queryKey: ['mst-dashboard-ticket-counts'] });
   };
 
   // ── Shift toggle ──
@@ -756,7 +785,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
   }, [isCheckedIn, propertyId, user?.id, isCheckingInOut]);
 
   // ── Stats ──
-  const stats = useMemo(() => {
+  // Use exact counts fetched with limit:1 so properties with >100 tickets still report the true totals.
+  const localStats = useMemo(() => {
     const total = filteredTickets.length;
     const open = filteredTickets.filter((t) =>
       ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
@@ -766,6 +796,7 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     ).length;
     return { total, open, closed };
   }, [filteredTickets]);
+  const stats = exactTicketCounts ?? localStats;
 
   // ── Gamification user ──
   const mstUser: UserStats = useMemo(() => {
@@ -788,6 +819,14 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       weeklyTotal: myStats.today?.total_in_rank ?? 1,
     };
   }, [myStats, user]);
+
+  const achievements: Achievement[] = useMemo(() => {
+    if (!myStats) return defaultAchievements;
+    return [
+      ...mapBadgesToAchievements(myStats.badges),
+      ...mapNextAchievementsToAchievements(myStats.next_achievements),
+    ];
+  }, [myStats]);
 
   // ── Leaderboard rows ──
   const leaderboardRows: LeaderRow[] = useMemo(() => {
@@ -941,60 +980,9 @@ export default function LovableMstDashboard({ propertyId }: Props) {
     </>
   );
 
-  const renderLiveFlow = () => (
-    <>
-      <Animated.View >
-        <Text style={styles.heroTitle}>Live Flow</Text>
-      </Animated.View>
-
-      {/* Weekly Champion */}
-      <Animated.View  style={styles.championCard}>
-        <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.championInner}>
-          <View style={styles.championAvatarWrap}>
-            <LinearGradient
-              colors={['#F59E0B', '#D97706']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.championAvatar}
-            >
-              <Text style={styles.championAvatarText}>{champion?.initials}</Text>
-            </LinearGradient>
-            <View style={styles.crownBadge}>
-              <Ionicons name="trophy" size={14} color="#FDE68A" />
-            </View>
-          </View>
-          <View style={styles.championInfo}>
-            <Text style={styles.championLabel}>Weekly Champion</Text>
-            <Text style={styles.championName}>{champion?.name || 'No champion yet'}</Text>
-            <Text style={styles.championMeta}>
-              {champion?.xp.toLocaleString()} XP · {champion?.resolved} resolved
-            </Text>
-          </View>
-        </View>
-      </Animated.View>
-
-      {/* Property grid */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionHeaderTitle}>Active Properties</Text>
-      </View>
-
-      <View style={styles.flowGrid}>
-        {[
-          { name: 'SS Plaza', code: 'SSP-01', active: 3 },
-          { name: 'Rabale', code: 'RBL-02', active: 2 },
-          { name: 'ETPL Digitide', code: 'ETP-03', active: 1 },
-          { name: 'Head Office', code: 'HO-04', active: 2 },
-        ].map((p, i) => (
-          <PropertyFlowTile key={i} name={p.name} code={p.code} active={p.active} />
-        ))}
-      </View>
-    </>
-  );
-
   const renderProfile = () => {
-    const unlocked = defaultAchievements.filter((a) => a.unlocked);
-    const locked = defaultAchievements.filter((a) => !a.unlocked);
+    const unlocked = achievements.filter((a) => a.unlocked);
+    const locked = achievements.filter((a) => !a.unlocked);
     const myRow = leaderboardRows.find((r) => r.isMe) ?? leaderboardRows[0];
 
     return (
@@ -1039,14 +1027,14 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         <View style={styles.profileStatsGrid}>
           <ProfileStat icon="trophy" value={mstUser.totalXp.toLocaleString()} label="TOTAL XP" tint="#FBBF24" />
           <ProfileStat icon="checkmark-circle" value={String(myRow?.resolved ?? 0)} label="RESOLVED" tint="#34D399" />
-          <ProfileStat icon="flag" value={`${unlocked.length}/${defaultAchievements.length}`} label="BADGES" tint="#60A5FA" />
+          <ProfileStat icon="flag" value={`${unlocked.length}/${achievements.length}`} label="BADGES" tint="#60A5FA" />
         </View>
 
         {/* Achievements */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderTitle}>Achievements</Text>
           <Text style={styles.sectionHeaderHint}>
-            {unlocked.length} of {defaultAchievements.length} unlocked
+            {unlocked.length} of {achievements.length} unlocked
           </Text>
         </View>
         <View style={styles.achievementsGrid}>
@@ -1154,7 +1142,6 @@ export default function LovableMstDashboard({ propertyId }: Props) {
         <View style={styles.tabContent}>
           {activeTab === 'dashboard' && renderMyDashboard()}
           {activeTab === 'daily' && renderDailyBoard()}
-          {activeTab === 'flow' && renderLiveFlow()}
           {activeTab === 'profile' && renderProfile()}
         </View>
       </ScrollView>
@@ -2144,83 +2131,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.60)',
   },
-  flowGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
-  },
-  flowTile: {
-    width: (SCREEN_W - 52) / 2,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    overflow: 'hidden',
-  },
-  flowTileInner: {
-    padding: 14,
-  },
-  flowTileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  flowTileCode: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.55)',
-    letterSpacing: 1.6,
-    textTransform: 'uppercase',
-  },
-  flowTileName: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    lineHeight: 20,
-  },
-  flowTileAvatars: {
-    flexDirection: 'row',
-    marginTop: 12,
-  },
-  flowTileAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.20)',
-    backgroundColor: '#4C3FB8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  flowTileAvatarText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  flowTileStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-  },
-  flowTileDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#34D399',
-    shadowColor: '#34D399',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  flowTileStatusText: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.55)',
-  },
-
   // Profile
   identityCard: {
     marginTop: 8,

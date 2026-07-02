@@ -29,39 +29,43 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File;
-    const visitorId = formData.get("visitor_id") as string;
+    const body = await request.json();
+    const visitorId = body.visitor_id;
+    const fileBase64 = body.fileBase64;
+    const contentType = body.contentType || 'image/jpeg';
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
     if (!visitorId) {
       return NextResponse.json({ error: "visitor_id required" }, { status: 400 });
     }
+    if (!fileBase64) {
+      return NextResponse.json({ error: "No fileBase64 provided" }, { status: 400 });
+    }
 
-    // Validate file type - only images allowed for photos
+    // Validate file type
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"];
-    if (!allowedTypes.includes(file.type)) {
+    if (!allowedTypes.includes(contentType)) {
       return NextResponse.json({ error: "Only image files allowed." }, { status: 400 });
     }
 
+    // Decode base64 to Buffer
+    const buffer = Buffer.from(fileBase64, 'base64');
+
     // Validate file size (max 5MB)
-    if (file.size > MAX_FILE_SIZE) {
+    if (buffer.length > MAX_FILE_SIZE) {
       return NextResponse.json({ error: `File too large. Max 5MB allowed.` }, { status: 400 });
     }
 
     // Generate path: {propertyId}/{visitorId}.{ext}
-    const fileExt = file.name.split(".").pop() || "jpg";
+    const fileExt = contentType.split('/').pop() || "jpg";
     const filePath = `${propertyId}/${visitorId}.${fileExt}`;
 
-    // Upload to Supabase Storage - pass File object directly
+    // Upload to Supabase Storage - pass Buffer
     const { data: uploadData, error: uploadError } = await admin.storage
       .from(BUCKET_NAME)
-      .upload(filePath, file, {
+      .upload(filePath, buffer, {
         cacheControl: "3600",
         upsert: true,
-        contentType: file.type,
+        contentType: contentType,
       });
 
     if (uploadError) {

@@ -1,5 +1,5 @@
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import { Skia } from '@shopify/react-native-skia';
 
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -94,10 +94,17 @@ export async function processAndStampImage(uri: string, timestamp?: string): Pro
     }
 
     const stampedImage = surface.makeImageSnapshot();
-    const base64Data = stampedImage.encodeToBase64(Skia.ImageFormat.WEBP, 80);
-    
-    const outUri = `${FileSystem.cacheDirectory}stamped_${Date.now()}.webp`;
-    await FileSystem.writeAsStringAsync(outUri, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+    const base64Data = stampedImage.encodeToBase64(
+      (Skia as any).ImageFormat.WEBP,
+      80,
+    );
+
+    const cacheFile = Paths.cache.createFile(
+      `stamped_${Date.now()}.webp`,
+      'image/webp',
+    );
+    cacheFile.write(base64Data, { encoding: 'base64' });
+    const outUri = cacheFile.uri;
     
     // Cleanup Skia resources
     image.dispose();

@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     // Vendors may be flagged via role, service_type, or category column
     const { data: vendors, error: vendorsError } = await admin
       .from("vendors")
-      .select("id, property_id, name, email, phone, service_type, commission_rate, monthly_rent, status, contract_start_date, contract_end_date, created_at")
+      .select("id, property_id, shop_name, owner_name, email, phone, service_type, commission_rate, monthly_rent, status, contract_start_date, contract_end_date, created_at")
       .eq("property_id", propertyId)
       .eq("status", "active")
       .or("role.eq.food_vendor,service_type.eq.food_vendor,category.eq.food_vendor")

@@ -370,6 +370,7 @@ const { data, isLoading, isFetching, refetch } = useServerQuery(
   { 
     staleTime: 1000 * 60 * 5,
     enabled: isValidProperty,
+    refetchOnMount: 'always',
   }
 );
 
@@ -765,6 +766,7 @@ const onRefresh = () => {
           propertyId={propertyId ?? ''}
           organizationId={orgId}
           role={(membership as any)?.role === 'org_super_admin' ? 'super_admin' : ((membership as any)?.role === 'property_admin' ? 'admin' : 'tenant')}
+          onSuccess={() => refetch()}
         />
 
         {/* Filter Modal */}

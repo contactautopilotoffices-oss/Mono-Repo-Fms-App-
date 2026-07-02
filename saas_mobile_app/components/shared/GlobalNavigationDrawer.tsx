@@ -87,7 +87,6 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
           items: [
             { label: 'Overview', route: 'dashboard', icon: 'grid-outline' },
             { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
-            { label: 'Live Flow Map', route: 'flow-map', icon: 'git-branch-outline' },
             { label: 'Visitors', route: 'visitors', icon: 'people-outline' },
             { label: 'Diesel', route: 'diesel', icon: 'flame-outline' },
             { label: 'Electricity Logger', route: 'electricity', icon: 'flash-outline' },
@@ -127,6 +126,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             { label: 'Diesel', route: 'diesel', icon: 'flame-outline' },
             { label: 'Electricity', route: 'electricity', icon: 'flash-outline' },
             { label: 'Water', route: 'water', icon: 'water-outline' },
+            { label: 'Cafeteria', route: 'cafeteria', icon: 'fast-food-outline' },
             { label: 'Stock', route: 'stock', icon: 'cube-outline' },
             { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
             { label: 'Checklists', route: 'checklist', icon: 'clipboard-outline' },
@@ -216,6 +216,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
             { label: 'Diesel', route: 'diesel', icon: 'flame-outline', color: '#F97316' },
             { label: 'Electricity', route: 'electricity', icon: 'flash-outline' },
             { label: 'Water', route: 'water', icon: 'water-outline' },
+            { label: 'Cafeteria', route: 'cafeteria', icon: 'fast-food-outline' },
             { label: 'Stock', route: 'stock', icon: 'cube-outline' },
             { label: 'Procurement', route: 'procurement', icon: 'cart-outline' },
           ],

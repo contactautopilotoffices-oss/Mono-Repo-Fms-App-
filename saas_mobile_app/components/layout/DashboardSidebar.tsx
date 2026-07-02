@@ -14,6 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import SignOutModal from '../ui/SignOutModal';
 import ThemeToggle from '../ui/ThemeToggle';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { queryKeys } from '@/utils/queryKeys';
+import { apiFetch } from '@/utils/api/mobileApi';
 
 interface NavItem {
   label: string;
@@ -34,6 +37,20 @@ export default function DashboardSidebar(props: DrawerContentComponentProps) {
   const { signOut, user } = useAuth();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const insets = useSafeAreaInsets();
+
+  const fetchProfile = async () => {
+    if (!user) return null;
+    const response = await apiFetch<any>(`/api/users/${user.id}`);
+    if (response.success && response.data) return response.data;
+    if (response.id || response.full_name) return response;
+    return null;
+  };
+
+  const { data: userProfile } = useServerQuery(
+    queryKeys.user.profile(user?.id ?? 'none'),
+    fetchProfile,
+    { staleTime: 1000 * 60 * 5 }
+  );
 
   const NAV_SECTIONS: NavSection[] = [
     {
@@ -132,15 +149,22 @@ export default function DashboardSidebar(props: DrawerContentComponentProps) {
         {/* User Profile */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {getUserInitials(
-                user?.user_metadata?.full_name || user?.email || 'User'
-              )}
-            </Text>
+            {userProfile?.user_photo_url || user?.user_metadata?.avatar_url || user?.avatar ? (
+              <Image 
+                source={{ uri: userProfile?.user_photo_url || user?.user_metadata?.avatar_url || user?.avatar }} 
+                style={{ width: '100%', height: '100%', borderRadius: 100 }} 
+              />
+            ) : (
+              <Text style={styles.avatarText}>
+                {getUserInitials(
+                  user?.user_metadata?.full_name || userProfile?.full_name || user?.email || 'User'
+                )}
+              </Text>
+            )}
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName} numberOfLines={1}>
-              {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+              {user?.user_metadata?.full_name || userProfile?.full_name || user?.email?.split('@')[0] || 'User'}
             </Text>
             <Text style={styles.profileRole} numberOfLines={1}>
               {user?.user_metadata?.role || 'User'}

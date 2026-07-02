@@ -21,6 +21,7 @@ const BACKGROUND_IMAGES: Record<string, any> = {
   'rainy': require('@/assets/images/weather-rain.png'),
   'cosmic': require('@/assets/images/weather-moon.png'),
   'custom': require('@/assets/images/launch-bg.png'),
+  'default': require('@/assets/images/default-dashboard-bg.png'),
 };
 
 const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = {
@@ -33,6 +34,7 @@ const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = 
   'rainy': ['#0f172a', '#1e293b', '#334155'],        // Deep Stormy Rain
   'cosmic': ['#0a0a1a', '#1a1040', '#0d1b3e'],       // Deep cosmic purple-blue
   'custom': ['#0a0a1a', '#1a1040', '#0d1b3e'],       // Matching launch-bg gradient
+  'default': ['#0a0a1a', '#1a1040', '#0d1b3e'],       // Matching launch-bg gradient
 };
 
 export default function WeatherBackground({ condition }: WeatherBackgroundProps) {
@@ -76,12 +78,10 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
     overrideCondition.startsWith('data:image')
   );
 
-  // Default to night backdrop — dashboard always shows dark background
+  // Default to the app-wide default backdrop unless a weather-based preset was explicitly chosen
   const mappedCondition = (overrideCondition && !isCustomUri)
-    ? overrideCondition.toLowerCase() 
-    : (condition && typeof condition === 'string')
-      ? condition.toLowerCase()
-      : 'clear-night';
+    ? overrideCondition.toLowerCase()
+    : 'default';
       
   const backgroundImage = isCustomUri 
     ? { uri: overrideCondition }
@@ -104,9 +104,6 @@ export default function WeatherBackground({ condition }: WeatherBackgroundProps)
           style={StyleSheet.absoluteFillObject}
           resizeMode="cover"
         />
-        
-        {/* Dark backdrop overlay to ensure text readability */}
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(10, 10, 15, 0.70)' }]} />
       </View>
     </View>
   );

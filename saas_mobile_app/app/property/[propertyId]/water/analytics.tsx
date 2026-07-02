@@ -5,15 +5,15 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  useWindowDimensions,
+  RefreshControl,
 } from 'react-native';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
-import { MaterialIcons } from '@expo/vector-icons';
+
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { waterService, WaterReading, WaterSource } from '@/services/waterService';
+import { waterService, WaterReading, WaterSource, WaterTariff, computeReadingCost } from '@/services/waterService';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,10 +54,17 @@ export default function WaterAnalyticsScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load analytics'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2 }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
   );
 
   const sources = data?.sources ?? [];
+  const tariffs = useMemo<WaterTariff[]>(() => {
+    const list: WaterTariff[] = [];
+    sources.forEach((s: WaterSource) => {
+      if (s.water_tariffs) list.push(...s.water_tariffs);
+    });
+    return list;
+  }, [sources]);
   const rawReadings = data ?? { today: [], month: [], prevMonth: [], trend: [], custom: [] };
 
   const filterFn = useCallback((r: WaterReading) => {
@@ -67,10 +74,13 @@ export default function WaterAnalyticsScreen() {
 
   const calc = useCallback((readings: WaterReading[]) => {
     return readings.filter(filterFn).reduce(
-      (acc, r) => ({ cost: acc.cost + (r.computed_cost || 0), quantity: acc.quantity + (r.quantity || 0) }),
+      (acc, r) => ({
+        cost: acc.cost + computeReadingCost(r, tariffs),
+        quantity: acc.quantity + (Number(r.quantity) || 0),
+      }),
       { cost: 0, quantity: 0 }
     );
-  }, [filterFn]);
+  }, [filterFn, tariffs]);
 
   const avgCalc = useCallback((readings: WaterReading[]) => {
     const uniqueDays = new Set(readings.filter(filterFn).map(r => r.reading_date)).size || 1;
@@ -107,7 +117,10 @@ export default function WaterAnalyticsScreen() {
         const dateStr = d.toISOString().split('T')[0];
         const label = d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
         const dayTotals = relevantReadings.filter(r => r.reading_date === dateStr).reduce(
-          (acc, r) => ({ cost: acc.cost + (r.computed_cost || 0), quantity: acc.quantity + (r.quantity || 0) }),
+          (acc, r) => ({
+            cost: acc.cost + computeReadingCost(r, tariffs),
+            quantity: acc.quantity + (Number(r.quantity) || 0),
+          }),
           { cost: 0, quantity: 0 }
         );
         result.push({ date: label, ...dayTotals });

@@ -106,9 +106,13 @@ export default function NotificationModal({ visible, onClose, propertyId, role }
       onPress={() => handleNotificationPress(item)}
       activeOpacity={0.7}
     >
-      <View style={[styles.iconContainer, { backgroundColor: `${getIconColor(item.type)}20` }]}>
-        <Ionicons name={getIconName(item.type)} size={20} color={getIconColor(item.type)} />
-      </View>
+      {item.photo_url ? (
+        <Image source={{ uri: item.photo_url }} style={[styles.iconContainer, { resizeMode: 'cover' }]} />
+      ) : (
+        <View style={[styles.iconContainer, { backgroundColor: `${getIconColor(item.type)}20` }]}>
+          <Ionicons name={getIconName(item.type)} size={20} color={getIconColor(item.type)} />
+        </View>
+      )}
       <View style={styles.notificationContent}>
         <View style={styles.notificationHeader}>
           <Text style={styles.notificationTitle} numberOfLines={1}>{item.title}</Text>

@@ -29,6 +29,7 @@ export function useDashboardFetch(
     staleTime,
     enabled: enabled && !!queryKey[queryKey.length - 1],
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
     retry: 2,
   });
 

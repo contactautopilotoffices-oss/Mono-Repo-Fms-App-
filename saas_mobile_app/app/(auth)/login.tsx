@@ -265,6 +265,15 @@ export default function LoginScreen() {
       return;
     }
 
+    const isPropertyAdminOnAny = activePropMemberships.some((m) => 
+      ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(m.role?.toLowerCase() || '')
+    );
+
+    if (isPropertyAdminOnAny) {
+      router.replace('/super-admin' as any);
+      return;
+    }
+
     router.replace({
       pathname: '/(auth)/property-selection',
       params: {

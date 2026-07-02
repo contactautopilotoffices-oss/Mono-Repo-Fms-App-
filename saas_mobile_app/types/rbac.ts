@@ -4,9 +4,11 @@ export type RoleKey =
     | 'super_admin'
     | 'master_admin'
     | 'org_admin'
+    | 'org_super_admin'
     | 'owner'
     | 'property_admin'
     | 'manager_executive'
+    | 'procurement'
     | 'purchase_manager'
     | 'purchase_executive'
     | 'mst' | 'maintenance_staff' | 'hk' | 'fe' | 'se' | 'technician' | 'field_staff' | 'bms_operator' | 'staff'
@@ -28,7 +30,8 @@ export type CapabilityDomain =
     | 'reports'
     | 'vendors'
     | 'stock'
-    | 'sop';
+    | 'sop'
+    | 'cafeteria';
 
 export type CapabilityAction = 'view' | 'create' | 'update' | 'approve' | 'assign' | 'delete' | 'suspend';
 

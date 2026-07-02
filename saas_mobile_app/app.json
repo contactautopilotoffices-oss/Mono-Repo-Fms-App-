@@ -28,6 +28,7 @@
         "backgroundColor": "#708F96"
       },
       "package": "com.autopilot.app",
+      "launchMode": "singleTask",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",
@@ -78,7 +79,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/notification-icon.png",
           "color": "#708F96",
           "sounds": [
             "./assets/sounds/notification.wav"

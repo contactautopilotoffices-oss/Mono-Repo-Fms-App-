@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 interface UpdateUserRequest {
   full_name?: string;
   phone?: string;
+  user_photo_url?: string;
   is_active?: boolean;
   organizationId?: string;
   propertyId?: string;
@@ -28,11 +29,28 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     // Fetch user profile
     const { data: user, error } = await admin
       .from("users")
-      .select("id, full_name, email, phone, user_photo_url, is_active, created_at")
+      .select("id, full_name, email, phone, user_photo_url, created_at")
       .eq("id", id)
       .maybeSingle();
 
     if (error || !user) {
+      // Fallback for new users whose trigger hasn't populated public.users yet
+      if (id === auth.user.id) {
+        return NextResponse.json({
+          success: true,
+          data: {
+            id: auth.user.id,
+            full_name: auth.user.email?.split('@')[0] || "User",
+            email: auth.user.email || "",
+            phone: null,
+            user_photo_url: null,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            property_memberships: [],
+            organization_memberships: []
+          }
+        });
+      }
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
@@ -110,7 +128,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     const { id } = await context.params;
     const body = (await request.json()) as UpdateUserRequest;
-    const { full_name, phone, is_active, organizationId, propertyId } = body;
+    const { full_name, phone, user_photo_url, is_active, organizationId, propertyId } = body;
 
     if (!id) {
       return NextResponse.json({ error: "User id is required" }, { status: 400 });
@@ -140,23 +158,53 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     const admin = createAdminClient();
     const updatePayload: Record<string, unknown> = {};
-    if (full_name !== undefined) updatePayload.full_name = full_name.trim();
-    if (phone !== undefined) updatePayload.phone = phone.trim() || null;
-    if (is_active !== undefined && canManage) updatePayload.is_active = is_active;
+    if (full_name !== undefined) updatePayload.full_name = full_name ? String(full_name).trim() : null;
+    if (phone !== undefined) updatePayload.phone = phone ? String(phone).trim() : null;
+    if (user_photo_url !== undefined) updatePayload.user_photo_url = user_photo_url;
 
-    if (!Object.keys(updatePayload).length) {
+    if (!Object.keys(updatePayload).length && is_active === undefined) {
       return NextResponse.json({ error: "No supported fields to update" }, { status: 400 });
     }
 
-    const { data: user, error } = await admin
-      .from("users")
-      .update(updatePayload)
-      .eq("id", id)
-      .select("id, full_name, email, phone, user_photo_url, is_active, created_at")
-      .single();
+    let user = null;
+    if (Object.keys(updatePayload).length > 0) {
+      const { data, error } = await admin
+        .from("users")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("id, full_name, email, phone, user_photo_url, created_at")
+        .maybeSingle();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        require('fs').writeFileSync('D:/Projects/Mono-Repo-Fms-App-/saas_mobileApp_server/patch_error.log', JSON.stringify({ step: 'update', error }));
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      user = data;
+    } else {
+      // Fetch user if we are only updating is_active
+      const { data } = await admin.from("users").select("id, full_name, email, phone, user_photo_url, created_at").eq("id", id).maybeSingle();
+      user = data;
+    }
+    
+    if (!user) {
+      // User doesn't exist in public.users yet, insert them
+      const insertPayload = {
+        id,
+        email: auth.user.email || "",
+        full_name: (updatePayload.full_name as string) || auth.user.email?.split("@")[0] || "User",
+        phone: (updatePayload.phone as string) || null,
+      };
+      
+      const { data: newUser, error: insertError } = await admin
+        .from("users")
+        .insert(insertPayload)
+        .select("id, full_name, email, phone, user_photo_url, created_at")
+        .single();
+        
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
+      }
+      user = newUser;
     }
 
     if (is_active === false && canManage) {
@@ -190,6 +238,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     return NextResponse.json({ success: true, user });
   } catch (error: any) {
+    require('fs').writeFileSync('D:/Projects/Mono-Repo-Fms-App-/saas_mobileApp_server/patch_error.log', JSON.stringify({ step: 'catch', error: error.message, stack: error.stack }));
     console.error("[saas-mobile-server] users/[id] PATCH error:", error);
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
   }

@@ -4,11 +4,10 @@ import {
   Text,
   TouchableOpacity,
   FlatList,
-  Platform,
   Alert,
   StyleSheet,
-  Image,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,7 +24,6 @@ import {
   getMeetingRoomCredits,
   createMeetingRoomBooking,
   cancelMeetingRoomBookingApi,
-  deleteMeetingRoomApi,
   MeetingRoom,
   MeetingRoomBooking,
   MeetingRoomCredit,
@@ -36,11 +34,8 @@ import {
   Settings2,
   Users,
   MapPin,
-  Clock,
   CalendarDays,
   Armchair,
-  CheckCircle2,
-  X,
   CreditCard,
   Plus,
   Trash2,
@@ -55,10 +50,6 @@ import { queryKeys } from '@/utils/queryKeys';
 import { RoomBookingTab } from '@/components/tenant/tabs/RoomBookingTab';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface RoomWithBookings extends MeetingRoom {
-  todayBookings: MeetingRoomBooking[];
-}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -100,6 +91,9 @@ function formatRemainingHours(hours: number): string {
   const num = typeof hours === 'string' ? parseFloat(hours) : hours;
   const h = Math.floor(num);
   const m = Math.round((num - h) * 60);
+  
+  if (h === 0) return `${m} minute${m !== 1 ? 's' : ''}`;
+  if (m === 0) return `${h} hour${h !== 1 ? 's' : ''}`;
   return `${h} hour${h !== 1 ? 's' : ''} ${m} minute${m !== 1 ? 's' : ''}`;
 }
 
@@ -270,7 +264,7 @@ export default function RoomsScreen() {
 
   const { setRooms, setBookings, setCredit, setHasLoadedInitialData } = useMeetingRoomStore();
   const [isAdmin, setIsAdmin] = useState(false);
-  const [selectedRoom, setSelectedRoom] = useState<MeetingRoom | null>(null);
+  const [selectedRoom] = useState<MeetingRoom | null>(null);
   const [activeTab, setActiveTab] = useState<'rooms' | 'bookings' | 'all-bookings'>('rooms');
   const [toastConfig, setToastConfig] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -307,12 +301,17 @@ export default function RoomsScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.rooms(propertyId),
     fetchData,
-    { staleTime: 1000 * 30 }
+    { staleTime: 1000 * 30, refetchOnMount: 'always' }
   );
 
   const rooms = data?.rooms ?? [];
-  const bookings = data?.bookings ?? [];
   const credit = data?.credit ?? null;
+
+  const displayedBookings = useMemo(() => {
+    const list = data?.bookings ?? [];
+    if (activeTab === 'all-bookings') return list;
+    return list.filter((b) => b.user_id === user?.id);
+  }, [data?.bookings, activeTab, user?.id]);
 
   async function handleCancelBooking(bookingId: string) {
     try {
@@ -344,7 +343,9 @@ export default function RoomsScreen() {
           <View style={{ flex: 1, alignItems: 'center' }}>
             <Text style={styles.headerTitle}>Meeting Rooms</Text>
             <Text style={styles.headerSubtitle}>
-              {activeTab === 'rooms' ? `${rooms.length} room${rooms.length !== 1 ? 's' : ''} available` : `${bookings.length} booking${bookings.length !== 1 ? 's' : ''}`}
+              {activeTab === 'rooms'
+                ? `${rooms.length} room${rooms.length !== 1 ? 's' : ''} available`
+                : `${displayedBookings.length} booking${displayedBookings.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
           {isAdmin ? (
@@ -395,11 +396,11 @@ export default function RoomsScreen() {
         </View>
       ) : activeTab === 'rooms' ? (
         <View style={{ flex: 1, paddingTop: 8 }}>
-          <RoomBookingTab propertyId={propertyId} userId={user?.id || ''} />
+          <RoomBookingTab propertyId={propertyId} userId={user?.id || ''} onRefresh={refetch} />
         </View>
       ) : (
         <FlatList
-          data={bookings}
+          data={displayedBookings}
           keyExtractor={(item) => item.id}
           style={{ flex: 1 }}
           contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom, 12) + 160 }]}
@@ -422,6 +423,11 @@ export default function RoomsScreen() {
                       <Users size={12} color="#708F96" />
                       <Text style={styles.cardMetaText}>{item.tenant?.full_name || 'Tenant'}</Text>
                     </View>
+                    {item.comment ? (
+                      <Text style={[styles.cardMetaText, { marginTop: 4, color: 'rgba(255,255,255,0.7)' }]} numberOfLines={2}>
+                        Comment: {item.comment}
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={[styles.amenityChip, {

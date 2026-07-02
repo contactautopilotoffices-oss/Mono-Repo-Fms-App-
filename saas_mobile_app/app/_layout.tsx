@@ -1,4 +1,4 @@
-import React, { useEffect, Component, ReactNode, useState, useCallback } from 'react';
+import React, { useEffect, Component, ReactNode, useState, useCallback, useRef } from 'react';
 import { initSentry, Sentry } from '@/lib/sentry';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -8,7 +8,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider, ThemeProvider } from '@/context';
-import { useColorScheme, View, Text, StyleSheet } from 'react-native';
+import { useColorScheme, View, Text, StyleSheet, AppState } from 'react-native';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import NotificationBanner from '@/components/notifications/NotificationBanner';
 import { PersistGate } from '@/components/PersistGate';
@@ -174,6 +174,21 @@ function AppContent({
   useOfflineMediaSync();
 
   const { isLoading: isAuthLoading, isMembershipLoading } = useAuth();
+
+  // Track whether the app has been backgrounded so we can skip the animated splash on resume
+  const hasBeenInactive = useRef(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        hasBeenInactive.current = true;
+      } else if (nextAppState === 'active' && hasBeenInactive.current) {
+        // Warm resume from background: hide splash immediately instead of replaying it.
+        setSplashAnimationComplete(true);
+        SplashScreen.hideAsync().catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [setSplashAnimationComplete]);
 
   // Handle animated splash completion - this is when we finally hide the animated splash
   const handleAnimatedSplashComplete = useCallback(() => {

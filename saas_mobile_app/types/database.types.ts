@@ -1694,6 +1694,7 @@ export type Database = {
       meeting_room_bookings: {
         Row: {
           booking_date: string
+          comment: string | null
           company_id: string | null
           created_at: string | null
           end_time: string
@@ -1708,6 +1709,7 @@ export type Database = {
         }
         Insert: {
           booking_date: string
+          comment?: string | null
           company_id?: string | null
           created_at?: string | null
           end_time: string
@@ -1722,6 +1724,7 @@ export type Database = {
         }
         Update: {
           booking_date?: string
+          comment?: string | null
           company_id?: string | null
           created_at?: string | null
           end_time?: string

@@ -645,7 +645,7 @@ export default function PPMScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.ppm(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
   );
 
   const schedules = data?.schedules ?? [];

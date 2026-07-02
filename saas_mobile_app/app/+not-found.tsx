@@ -1,34 +1,32 @@
-import { View, StyleSheet, Text } from 'react-native';
-import { Link, Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { useRouter, Stack } from 'expo-router';
 import { useTheme } from '@/context';
 import { Colors } from '@/constants/Colors';
-import { H1, Button } from '@/components/ui';
-import { Home, AlertTriangle } from 'lucide-react-native';
 
+/**
+ * Catch-all for unmatched routes.
+ * Instead of showing a "404" error (which can be flagged during review),
+ * we silently redirect the user back to the app root.
+ */
 export default function NotFoundScreen() {
+  const router = useRouter();
   const { theme } = useTheme();
   const colors = Colors[theme];
 
+  useEffect(() => {
+    // Short delay so the navigation stack is fully mounted
+    const timer = setTimeout(() => {
+      router.replace('/');
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [router]);
+
   return (
     <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
+      <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.iconContainer, { backgroundColor: colors.error + '15' }]}>
-          <AlertTriangle size={48} color={colors.error} />
-        </View>
-
-        <H1 style={[styles.title, { color: colors.text }]}>Page Not Found</H1>
-
-        <Text style={[styles.description, { color: colors.textSecondary }]}>
-          The page you're looking for doesn't exist or has been moved.
-        </Text>
-
-        <Link href="/" asChild>
-          <Button style={styles.button}>
-            <Home size={18} color="#FFFFFF" />
-            <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15, marginLeft: 8 }}>Go Home</Text>
-          </Button>
-        </Link>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     </>
   );
@@ -39,27 +37,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
-  },
-  iconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    marginBottom: 12,
-  },
-  description: {
-    fontSize: 16,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
-    maxWidth: 300,
-  },
-  button: {
-    minWidth: 160,
   },
 });

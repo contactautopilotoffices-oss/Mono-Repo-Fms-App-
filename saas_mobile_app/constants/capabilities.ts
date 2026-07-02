@@ -7,6 +7,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'create', 'update', 'approve', 'assign', 'delete'],
         assets: ['view', 'create', 'update', 'delete'],
         water: ['view', 'create', 'update', 'delete'],
+        cafeteria: ['view', 'create', 'update', 'delete'],
         procurement: ['view', 'create', 'update', 'approve', 'delete'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -21,6 +22,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'create', 'update', 'approve', 'assign', 'delete'],
         assets: ['view', 'create', 'update', 'delete'],
         water: ['view', 'create', 'update', 'delete'],
+        cafeteria: ['view', 'create', 'update', 'delete'],
         procurement: ['view', 'create', 'update', 'approve', 'delete'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -35,6 +37,21 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         water: ['view', 'update'],
+        cafeteria: ['view', 'create', 'update'],
+        procurement: ['view', 'approve'],
+        visitors: ['view', 'create', 'update', 'delete'],
+        security: ['view', 'create', 'update', 'delete'],
+        dashboards: ['view'],
+        reports: ['view'],
+        sop: ['view', 'create', 'update', 'delete']
+    },
+    org_super_admin: {
+        users: ['view', 'create', 'update', 'assign', 'suspend'],
+        properties: ['view', 'update'],
+        tickets: ['view', 'update', 'approve'],
+        assets: ['view', 'update'],
+        water: ['view', 'update'],
+        cafeteria: ['view', 'create', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -48,6 +65,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         water: ['view', 'update'],
+        cafeteria: ['view', 'create', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -61,6 +79,7 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         tickets: ['view', 'update', 'approve'],
         assets: ['view', 'update'],
         water: ['view', 'update'],
+        cafeteria: ['view', 'create', 'update'],
         procurement: ['view', 'approve'],
         visitors: ['view', 'create', 'update', 'delete'],
         security: ['view', 'create', 'update', 'delete'],
@@ -144,7 +163,8 @@ export const CAPABILITY_MATRIX: Record<RoleKey, CapabilityMatrix> = {
         reports: ['view']
     },
     vendor: {
-        tickets: ['view']
+        tickets: ['view'],
+        cafeteria: ['view', 'create']
     },
     staff: {
         tickets: ['view', 'create', 'update'],
@@ -184,6 +204,7 @@ export const ROLE_LEVEL_MAP: Record<string, RoleLevel> = {
     'super_admin': 0,
     'master_admin': 0,
     'org_admin': 1,
+    'org_super_admin': 1,
     'owner': 1,
     'property_admin': 2,
     'manager_executive': 3,

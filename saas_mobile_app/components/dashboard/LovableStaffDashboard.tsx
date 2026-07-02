@@ -56,8 +56,11 @@ import {
   defaultMstUser,
   defaultAchievements,
   defaultLeaderboard as demoLeaderboard,
+  mapBadgesToAchievements,
+  mapNextAchievementsToAchievements,
   type UserStats,
   type LeaderRow,
+  type Achievement,
 } from '@/lib/gamification';
 import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
@@ -543,6 +546,14 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     };
   }, [myStats, user]);
 
+  const achievements: Achievement[] = useMemo(() => {
+    if (!myStats) return defaultAchievements;
+    return [
+      ...mapBadgesToAchievements(myStats.badges),
+      ...mapNextAchievementsToAchievements(myStats.next_achievements),
+    ];
+  }, [myStats]);
+
   // ── Leaderboard rows ──
   const leaderboardRows: LeaderRow[] = useMemo(() => {
     if (gamifyLb.length === 0) return demoLeaderboard;
@@ -806,8 +817,8 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
   );
 
   const renderProfile = () => {
-    const unlocked = defaultAchievements.filter((a) => a.unlocked);
-    const locked = defaultAchievements.filter((a) => !a.unlocked);
+    const unlocked = achievements.filter((a) => a.unlocked);
+    const locked = achievements.filter((a) => !a.unlocked);
     const myRow = leaderboardRows.find((r) => r.isMe) ?? leaderboardRows[0];
 
     return (
@@ -852,14 +863,14 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         <View style={styles.profileStatsGrid}>
           <ProfileStat icon="trophy" value={mstUser.totalXp.toLocaleString()} label="TOTAL XP" tint="#FBBF24" />
           <ProfileStat icon="checkmark-circle" value={String(myRow?.resolved ?? 0)} label="RESOLVED" tint="#34D399" />
-          <ProfileStat icon="flag" value={`${unlocked.length}/${defaultAchievements.length}`} label="BADGES" tint="#60A5FA" />
+          <ProfileStat icon="flag" value={`${unlocked.length}/${achievements.length}`} label="BADGES" tint="#60A5FA" />
         </View>
 
         {/* Achievements */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderTitle}>Achievements</Text>
           <Text style={styles.sectionHeaderHint}>
-            {unlocked.length} of {defaultAchievements.length} unlocked
+            {unlocked.length} of {achievements.length} unlocked
           </Text>
         </View>
         <View style={styles.achievementsGrid}>

@@ -1,6 +1,7 @@
 import { serverApi } from '@/lib/serverApi';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { ApiResponse } from '@/types';
+import { File as FSFile } from 'expo-file-system';
 
 // ---------------------------------------------------------------------------
 // Types (aligned with saas_one schema)
@@ -194,8 +195,8 @@ export const checklistService = {
     let fileBase64 = '';
     if (file.uri) {
       // React Native file object with uri
-      const FileSystem = require('expo-file-system');
-      fileBase64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const fsFile = new FSFile(file.uri);
+      fileBase64 = await fsFile.base64();
     } else if (file instanceof Blob) {
       const reader = new FileReader();
       fileBase64 = await new Promise<string>((resolve, reject) => {
@@ -210,7 +211,7 @@ export const checklistService = {
     }
 
     // Call the dedicated checklist media endpoint on the mobile server
-    const res = await apiFetch<{ success: boolean; url: string; bucket: string; filePath: string }>('/api/checklist/media', {
+    const res = await apiFetch<any>('/api/checklist/media', {
       method: 'POST',
       body: JSON.stringify({
         fileBase64,
@@ -218,6 +219,8 @@ export const checklistService = {
         completionId,
         itemId,
         type,
+        fileName: file.name,
+        contentType: file.type,
       }),
     });
 
@@ -227,7 +230,7 @@ export const checklistService = {
 
   // ── Delete media ──────────────────────────────────────────────────────────
   async deleteMedia(type: string, url: string, _completionId?: string) {
-    const res = await apiFetch<{ success: boolean }>(`/api/checklist/media?url=${encodeURIComponent(url)}&type=${type}`, {
+    const res = await apiFetch<any>(`/api/checklist/media?url=${encodeURIComponent(url)}&type=${type}`, {
       method: 'DELETE',
     });
     if (res.error) throw new Error(res.error);

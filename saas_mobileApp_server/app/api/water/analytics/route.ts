@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     // Fetch active source IDs for this property
     const { data: sources } = await admin
       .from("water_sources")
-      .select("id, name, source_type")
+      .select("id, name, source_type, water_tariffs(*)")
       .eq("property_id", propertyId)
       .eq("is_active", true);
 

@@ -28,6 +28,7 @@ export interface MeetingRoomBooking {
   start_time: string;
   end_time: string;
   status: string;
+  comment?: string | null;
   company_id?: string;
   organization_id?: string;
   created_at: string;
@@ -205,6 +206,7 @@ export interface CreateBookingInput {
   date: string;
   startTime: string;
   endTime: string;
+  comment?: string;
 }
 
 export async function createMeetingRoomBooking(input: CreateBookingInput): Promise<{ success?: boolean; booking?: MeetingRoomBooking; error?: string }> {
@@ -218,6 +220,7 @@ export async function createMeetingRoomBooking(input: CreateBookingInput): Promi
       date: input.date,
       startTime: input.startTime,
       endTime: input.endTime,
+      comment: input.comment,
     });
 
     if (result.error) throw new Error(result.error.message);

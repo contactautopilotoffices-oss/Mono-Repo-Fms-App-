@@ -55,11 +55,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (body.item.admin_rating !== undefined) itemUpdate.admin_rating = body.item.admin_rating;
 
       if (Object.keys(itemUpdate).length > 0) {
-        const { error: itemError } = await admin
-          .from("sop_completion_items")
-          .update(itemUpdate)
-          .eq("id", body.item.completionItemId)
-          .eq("completion_id", id);
+        let itemQuery = admin.from("sop_completion_items").update(itemUpdate);
+        if (body.item.completionItemId) {
+          itemQuery = itemQuery.eq("id", body.item.completionItemId);
+        } else if (body.item.checklist_item_id) {
+          itemQuery = itemQuery.eq("checklist_item_id", body.item.checklist_item_id);
+        } else {
+          return NextResponse.json({ error: "Missing completion item identifier" }, { status: 400 });
+        }
+        const { error: itemError } = await itemQuery.eq("completion_id", id);
         if (itemError) {
           console.error("[saas-mobile-server] completion item update error:", itemError);
         }
