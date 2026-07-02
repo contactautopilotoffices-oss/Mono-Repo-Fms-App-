@@ -136,26 +136,26 @@ export async function GET(request: NextRequest) {
         admin.from('electricity_readings')
           .select('final_units, computed_units, created_at')
           .eq('property_id', pid)
-          .order('created_at', { ascending: false })
+          .order('reading_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
         // Monthly readings (for monthly consumption)
         admin.from('electricity_readings')
-          .select('computed_units, final_units, created_at')
+          .select('computed_units, final_units, reading_date')
           .eq('property_id', pid)
-          .gte('created_at', monthStart)
-          .order('created_at', { ascending: true }),
+          .gte('reading_date', monthStart)
+          .order('reading_date', { ascending: true }),
         admin.from('diesel_readings')
           .select('closing_diesel_level, computed_consumed_litres')
           .eq('property_id', pid)
-          .order('created_at', { ascending: false })
+          .order('reading_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
         // Water readings for current month
         admin.from('water_readings')
           .select('quantity, computed_cost')
           .eq('property_id', pid)
-          .gte('created_at', monthStart),
+          .gte('reading_date', monthStart),
         admin.rpc('get_property_health_score', { p_property_id: pid }),
         admin.rpc('get_attention_items', { p_property_id: pid, p_limit: 10 }),
         admin.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }),

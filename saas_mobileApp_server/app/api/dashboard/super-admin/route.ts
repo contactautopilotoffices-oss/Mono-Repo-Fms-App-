@@ -107,10 +107,10 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       admin.from('tickets').select('property_id, status, created_at, priority').in('property_id', propIds),
       admin.from('sop_completions').select('property_id, status').in('property_id', propIds),
-      admin.from('diesel_readings').select('property_id, computed_consumed_litres').in('property_id', propIds),
-      admin.from('electricity_readings').select('property_id, final_units').in('property_id', propIds),
-      admin.from('electricity_readings').select('property_id, final_units, created_at').in('property_id', propIds).gte('created_at', thirtyDaysAgo),
-      admin.from('water_readings').select('property_id, quantity, computed_cost').in('property_id', propIds).gte('created_at', monthStart),
+      admin.from('diesel_readings').select('property_id, computed_consumed_litres').in('property_id', propIds).gte('reading_date', monthStart),
+      admin.from('electricity_readings').select('property_id, final_units').in('property_id', propIds).gte('reading_date', monthStart),
+      admin.from('electricity_readings').select('property_id, final_units, reading_date').in('property_id', propIds).gte('reading_date', thirtyDaysAgo),
+      admin.from('water_readings').select('property_id, quantity, computed_cost').in('property_id', propIds).gte('reading_date', monthStart),
       admin.from('users').select('id, full_name, email, phone').limit(100)
     ]);
 

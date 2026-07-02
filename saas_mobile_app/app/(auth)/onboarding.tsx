@@ -187,8 +187,8 @@ export default function OnboardingScreen() {
       }
 
       // Check if already voice enrolled via API
-      const voiceRes = await apiFetch<{ success: boolean; enrolled: boolean }>('/api/users/me/voice-enrollment');
-      if (voiceRes.success && voiceRes.enrolled) setVoiceEnrolled(true);
+      // DISABLED: const voiceRes = await apiFetch<{ success: boolean; enrolled: boolean }>('/api/users/me/voice-enrollment');
+      // DISABLED: if (voiceRes.success && voiceRes.enrolled) setVoiceEnrolled(true);
 
       setLoading(false);
     };
@@ -198,7 +198,7 @@ export default function OnboardingScreen() {
 
   // ─── Fetch properties ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (step !== 2) return;
+    if (properties.length > 0) return;
 
     const fetchProps = async () => {
       setLoading(true);
@@ -269,8 +269,8 @@ export default function OnboardingScreen() {
 
     if (step === 3) {
       // Role selected — check if voice step needed
-      const needsVoice = VOICE_ELIGIBLE_ROLES.includes(selectedRole ?? '');
-      const showVoiceStep = needsVoice && !voiceEnrolled;
+      const needsVoice = false; // DISABLED: VOICE_ELIGIBLE_ROLES.includes(selectedRole ?? '');
+      const showVoiceStep = false;
 
       if (showVoiceStep && (selectedRole === 'mst' || selectedRole === 'staff')) {
         animateToStep(5); // skills → voice enrollment → complete
@@ -433,6 +433,7 @@ export default function OnboardingScreen() {
         values: {
           id: authUser.id,
           email: authUser.email ?? '',
+          onboarding_completed: true,
           ...profileUpsert,
         },
         mutationOptions: { onConflict: 'id' },
@@ -465,8 +466,8 @@ export default function OnboardingScreen() {
 
   // ─── Derived state ───────────────────────────────────────────────────────────
   const showSkillsStep = selectedRole === 'mst' || selectedRole === 'staff';
-  const needsVoice = VOICE_ELIGIBLE_ROLES.includes(selectedRole ?? '');
-  const showVoiceStep = needsVoice && !voiceEnrolled && step >= 4;
+  const needsVoice = false; // DISABLED: VOICE_ELIGIBLE_ROLES.includes(selectedRole ?? '');
+  const showVoiceStep = false; // DISABLED: needsVoice && !voiceEnrolled && step >= 4;
 
   // Total visible steps: 0=welcome, 1=phone, 2=property, 3=role, 4+=voice, 5=skills
   const visibleSteps = 6; // fixed
@@ -507,7 +508,7 @@ export default function OnboardingScreen() {
       )}
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom + 24, 40) }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

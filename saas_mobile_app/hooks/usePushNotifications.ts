@@ -245,6 +245,23 @@ async function storePushToken(
     }
 
     console.log('[Push] ✅ Token stored successfully!');
+    
+    // --- ONE-TIME WELCOME PUSH NOTIFICATION ---
+    const hasSentWelcome = await mmkvAsyncStorage.getItem('welcome_push_sent');
+    if (!hasSentWelcome) {
+      console.log('[Push] Sending one-time welcome notification...');
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Welcome to the App! 🎉',
+          body: 'You are all set to receive important updates and notifications.',
+          sound: true,
+        },
+        trigger: null, // trigger immediately
+      });
+      await mmkvAsyncStorage.setItem('welcome_push_sent', 'true');
+    }
+    // ------------------------------------------
+    
     return true;
   } catch (err: any) {
     console.error('[Push] ❌ Token storage exception:', err);
