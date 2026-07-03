@@ -71,15 +71,31 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   };
   const sopCount = data?.sopCount ?? 0;
   const sopTotal = data?.sopTotal ?? 0;
+  const energyStats = data?.energyStats ?? { today: 0, month: 0, all: 0 };
   const energyKwh = data?.energyKwh ?? 0;
   const energyTrend = data?.energyTrend ?? 12;
   const propertyName = propertyId === 'all' 
     ? 'All Properties Overview' 
     : (data?.propertyName ?? membership?.properties?.find(p => p.id === propertyId)?.name ?? 'Property');
-  const vmsStats = data?.vmsStats ?? { total: 0, in: 0, out: 0 };
+  const vmsStats = data?.vmsStats ?? { 
+    today: { total: 0, in: 0, out: 0 },
+    month: { total: 0, in: 0, out: 0 },
+    all: { total: 0, in: 0, out: 0 }
+  };
   const vendorStats = data?.vendorStats ?? { revenue: 0, commission: 0 };
-  const dieselStats = data?.dieselStats ?? { level: 0, consumption: 0 };
-  const waterStats = data?.waterStats ?? { quantity: 0, cost: 0 };
+  const dieselStats = data?.dieselStats ?? { 
+    level: 0, 
+    consumption: { today: 0, month: 0, all: 0 } 
+  };
+  const waterStats = data?.waterStats ?? { 
+    quantity: { today: 0, month: 0, all: 0 }, 
+    cost: { today: 0, month: 0, all: 0 },
+    sources: { 
+      today: {} as Record<string, { count: number, cost: number, qty: number }>, 
+      month: {} as Record<string, { count: number, cost: number, qty: number }>, 
+      all: {} as Record<string, { count: number, cost: number, qty: number }> 
+    }
+  };
   const healthScore = data?.healthScore ?? 100;
   const attentionItems = data?.attentionItems ?? [];
   const tenantUserIds = data?.tenantUserIds ?? [];
@@ -100,7 +116,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
-  const [ticketTimeFilter, setTicketTimeFilter] = useState<'today' | 'month' | 'all'>('all');
+  const [timeFilter, setTimeFilter] = useState<'today' | 'month' | 'all'>('all');
 
   // Permission Onboarding
   useEffect(() => {
@@ -110,9 +126,9 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   }, []);
 
   // ─── Computed Values ───
-  const totalTickets = ticketCounts[ticketTimeFilter]?.total || 0;
-  const openTickets = ticketCounts[ticketTimeFilter]?.open || 0;
-  const resolvedTickets = ticketCounts[ticketTimeFilter]?.closed || 0;
+  const totalTickets = ticketCounts[timeFilter]?.total || 0;
+  const openTickets = ticketCounts[timeFilter]?.open || 0;
+  const resolvedTickets = ticketCounts[timeFilter]?.closed || 0;
 
   const healthStatus: 'optimal' | 'watch' | 'critical' = openTickets > 15 ? 'critical' : openTickets > 5 ? 'watch' : 'optimal';
   const healthColor = STATUS_COLORS[healthStatus].bg;
@@ -261,7 +277,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
     energy: {
       id: 'energy', iconName: 'flash', label: 'Energy', title: `${propertyName} · Energy Consumption`,
       metrics: [
-        { label: 'Today (kWh)', value: energyKwh.toString() },
+        { label: 'Units', value: (energyStats[timeFilter] || 0).toLocaleString() },
         { label: 'Trend', value: `${energyTrend > 0 ? '+' : ''}${energyTrend}%` },
         { label: 'Peak', value: '14:00' },
       ],
@@ -363,12 +379,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         </Animated.View>
 
         <View style={{ marginTop: SPACING.lg }}>
-          {/* Tickets Tile */}
+          {/* Global Time Toggle (Ticket card handles the UI, but it applies to all) */}
           <GlassTile label="Tickets" icon="ticket" delay={80} status={healthStatus} onPress={() => setShowTileDetail(tileDetails.tickets)}>
             <View style={styles.timeToggleRow}>
               {(['today', 'month', 'all'] as const).map((f) => (
-                <TouchableOpacity key={f} style={[styles.timeToggleBtn, ticketTimeFilter === f && styles.timeToggleBtnActive]} onPress={() => setTicketTimeFilter(f)} activeOpacity={0.7}>
-                  <Text style={[styles.timeToggleText, ticketTimeFilter === f && styles.timeToggleTextActive]}>
+                <TouchableOpacity key={f} style={[styles.timeToggleBtn, timeFilter === f && styles.timeToggleBtnActive]} onPress={() => setTimeFilter(f)} activeOpacity={0.7}>
+                  <Text style={[styles.timeToggleText, timeFilter === f && styles.timeToggleTextActive]}>
                     {f === 'today' ? 'Today' : f === 'month' ? 'This Month' : 'All Time'}
                   </Text>
                 </TouchableOpacity>
@@ -420,8 +436,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           <GlassTile label="Main Meter" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
             <View style={styles.tileTopRow}>
               <View>
-                <Text style={styles.tileMetricMid}><AnimatedNumber value={energyKwh} /> <Text style={styles.tileSuffix}>Units</Text></Text>
-                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
+                <Text style={styles.tileMetricMid}><AnimatedNumber value={energyStats[timeFilter] || 0} /> <Text style={styles.tileSuffix}>Units</Text></Text>
+                <Text style={styles.tileSubtext}>
+                  {timeFilter === 'today' ? 'Daily' : timeFilter === 'month' ? 'Monthly' : 'Total'} Consumption
+                </Text>
               </View>
               <View style={styles.trendChip}>
                 <Ionicons name={energyTrend > 0 ? 'trending-up' : 'trending-down'} size={12} color="#1FC26E" />
@@ -435,16 +453,16 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           <GlassTile label="Visitors" icon="people-outline" delay={320} onPress={() => router.push(`/property/${propertyId}/visitors`)}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
-                <Text style={styles.tileMetricMid}>{vmsStats.total}</Text>
+                <Text style={styles.tileMetricMid}>{vmsStats?.[timeFilter]?.total || 0}</Text>
                 <Text style={styles.tileSubtext}>Total Visitors</Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#10B981', fontWeight: '700' }}>{vmsStats.in}</Text>
+                  <Text style={{ color: '#10B981', fontWeight: '700' }}>{vmsStats?.[timeFilter]?.in || 0}</Text>
                   <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>IN</Text>
                 </View>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontWeight: '700' }}>{vmsStats.out}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontWeight: '700' }}>{vmsStats?.[timeFilter]?.out || 0}</Text>
                   <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>OUT</Text>
                 </View>
               </View>
@@ -472,8 +490,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
                 <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '800' }}>{dieselStats.level}%</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{dieselStats.consumption} L</Text>
-                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
+                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{dieselStats.consumption?.[timeFilter] || 0} L</Text>
+                <Text style={styles.tileSubtext}>{timeFilter === 'today' ? 'Daily' : timeFilter === 'month' ? 'Monthly' : 'Total'} Consumption</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Level</Text>
@@ -489,14 +507,30 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
                 <Ionicons name="water" size={24} color="#0EA5E9" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{waterStats.quantity.toLocaleString()} Units</Text>
-                <Text style={styles.tileSubtext}>Monthly Consumption</Text>
+                <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>{(waterStats.quantity?.[timeFilter] || 0).toLocaleString()} Units</Text>
+                <Text style={styles.tileSubtext}>{timeFilter === 'today' ? 'Daily' : timeFilter === 'month' ? 'Monthly' : 'Total'} Consumption</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>Cost</Text>
-                <Text style={{ color: '#0EA5E9', fontSize: 16, fontWeight: '800' }}>₹{Math.round(waterStats.cost).toLocaleString()}</Text>
+                <Text style={{ color: '#0EA5E9', fontSize: 16, fontWeight: '800' }}>₹{Math.round(waterStats.cost?.[timeFilter] || 0).toLocaleString()}</Text>
               </View>
             </View>
+            
+            {/* Water Sources Breakdown */}
+            {waterStats.sources?.[timeFilter] && Object.keys(waterStats.sources[timeFilter]).length > 0 && (
+              <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' }}>
+                {Object.entries(waterStats.sources[timeFilter]).map(([source, stats]) => (
+                  <View key={source} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textTransform: 'capitalize' }}>
+                      {source} <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>({stats.count} trips)</Text>
+                    </Text>
+                    <Text style={{ color: '#0EA5E9', fontSize: 12, fontWeight: '600' }}>
+                      ₹{Math.round(stats.cost).toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </GlassTile>
         </View>
       </ScrollView>

@@ -24,17 +24,31 @@ export async function GET(request: NextRequest) {
     const urlOrgId = url.searchParams.get("orgId");
     
     // 1. Check if user is an org-level admin (for any org, or specifically the requested one)
-    const { data: orgMembership } = await admin
+    let orgMemQuery = admin
       .from('organization_memberships')
       .select('organization_id, role')
       .eq('user_id', userId)
       .or('is_active.eq.true,is_active.is.null')
-      .in('role', ['org_super_admin', 'org_admin', 'owner', 'super_tenant'])
-      .limit(1)
-      .maybeSingle();
+      .in('role', ['org_super_admin', 'super_tenant', 'master_admin'])
+      .limit(1);
+      
+    if (urlOrgId) {
+      orgMemQuery = orgMemQuery.eq('organization_id', urlOrgId);
+    }
+    
+    const { data: orgMems, error: orgMemsError } = await orgMemQuery;
+    console.log('[SuperAdmin API] orgMems:', orgMems, 'error:', orgMemsError, 'userId:', userId, 'urlOrgId:', urlOrgId);
+    
+    const orgMembership = orgMems && orgMems.length > 0 ? orgMems[0] : null;
 
-    const isOrgAdmin = !!orgMembership;
+    // Check if user is master admin directly
+    const { data: userRec } = await admin.from('users').select('is_master_admin').eq('id', userId).single();
+    const isMasterAdmin = userRec?.is_master_admin === true;
+
+    const isOrgAdmin = !!orgMembership || isMasterAdmin;
     const resolvedOrgId = urlOrgId || orgMembership?.organization_id;
+
+    console.log('[SuperAdmin API] isOrgAdmin:', isOrgAdmin, 'resolvedOrgId:', resolvedOrgId);
 
     let propIdsAllowed: string[] | null = null;
     if (!isOrgAdmin) {
@@ -48,9 +62,12 @@ export async function GET(request: NextRequest) {
       const allowedRoles = ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'];
       const filteredMemberships = (propMemberships || []).filter(m => allowedRoles.includes(m.role?.toLowerCase() || ''));
 
+      console.log('[SuperAdmin API] not org admin. Prop mems:', filteredMemberships.length);
+
       if (filteredMemberships.length > 0) {
         propIdsAllowed = filteredMemberships.map(m => m.property_id);
       } else {
+        console.log('[SuperAdmin API] returning 403');
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
       }
     }
@@ -108,9 +125,9 @@ export async function GET(request: NextRequest) {
       admin.from('tickets').select('property_id, status, created_at, priority').in('property_id', propIds),
       admin.from('sop_completions').select('property_id, status').in('property_id', propIds),
       admin.from('diesel_readings').select('property_id, computed_consumed_litres').in('property_id', propIds).gte('reading_date', monthStart),
-      admin.from('electricity_readings').select('property_id, final_units').in('property_id', propIds).gte('reading_date', monthStart),
+      admin.from('electricity_readings').select('property_id, computed_units, final_units, reading_date, electricity_meters!inner(meter_type)').in('property_id', propIds).eq('electricity_meters.meter_type', 'main').gte('reading_date', monthStart).order('reading_date', { ascending: true }),
       admin.from('electricity_readings').select('property_id, final_units, reading_date').in('property_id', propIds).gte('reading_date', thirtyDaysAgo),
-      admin.from('water_readings').select('property_id, quantity, computed_cost').in('property_id', propIds).gte('reading_date', monthStart),
+      admin.from('water_readings').select('quantity, computed_cost, reading_date, source:water_sources!inner(property_id)').in('water_sources.property_id', propIds).gte('reading_date', monthStart),
       admin.from('users').select('id, full_name, email, phone').limit(100)
     ]);
 
@@ -160,13 +177,25 @@ export async function GET(request: NextRequest) {
       if (c) c.diesel += (d.computed_consumed_litres || 0);
     });
 
+    const elecMap = new Map();
     (electricData ?? []).forEach((e: any) => {
-      const c = energyMap.get(e.property_id);
-      if (c) c.electricity += (e.final_units || 0);
+      if (!elecMap.has(e.property_id)) elecMap.set(e.property_id, []);
+      elecMap.get(e.property_id).push(e);
+    });
+
+    elecMap.forEach((readings, propId) => {
+      let monthlyConsumption = 0;
+      readings.forEach((r: any) => {
+        monthlyConsumption += (r.final_units ?? r.computed_units ?? 0);
+      });
+      const c = energyMap.get(propId);
+      if (c) c.electricity += monthlyConsumption;
     });
 
     (waterData ?? []).forEach((w: any) => {
-      const c = waterMap.get(w.property_id);
+      const propId = w.source?.property_id;
+      if (!propId) return;
+      const c = waterMap.get(propId);
       if (c) {
         c.quantity += (w.quantity || 0);
         c.cost += (w.computed_cost || 0);

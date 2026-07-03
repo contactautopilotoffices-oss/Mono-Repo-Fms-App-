@@ -86,27 +86,7 @@ export default function PropertySwitcherModal({
           </View>
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-            {/* All Properties Option — only for admins */}
-            {canViewAllProperties && (
-              <>
-                <TouchableOpacity
-                  style={styles.item}
-                  onPress={handleSelectAll}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="grid-outline" size={20} color="#3B82F6" />
-                  </View>
-                  <View style={styles.itemTextContainer}>
-                    <Text style={styles.itemName}>All Properties (Overview)</Text>
-                    <Text style={styles.itemSubtext}>Aggregated organization data</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-                </TouchableOpacity>
 
-                <View style={styles.divider} />
-              </>
-            )}
 
             {/* Individual Properties */}
             {properties.map((p) => {

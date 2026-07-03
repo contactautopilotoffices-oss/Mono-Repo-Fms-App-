@@ -34,14 +34,15 @@ export async function GET(request: NextRequest) {
     let propIds: string[] = [];
     if (isAll) {
       // Find org memberships first
-      const { data: orgMembership } = await admin
+      const { data: orgMems } = await admin
         .from('organization_memberships')
         .select('organization_id')
         .eq('user_id', userId)
         .or('is_active.eq.true,is_active.is.null')
-        .in('role', ['org_super_admin', 'org_admin', 'owner', 'super_tenant'])
-        .limit(1)
-        .maybeSingle();
+        .in('role', ['org_super_admin', 'super_tenant', 'master_admin'])
+        .limit(1);
+        
+      const orgMembership = orgMems && orgMems.length > 0 ? orgMems[0] : null;
         
       if (orgMembership?.organization_id) {
         const { data: props } = await admin
@@ -93,9 +94,9 @@ export async function GET(request: NextRequest) {
         .eq('completion_date', todayStr)
         .eq('status', 'completed'),
         
-      // Visitor Logs Today
+      // Visitor Logs
       admin.from('visitor_logs')
-        .select('status')
+        .select('status, created_at')
         .in('property_id', propIds),
         
       // Vendor Daily Revenue
@@ -139,23 +140,21 @@ export async function GET(request: NextRequest) {
           .order('reading_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        // Monthly readings (for monthly consumption)
+        // All readings for main meter (to calculate today, month, all-time)
         admin.from('electricity_readings')
-          .select('computed_units, final_units, reading_date')
+          .select('computed_units, final_units, reading_date, electricity_meters!inner(meter_type)')
           .eq('property_id', pid)
-          .gte('reading_date', monthStart)
-          .order('reading_date', { ascending: true }),
+          .eq('electricity_meters.meter_type', 'main')
+          .order('reading_date', { ascending: false }),
         admin.from('diesel_readings')
-          .select('closing_diesel_level, computed_consumed_litres')
+          .select('closing_diesel_level, computed_consumed_litres, reading_date')
           .eq('property_id', pid)
-          .order('reading_date', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        // Water readings for current month
+          .order('reading_date', { ascending: false }),
+        // Water readings
         admin.from('water_readings')
-          .select('quantity, computed_cost')
-          .eq('property_id', pid)
-          .gte('reading_date', monthStart),
+          .select('quantity, computed_cost, reading_date, source:water_sources!inner(property_id, source_type)')
+          .eq('water_sources.property_id', pid)
+          .order('reading_date', { ascending: false }),
         admin.rpc('get_property_health_score', { p_property_id: pid }),
         admin.rpc('get_attention_items', { p_property_id: pid, p_limit: 10 }),
         admin.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }),
@@ -188,12 +187,36 @@ export async function GET(request: NextRequest) {
     // --- AGGREGATE RESULTS ---
     
     // VMS Stats
-    let vmsStats = { total: 0, in: 0, out: 0 };
+    let vmsStats = {
+      today: { total: 0, in: 0, out: 0 },
+      month: { total: 0, in: 0, out: 0 },
+      all: { total: 0, in: 0, out: 0 }
+    };
     if (vmsRes?.data) {
-      const total = vmsRes.data.length;
-      const checkedIn = vmsRes.data.filter((v: any) => v.status === 'checked_in').length;
-      const checkedOut = vmsRes.data.filter((v: any) => v.status === 'checked_out').length;
-      vmsStats = { total, in: checkedIn, out: checkedOut };
+      const todayStr = new Date().toISOString().split('T')[0];
+      const mStartStr = monthStart.split('T')[0];
+      
+      vmsRes.data.forEach((v: any) => {
+        const dateStr = v.created_at ? v.created_at.split('T')[0] : '';
+        const isToday = dateStr === todayStr;
+        const isMonth = dateStr >= mStartStr;
+        
+        vmsStats.all.total++;
+        if (v.status === 'checked_in') vmsStats.all.in++;
+        if (v.status === 'checked_out') vmsStats.all.out++;
+        
+        if (isMonth) {
+          vmsStats.month.total++;
+          if (v.status === 'checked_in') vmsStats.month.in++;
+          if (v.status === 'checked_out') vmsStats.month.out++;
+        }
+        
+        if (isToday) {
+          vmsStats.today.total++;
+          if (v.status === 'checked_in') vmsStats.today.in++;
+          if (v.status === 'checked_out') vmsStats.today.out++;
+        }
+      });
     }
 
     // Vendor Stats
@@ -228,25 +251,92 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Monthly readings (for monthly consumption)
-      if (res.elecMonthly?.data && Array.isArray(res.elecMonthly.data)) {
-        const monthlyReadings = res.elecMonthly.data as any[];
-        // Sum up all units for the month
-        const monthlyUnits = monthlyReadings.reduce((sum: number, r: any) => {
-          return sum + (r.computed_units || r.final_units || 0);
-        }, 0);
-        monthlyElecSum += monthlyUnits;
-      }
+      let elecToday = 0;
+      let elecMonth = 0;
+      let elecAll = 0;
 
-      if (res.diesel.data) {
-        totalDieselLevel += (res.diesel.data.closing_diesel_level || 0);
-        totalDieselConsumption += (res.diesel.data.computed_consumed_litres || 0);
-        dieselCount++;
+      // Readings for main meter (for consumption stats)
+      if (res.elecMonthly?.data && Array.isArray(res.elecMonthly.data)) {
+        const allReadings = res.elecMonthly.data as any[];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const mStartStr = monthStart.split('T')[0];
+        
+        allReadings.forEach(r => {
+          const units = r.final_units ?? r.computed_units ?? 0;
+          elecAll += units;
+          if (r.reading_date >= mStartStr) elecMonth += units;
+          if (r.reading_date === todayStr) elecToday += units;
+        });
+        
+        monthlyElecSum += elecMonth; // keep old behavior
+        totalElec += elecAll;
       }
+      
+      // Store in per-property results so we can aggregate if needed
+      (res as any).elecStats = { today: elecToday, month: elecMonth, all: elecAll };
+
+      let dieselToday = 0, dieselMonth = 0, dieselAll = 0;
+      let dieselLevel = 0;
+      if (res.diesel.data && Array.isArray(res.diesel.data)) {
+        const dReadings = res.diesel.data as any[];
+        if (dReadings.length > 0) {
+          dieselLevel = dReadings[0].closing_diesel_level || 0;
+          totalDieselLevel += dieselLevel;
+          dieselCount++;
+        }
+        const todayStr = new Date().toISOString().split('T')[0];
+        const mStartStr = monthStart.split('T')[0];
+        dReadings.forEach(r => {
+          const c = r.computed_consumed_litres || 0;
+          dieselAll += c;
+          if (r.reading_date >= mStartStr) dieselMonth += c;
+          if (r.reading_date === todayStr) dieselToday += c;
+        });
+      }
+      (res as any).dieselStats = { today: dieselToday, month: dieselMonth, all: dieselAll };
+
+      let waterTodayQty = 0, waterMonthQty = 0, waterAllQty = 0;
+      let waterTodayCost = 0, waterMonthCost = 0, waterAllCost = 0;
+      let waterSources = { 
+        today: {} as Record<string, { count: number, cost: number, qty: number }>, 
+        month: {} as Record<string, { count: number, cost: number, qty: number }>, 
+        all: {} as Record<string, { count: number, cost: number, qty: number }> 
+      };
+      
+      if (res.water.error) {
+        console.error("[SuperAdmin API] Water readings query error:", JSON.stringify(res.water.error));
+      }
+      
       if (res.water.data && Array.isArray(res.water.data)) {
-        totalWaterQuantity += (res.water.data as any[]).reduce((sum, r) => sum + (r.quantity || 0), 0);
-        totalWaterCost += (res.water.data as any[]).reduce((sum, r) => sum + (r.computed_cost || 0), 0);
+        const wReadings = res.water.data as any[];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const mStartStr = monthStart.split('T')[0];
+        wReadings.forEach(r => {
+          const q = r.quantity || 0;
+          const c = r.computed_cost || 0;
+          const sType = r.source?.source_type || 'Unknown';
+          
+          waterAllQty += q; waterAllCost += c;
+          if (!waterSources.all[sType]) waterSources.all[sType] = { count: 0, cost: 0, qty: 0 };
+          waterSources.all[sType].count++; waterSources.all[sType].cost += c; waterSources.all[sType].qty += q;
+          
+          if (r.reading_date >= mStartStr) { 
+            waterMonthQty += q; waterMonthCost += c; 
+            if (!waterSources.month[sType]) waterSources.month[sType] = { count: 0, cost: 0, qty: 0 };
+            waterSources.month[sType].count++; waterSources.month[sType].cost += c; waterSources.month[sType].qty += q;
+          }
+          if (r.reading_date === todayStr) { 
+            waterTodayQty += q; waterTodayCost += c; 
+            if (!waterSources.today[sType]) waterSources.today[sType] = { count: 0, cost: 0, qty: 0 };
+            waterSources.today[sType].count++; waterSources.today[sType].cost += c; waterSources.today[sType].qty += q;
+          }
+        });
       }
+      (res as any).waterStats = { 
+        qty: { today: waterTodayQty, month: waterMonthQty, all: waterAllQty },
+        cost: { today: waterTodayCost, month: waterMonthCost, all: waterAllCost },
+        sources: waterSources
+      };
       if (res.health.data) healthSum += (res.health.data as number);
       if (res.attention.data) attentionArr.push(...(res.attention.data as any[]));
       
@@ -265,8 +355,51 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Collect PPM schedules from all properties
     const ppmSchedulesArr = perPropResults.flatMap(res => res.ppmSchedules?.data ?? []);
+
+    const aggElecStats = perPropResults.reduce((acc, res) => {
+      acc.today += (res as any).elecStats?.today || 0;
+      acc.month += (res as any).elecStats?.month || 0;
+      acc.all += (res as any).elecStats?.all || 0;
+      return acc;
+    }, { today: 0, month: 0, all: 0 });
+
+    const aggDieselStats = perPropResults.reduce((acc, res) => {
+      acc.today += (res as any).dieselStats?.today || 0;
+      acc.month += (res as any).dieselStats?.month || 0;
+      acc.all += (res as any).dieselStats?.all || 0;
+      return acc;
+    }, { today: 0, month: 0, all: 0 });
+
+    const aggWaterStats = perPropResults.reduce((acc, res) => {
+      acc.qty.today += (res as any).waterStats?.qty?.today || 0;
+      acc.qty.month += (res as any).waterStats?.qty?.month || 0;
+      acc.qty.all += (res as any).waterStats?.qty?.all || 0;
+      acc.cost.today += (res as any).waterStats?.cost?.today || 0;
+      acc.cost.month += (res as any).waterStats?.cost?.month || 0;
+      acc.cost.all += (res as any).waterStats?.cost?.all || 0;
+      
+      const wSources = (res as any).waterStats?.sources;
+      if (wSources) {
+        ['today', 'month', 'all'].forEach(period => {
+          Object.keys(wSources[period] || {}).forEach(sType => {
+            if (!acc.sources[period][sType]) acc.sources[period][sType] = { count: 0, cost: 0, qty: 0 };
+            acc.sources[period][sType].count += wSources[period][sType].count;
+            acc.sources[period][sType].cost += wSources[period][sType].cost;
+            acc.sources[period][sType].qty += wSources[period][sType].qty;
+          });
+        });
+      }
+      return acc;
+    }, { 
+      qty: { today: 0, month: 0, all: 0 }, 
+      cost: { today: 0, month: 0, all: 0 },
+      sources: { 
+        today: {} as Record<string, { count: number, cost: number, qty: number }>, 
+        month: {} as Record<string, { count: number, cost: number, qty: number }>, 
+        all: {} as Record<string, { count: number, cost: number, qty: number }> 
+      }
+    });
 
     // Derive final fields
     const healthScore = propIds.length > 0 ? Math.round(healthSum / propIds.length) : 100;
@@ -291,7 +424,12 @@ export async function GET(request: NextRequest) {
       },
       sopTotal: sopTemplatesRes.count ?? 0,
       sopCount: sopCompletionsRes.count ?? 0,
-      energyKwh: Math.round(monthlyElecSum),
+      energyKwh: Math.round(aggElecStats.month),
+      energyStats: {
+        today: Math.round(aggElecStats.today),
+        month: Math.round(aggElecStats.month),
+        all: Math.round(aggElecStats.all)
+      },
       energyTrend: elecTrendCount > 0 ? Math.round(elecTrendSum / elecTrendCount) : 0,
       healthScore,
       attentionItems: sortedAttention,
@@ -300,11 +438,24 @@ export async function GET(request: NextRequest) {
       vendorStats,
       dieselStats: {
         level: dieselCount > 0 ? Math.round(totalDieselLevel / dieselCount) : 0,
-        consumption: Math.round(totalDieselConsumption),
+        consumption: {
+          today: Math.round(aggDieselStats.today),
+          month: Math.round(aggDieselStats.month),
+          all: Math.round(aggDieselStats.all)
+        }
       },
       waterStats: {
-        quantity: Math.round(totalWaterQuantity),
-        cost: Math.round(totalWaterCost),
+        quantity: {
+          today: Math.round(aggWaterStats.qty.today),
+          month: Math.round(aggWaterStats.qty.month),
+          all: Math.round(aggWaterStats.qty.all)
+        },
+        cost: {
+          today: Math.round(aggWaterStats.cost.today),
+          month: Math.round(aggWaterStats.cost.month),
+          all: Math.round(aggWaterStats.cost.all)
+        },
+        sources: aggWaterStats.sources
       },
       ppm: {
         total: pTotal,

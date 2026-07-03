@@ -66,9 +66,9 @@ export interface TicketFunnelItem {
 }
 
 export interface VmsStats {
-  total: number;
-  in: number;
-  out: number;
+  today: { total: number; in: number; out: number };
+  month: { total: number; in: number; out: number };
+  all: { total: number; in: number; out: number };
 }
 
 export interface VendorStats {
