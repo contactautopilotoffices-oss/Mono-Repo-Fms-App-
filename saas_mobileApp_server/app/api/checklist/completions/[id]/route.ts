@@ -25,7 +25,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // Update completion main record
     const updatePayload: Record<string, any> = {};
-    if (body.status !== undefined) updatePayload.status = body.status;
+    if (body.status !== undefined) {
+      updatePayload.status = body.status;
+      if (body.status === "completed" && !existing.completed_by) {
+        updatePayload.completed_by = auth.user.id;
+      }
+    }
     if (body.completed_at !== undefined) updatePayload.completed_at = body.completed_at;
     if (body.is_late !== undefined) updatePayload.is_late = body.is_late;
     if (body.notes !== undefined) updatePayload.notes = body.notes;

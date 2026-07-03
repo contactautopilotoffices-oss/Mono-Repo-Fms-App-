@@ -54,6 +54,24 @@ export async function POST(request: NextRequest) {
 
     const admin = createAdminClient();
 
+    // Dedup check: Does this completion already exist?
+    let query = admin
+      .from("sop_completions")
+      .select("*, user:users(id, full_name), items:sop_completion_items(*)")
+      .eq("template_id", body.template_id)
+      .eq("property_id", propertyId)
+      .eq("completion_date", body.completion_date);
+
+    if (body.slot_time) {
+      query = query.eq("slot_time", body.slot_time);
+    }
+
+    const { data: existingData } = await query.order('created_at', { ascending: false }).limit(1);
+    
+    if (existingData && existingData.length > 0) {
+      return NextResponse.json({ completion: existingData[0] });
+    }
+
     // Insert completion
     const { data, error } = await admin
       .from("sop_completions")
