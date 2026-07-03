@@ -655,7 +655,7 @@ const HistoryListCard = ({
     const completedTime = completion.completed_at
       ? new Date(completion.completed_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
       : completion.slot_time
-      ? fmt12h(completion.slot_time)
+      ? getSlotWindow(completion.slot_time, template?.frequency) || fmt12h(completion.slot_time)
       : "N/A";
     const userName =
       completion.user?.full_name ||
@@ -2033,7 +2033,7 @@ export default function ChecklistScreen() {
                   >
                     BACKFILLING FOR {activeCompletion?.completion_date}{" "}
                     {activeCompletion?.slot_time
-                      ? `(${fmt12h(activeCompletion.slot_time)})`
+                      ? `(${getSlotWindow(activeCompletion.slot_time, activeTemplate.frequency) || fmt12h(activeCompletion.slot_time)})`
                       : ""}
                   </Text>
                 )}
