@@ -30,10 +30,6 @@ config.resolver.sourceExts.push('mjs');
 // Add support for web platform
 config.resolver.platforms = ['ios', 'android', 'web'];
 
-// Polyfill Node.js core modules
-config.resolver.extraNodeModules = {
-  stream: require.resolve('stream-browserify'),
-};
 
 // Don't watch test/mock/platform-irrelevant files
 // Also block Node.js-only packages that Metro can't bundle
