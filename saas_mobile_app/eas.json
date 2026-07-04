@@ -1,7 +1,8 @@
 {
   "cli": {
     "version": ">= 12.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "remote",
+    "packageManager": "npm"
   },
   "build": {
     "development": {
@@ -15,6 +16,7 @@
       }
     },
     "preview": {
+      "node": "22",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
