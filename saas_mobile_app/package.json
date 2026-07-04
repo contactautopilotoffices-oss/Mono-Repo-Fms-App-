@@ -1,13 +1,11 @@
 {
   "name": "autopilot-mobile",
   "version": "1.0.0",
-  "packageManager": "npm@10.8.1",
   "engines": {
     "node": ">=20.0.0"
   },
   "main": "expo-router/entry",
   "scripts": {
-    "eas-build-pre-install": "rm -f package-lock.json",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
