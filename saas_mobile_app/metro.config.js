@@ -56,6 +56,13 @@ config.resolver.blockList = [
 // TODO: Re-check after any @gorhom/portal upgrade > 1.0.14.
 const portalPackage = path.resolve(__dirname, 'node_modules/@gorhom/portal/src');
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Block Node.js core modules and ws (which is not needed in React Native)
+  if (moduleName === 'ws' || moduleName === 'zlib' || moduleName === 'stream' || moduleName === 'crypto') {
+    return {
+      type: 'empty'
+    };
+  }
+
   // Redirect @gorhom/portal's broken ../context/portal imports to ../contexts/portal
   if (
     moduleName === '../context/portal' &&
