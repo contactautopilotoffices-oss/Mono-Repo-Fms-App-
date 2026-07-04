@@ -1967,7 +1967,14 @@ export default function TicketDetailScreen() {
                       <Video source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
                     )
                   ) : ticket.photo_before_url ? (
-                    <Image source={{ uri: ticket.photo_before_url }} style={styles.mediaImage} />
+                    <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <Image source={{ uri: ticket.photo_before_url }} style={[styles.mediaImage, { width: '100%', height: '100%' }]} />
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>
+                          {ticket.created_at ? new Date(ticket.created_at).toLocaleString() : ''}
+                        </Text>
+                      </View>
+                    </View>
                   ) : ticket.video_before_url ? (
                     <Video
                       source={{ uri: ticket.video_before_url }}
@@ -2014,7 +2021,14 @@ export default function TicketDetailScreen() {
                       <Video source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
                     )
                   ) : ticket.photo_after_url ? (
-                    <Image source={{ uri: ticket.photo_after_url }} style={styles.mediaImage} />
+                    <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <Image source={{ uri: ticket.photo_after_url }} style={[styles.mediaImage, { width: '100%', height: '100%' }]} />
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>
+                          {(ticket.resolved_at || ticket.updated_at) ? new Date(ticket.resolved_at || ticket.updated_at).toLocaleString() : ''}
+                        </Text>
+                      </View>
+                    </View>
                   ) : ticket.video_after_url ? (
                     <Video
                       source={{ uri: ticket.video_after_url }}
