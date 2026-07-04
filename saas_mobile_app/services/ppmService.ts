@@ -315,7 +315,7 @@ export const ppmService = {
       const response = await fetch(uri);
       const arrayBuffer = await response.arrayBuffer();
 
-      const { error: uploadError } = await serverApi.upload('ppm-attachments', filename, arrayBuffer, mimeType);
+      const { error: uploadError } = await serverApi.uploadFile('ppm-attachments', filename, arrayBuffer, mimeType);
       if (uploadError) throw new Error(uploadError.message);
 
       const { data: urlData } = await serverApi.getPublicUrl('ppm-attachments', filename);

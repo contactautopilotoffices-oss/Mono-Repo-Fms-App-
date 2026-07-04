@@ -4,9 +4,8 @@
     "slug": "autopilot-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "statusBar": {
+    "androidStatusBar": {
       "translucent": true,
-      "backgroundColor": "transparent",
       "barStyle": "light-content"
     },
     "icon": "./assets/images/icon.png",
@@ -28,7 +27,6 @@
         "backgroundColor": "#708F96"
       },
       "package": "com.autopilot.app",
-      "launchMode": "singleTask",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",
@@ -104,7 +102,8 @@
         }
       ],
       "@react-native-firebase/messaging",
-      "react-native-compressor"
+      "react-native-compressor",
+      "expo-font"
     ],
     "updates": {
       "enabled": false

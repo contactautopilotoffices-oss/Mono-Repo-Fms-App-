@@ -14,6 +14,7 @@ import LovableSoftServiceManagerDashboard from '@/components/dashboard/LovableSo
 import LovableStaffDashboard from '@/components/dashboard/LovableStaffDashboard';
 import SuperTenantPropertySelector from '@/components/dashboard/SuperTenantPropertySelector';
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
+import FoodVendorDashboard from '@/components/dashboard/FoodVendorDashboard';
 
 // ─── Role constants ────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ const SOFT_SERVICE_ROLES = ['soft_service_manager', 'soft_services', 'housekeepi
 const STAFF_ROLES = ['staff', 'maintenance_staff', 'technician', 'helper', 'cleaner'];
 const TENANT_ROLES = ['tenant'];
 const SUPER_TENANT_ROLES = ['super_tenant'];
+const VENDOR_ROLES = ['vendor', 'food_vendor'];
 
 export default function DashboardScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
@@ -67,6 +69,7 @@ export default function DashboardScreen() {
     if (SOFT_SERVICE_ROLES.includes(propRole)) return 'soft_service';
     if (propRole === 'super_tenant') return 'super_tenant';
     if (TENANT_ROLES.includes(propRole)) return 'tenant';
+    if (VENDOR_ROLES.includes(propRole)) return 'vendor';
     if (STAFF_ROLES.includes(propRole)) return 'staff';
 
     if (propRole === 'procurement' || orgRole === 'procurement') return 'procurement';
@@ -122,6 +125,10 @@ export default function DashboardScreen() {
 
   if (effectiveRole === 'staff') {
     return <LovableStaffDashboard propertyId={pid} />;
+  }
+
+  if (effectiveRole === 'vendor') {
+    return <FoodVendorDashboard propertyId={pid} />;
   }
 
   // property_admin, tenant, vendor, and any other role → property admin dashboard

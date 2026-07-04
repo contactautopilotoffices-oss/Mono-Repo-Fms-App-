@@ -14,6 +14,7 @@ import { mmkvAsyncStorage as AsyncStorage } from '@/utils/storage';
 import { User, Session } from '@supabase/supabase-js';
 
 import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { UserMembership, PropertyInfo } from '@/types/membership';
 import { clearToken } from '@/services/cassandra/cassandraAuthService';
 import { queryClient } from '@/utils/queryClient';
@@ -153,21 +154,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         // Fetch organisation membership
-        const { data: orgData, error: orgError } = await supabase
-          .from('organization_memberships')
-          .select(
-            `
+        const { data: orgData, error: orgError } = await serverApi.query<any>({
+          table: 'organization_memberships',
+          action: 'select',
+          select: `
             role,
             organization:organizations (
               id,
               name
             )
-          `
-          )
-          .eq('user_id', userId)
-          .or('is_active.eq.true,is_active.is.null')
-          .limit(1)
-          .maybeSingle();
+          `,
+          filters: [
+            { op: 'eq', column: 'user_id', value: userId },
+            { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
+          ],
+          limit: 1,
+          maybeSingle: true,
+        });
 
         if (orgError) {
           console.error('[AuthContext] org membership fetch error:', orgError);
@@ -178,10 +181,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const fetchedOrgId = typeof orgFromJoin?.id === 'string' ? orgFromJoin.id : null;
 
         // Fetch all property memberships for this user
-        const { data: propData } = await supabase
-          .from('property_memberships')
-          .select(
-            `
+        const { data: propData } = await serverApi.query<any[]>({
+          table: 'property_memberships',
+          action: 'select',
+          select: `
             role,
             property:properties (
               id,
@@ -189,10 +192,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               code,
               image_url
             )
-          `
-          )
-          .eq('user_id', userId)
-          .or('is_active.eq.true,is_active.is.null');
+          `,
+          filters: [
+            { op: 'eq', column: 'user_id', value: userId },
+            { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
+          ],
+        });
 
         let builtProperties: PropertyInfo[] = (propData ?? []).reduce<PropertyInfo[]>(
           (acc, p: any) => {
@@ -215,10 +220,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const ORG_ADMIN_ROLES = ['org_super_admin', 'org_admin', 'owner'];
 
         if (fetchedOrgId && fetchedOrgRole && ORG_ADMIN_ROLES.includes(fetchedOrgRole)) {
-          const { data: orgPropsData } = await supabase
-            .from('properties')
-            .select('id, name, code, image_url')
-            .eq('organization_id', fetchedOrgId);
+          const { data: orgPropsData } = await serverApi.query<any[]>({
+            table: 'properties',
+            action: 'select',
+            select: 'id, name, code, image_url',
+            filters: [{ op: 'eq', column: 'organization_id', value: fetchedOrgId }],
+          });
             
           if (orgPropsData) {
             const existingIds = new Set(builtProperties.map(p => p.id));
@@ -245,11 +252,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!resolvedOrgId && builtProperties.length > 0) {
           // Look up the organization_id from the first property's parent org
           const firstPropId = builtProperties[0].id;
-          const { data: propOrgData } = await supabase
-            .from('properties')
-            .select('organization_id')
-            .eq('id', firstPropId)
-            .single();
+          const { data: propOrgData } = await serverApi.query<any>({
+            table: 'properties',
+            action: 'select',
+            select: 'organization_id',
+            filters: [{ op: 'eq', column: 'id', value: firstPropId }],
+            single: true,
+          });
           resolvedOrgId = (propOrgData as any)?.organization_id ?? null;
           console.log('[AuthContext] Derived org_id from property:', resolvedOrgId);
         }
@@ -429,11 +438,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // ─── Create users profile row (mirrors web app auth callback) ───
         // This must exist before onboarding tries to .update() it.
-        await (supabase as any).from('users').upsert({
-          id: data.session.user.id,
-          email: email,
-          full_name: fullName,
-        }, { onConflict: 'id' });
+        await serverApi.query({
+          table: 'users',
+          action: 'upsert',
+          values: {
+            id: data.session.user.id,
+            email: email,
+            full_name: fullName,
+          },
+          mutationOptions: { onConflict: 'id' },
+        });
 
         await fetchMembership(data.session.user.id);
       }
@@ -448,11 +462,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // 1. Instantly unmount protected components to prevent refetches
+    setUser(null);
+    setSession(null);
+    setMembership(null);
+
+    // 2. Cancel in-flight queries
+    queryClient.cancelQueries();
+
+    // 3. Clear caches
     if (user?.id) {
       await clearMembershipCache(user.id);
     }
-    setMembership(null);
     useDashboardStore.getState().clearUIState();
+    
+    // Clear Super Admin store
+    const { useSuperAdminStore } = require('@/stores/superAdminStore');
+    useSuperAdminStore.getState().clearCache();
+
     queryClient.removeQueries(); // Completely purge cache rather than just clear()
     queryClient.clear();
     

@@ -27,6 +27,7 @@ import { useServerQuery } from '@/hooks/useServerQuery';
 import { useQuery } from '@tanstack/react-query';
 import { queryClient } from '@/utils/queryClient';
 import SkeletonLoader from './lovable/SkeletonLoader';
+import ContentSkeletonLoader from './lovable/ContentSkeletonLoader';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import Animated, {
   useSharedValue,
@@ -1048,16 +1049,8 @@ export default function LovableMstDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  // BLOCK rendering until we have actual data (prevents empty UI flash)
-  if (!data) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" />
-        <WeatherBackground condition={undefined} />
-        <SkeletonLoader />
-      </View>
-    );
-  }
+  // Show header shell instantly (from cached membership) with skeleton content below
+  const isDataReady = !!data;
 
   return (
     <View style={styles.container}>
@@ -1140,9 +1133,15 @@ export default function LovableMstDashboard({ propertyId }: Props) {
       >
         {/* Tab content */}
         <View style={styles.tabContent}>
-          {activeTab === 'dashboard' && renderMyDashboard()}
-          {activeTab === 'daily' && renderDailyBoard()}
-          {activeTab === 'profile' && renderProfile()}
+          {!isDataReady ? (
+            <ContentSkeletonLoader />
+          ) : (
+            <>
+              {activeTab === 'dashboard' && renderMyDashboard()}
+              {activeTab === 'daily' && renderDailyBoard()}
+              {activeTab === 'profile' && renderProfile()}
+            </>
+          )}
         </View>
       </ScrollView>
 

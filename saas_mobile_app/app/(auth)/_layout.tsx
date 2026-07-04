@@ -15,7 +15,7 @@ export default function AuthLayout() {
         contentStyle: { backgroundColor: theme.background },
       }}
     >
-      <Stack.Screen name="login" />
+      <Stack.Screen name="login" options={{ animation: 'fade' }} />
       <Stack.Screen name="signup" />
       <Stack.Screen name="forgot-password" />
       <Stack.Screen name="reset-password/index" options={{ headerShown: false }} />

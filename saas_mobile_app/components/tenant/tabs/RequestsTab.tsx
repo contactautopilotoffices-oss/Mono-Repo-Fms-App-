@@ -99,6 +99,7 @@ export function RequestsTab({ tickets, onRefresh, refreshing, onTicketPress, onC
               status={item.status as any}
               ticketNumber={item.ticket_number || ''}
               createdAt={item.created_at}
+              resolvedAt={item.resolved_at}
               assignedTo={item.assignee?.full_name}
               assigneePhotoUrl={item.assignee?.user_photo_url}
               onClick={() => onTicketPress?.(item)}

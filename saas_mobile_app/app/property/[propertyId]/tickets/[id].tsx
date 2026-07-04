@@ -586,13 +586,15 @@ export default function TicketDetailScreen() {
 
     // Background sync
     const userId = authUser?.id;
-    supabase
-      .from('ticket_comments')
-      .insert({ ticket_id: id, comment: commentText, user_id: userId, is_internal: false } as any)
-      .select(`*, user:users(full_name, user_photo_url)`)
-      .single()
+    serverApi.query<Comment>({
+      table: 'ticket_comments',
+      action: 'insert',
+      values: { ticket_id: id, comment: commentText, user_id: userId, is_internal: false },
+      select: `*, user:users(full_name, user_photo_url)`,
+      single: true,
+    })
       .then(({ data, error }) => {
-        if (error) throw error;
+        if (error) throw new Error(error.message);
         // Replace temp comment with actual server data to get real ID
         setComments(prev => prev.map(c => c.id === optimisticComment.id ? (data as Comment) : c));
       })

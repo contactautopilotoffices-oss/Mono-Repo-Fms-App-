@@ -7,6 +7,7 @@
 
 import { File } from 'expo-file-system';
 import { supabase } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 
 const ENROLL_API_URL = process.env.EXPO_PUBLIC_VOICE_API_URL ?? '';
 const MAX_PHRASE_SECONDS = 15;
@@ -146,12 +147,16 @@ export class VoiceEnrollmentService {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return { enrolled: false };
 
-      const { data, error } = await ((supabase
-        .from('user_voice_embeddings' as any) as any)
-        .select('id')
-        .eq('user_id', session.user.id)
-        .eq('status', 'enrolled')
-        .maybeSingle());
+      const { data, error } = await serverApi.query<{ id: string }>({
+        table: 'user_voice_embeddings',
+        action: 'select',
+        select: 'id',
+        filters: [
+          { op: 'eq', column: 'user_id', value: session.user.id },
+          { op: 'eq', column: 'status', value: 'enrolled' },
+        ],
+        maybeSingle: true,
+      });
 
       if (error) return { enrolled: false };
       return { enrolled: !!data, embedding_id: (data as { id: string } | null)?.id };
@@ -168,11 +173,15 @@ export class VoiceEnrollmentService {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return;
 
-      await (supabase as any)
-        .from('user_voice_embeddings')
-        .update({ status: 'revoked' })
-        .eq('user_id', session.user.id)
-        .eq('status', 'enrolled');
+      await serverApi.query({
+        table: 'user_voice_embeddings',
+        action: 'update',
+        values: { status: 'revoked' },
+        filters: [
+          { op: 'eq', column: 'user_id', value: session.user.id },
+          { op: 'eq', column: 'status', value: 'enrolled' },
+        ],
+      });
 
       this.reset();
     } catch {

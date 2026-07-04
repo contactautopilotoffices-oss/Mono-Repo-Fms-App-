@@ -1,5 +1,6 @@
 import { mmkvAsyncStorage } from './storage';
 import * as FileSystem from 'expo-file-system';
+import { documentDirectory } from 'expo-file-system';
 import { checklistService } from '@/services/checklistService';
 import { processAndStampImage, processVideo } from './mediaProcessor';
 
@@ -34,7 +35,7 @@ export const offlineMediaQueue = {
     
     // Copy the file to a permanent local directory so it's not deleted if temp is cleared
     const fileExt = taskInput.type === 'photo' ? 'webp' : 'mp4'; // Initial assumption, actual ext doesn't matter much for localUri
-    const newUri = `${FileSystem.documentDirectory}media_queue_${Date.now()}.${fileExt}`;
+    const newUri = `${documentDirectory}media_queue_${Date.now()}.${fileExt}`;
     await FileSystem.copyAsync({ from: taskInput.localUri, to: newUri });
 
     const newTask: OfflineMediaTask = {

@@ -280,6 +280,7 @@ export function OverviewTab({
                 status={ticket.status as any}
                 ticketNumber={ticket.ticket_number || ''}
                 createdAt={ticket.created_at}
+                resolvedAt={ticket.resolved_at}
                 assignedTo={ticket.assignee?.full_name}
                 assigneePhotoUrl={ticket.assignee?.user_photo_url}
                 onClick={() => onTicketPress?.(ticket)}

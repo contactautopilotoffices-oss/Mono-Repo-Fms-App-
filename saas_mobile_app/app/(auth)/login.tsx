@@ -219,7 +219,7 @@ export default function LoginScreen() {
         return ai - bi;
       })[0];
 
-      if (['org_super_admin'].includes(best.role)) {
+      if (best.role === 'org_super_admin') {
         router.replace('/super-admin' as any);
         return;
       }
@@ -228,16 +228,18 @@ export default function LoginScreen() {
       const propsRes = await apiFetch<{ success: boolean; data: Array<{ id: string; name: string }> }>(`/api/organizations/${best.organization_id}/properties`);
       const orgProps = propsRes.success ? propsRes.data ?? [] : [];
 
+      if (orgProps && orgProps.length === 1) {
+        router.replace(`/property/${orgProps[0].id}` as any);
+        return;
+      }
+
+
       if (orgProps && orgProps.length > 0) {
-        if (orgProps.length === 1) {
-          router.replace(`/property/${orgProps[0].id}` as any);
-        } else {
-          const propsParam = encodeURIComponent(JSON.stringify(orgProps.map((p) => ({
-            id: p.id,
-            role: best.role
-          }))));
-          router.replace(`/(auth)/property-selection?properties=${propsParam}`);
-        }
+        const propsParam = encodeURIComponent(JSON.stringify(orgProps.map((p) => ({
+          id: p.id,
+          role: best.role
+        }))));
+        router.replace(`/(auth)/property-selection?properties=${propsParam}`);
         return;
       } else {
         router.replace('/(auth)/property-selection');
@@ -265,10 +267,11 @@ export default function LoginScreen() {
       return;
     }
 
-    const isPropertyAdminOnAny = activePropMemberships.some((m) => 
-      ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(m.role?.toLowerCase() || '')
-    );
 
+    const isPropertyAdminOnAny = activePropMemberships.some(p => 
+      ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(p.role?.toLowerCase() || '')
+    );
+    
     if (isPropertyAdminOnAny) {
       router.replace('/super-admin' as any);
       return;

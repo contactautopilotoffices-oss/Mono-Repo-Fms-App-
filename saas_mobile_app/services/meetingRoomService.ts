@@ -340,7 +340,7 @@ export async function uploadMeetingRoomPhoto(photoUri: string): Promise<{ succes
     const blob = await fileRes.blob();
     const path = `${Date.now()}.${ext}`;
 
-    const { error: uploadError } = await serverApi.upload('meeting-rooms', path, blob, type);
+    const { error: uploadError } = await serverApi.uploadFile('meeting-rooms', path, blob, type);
 
     if (uploadError) throw new Error(uploadError.message);
 

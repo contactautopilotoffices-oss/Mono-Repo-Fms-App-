@@ -12,6 +12,7 @@ import { View, Text, ActivityIndicator, StyleSheet, BackHandler } from 'react-na
 import { useRouter, useLocalSearchParams, useRootNavigationState } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 
 // Configure WebBrowser to complete the OAuth session
 WebBrowser.maybeCompleteAuthSession();
@@ -88,18 +89,19 @@ export default function OAuthCallback() {
         if (isMounted) setStatus('Setting up your account...');
 
         // Ensure user profile exists in our users table
-        const { error: profileError } = await supabase
-          .from('users')
-          .upsert({
+        const { error: profileError } = await serverApi.query({
+          table: 'users',
+          action: 'upsert',
+          values: {
             id: user.id,
             full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
             email: user.email || '',
             phone: user.phone || user.user_metadata?.phone || null,
             user_photo_url: user.user_metadata?.avatar_url || null,
             metadata: user.user_metadata,
-          }, {
-            onConflict: 'id',
-          });
+          },
+          mutationOptions: { onConflict: 'id' },
+        });
 
         if (profileError) {
           console.error('[OAuth Callback] Profile upsert error:', profileError);
@@ -107,25 +109,35 @@ export default function OAuthCallback() {
         }
 
         // Fetch user profile and memberships
-        const { data: profile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', user.id)
-          .single();
+        const { data: profile } = await serverApi.query<any>({
+          table: 'users',
+          action: 'select',
+          select: '*',
+          filters: [{ op: 'eq', column: 'id', value: user.id }],
+          single: true,
+        });
 
         // Fetch organization memberships
-        const { data: orgMems } = await supabase
-          .from('organization_memberships')
-          .select('organization_id, role')
-          .eq('user_id', user.id)
-          .eq('is_active', true);
+        const { data: orgMems } = await serverApi.query<any[]>({
+          table: 'organization_memberships',
+          action: 'select',
+          select: 'organization_id, role',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user.id },
+            { op: 'eq', column: 'is_active', value: true },
+          ],
+        });
 
         // Fetch property memberships
-        const { data: propMems } = await supabase
-          .from('property_memberships')
-          .select('property_id, organization_id, role')
-          .eq('user_id', user.id)
-          .eq('is_active', true);
+        const { data: propMems } = await serverApi.query<any[]>({
+          table: 'property_memberships',
+          action: 'select',
+          select: 'property_id, organization_id, role',
+          filters: [
+            { op: 'eq', column: 'user_id', value: user.id },
+            { op: 'eq', column: 'is_active', value: true },
+          ],
+        });
 
         const hasOrgAccess = (orgMems || []).length > 0;
         const hasPropertyAccess = (propMems || []).length > 0;
@@ -135,26 +147,31 @@ export default function OAuthCallback() {
         // Route based on membership
         if (hasOrgAccess) {
           const mem = (orgMems || [])[0];
-          if (mem.role === 'org_super_admin' || mem.role === 'super_tenant') {
+
+          if (mem.role === 'org_super_admin') {
             router.replace('/super-admin');
             return;
           }
 
           // Get org properties
-          const { data: orgProps } = await supabase
-            .from('properties')
-            .select('id, name')
-            .eq('organization_id', mem.organization_id);
+          const { data: orgProps } = await serverApi.query<any[]>({
+            table: 'properties',
+            action: 'select',
+            select: 'id, name',
+            filters: [{ op: 'eq', column: 'organization_id', value: mem.organization_id }],
+          });
+
+          if (orgProps && orgProps.length === 1) {
+            router.replace(`/property/${orgProps[0].id}`);
+            return;
+          }
+
 
           if (orgProps && orgProps.length > 0) {
-            if (orgProps.length === 1) {
-              router.replace(`/property/${orgProps[0].id}`);
-            } else {
-              const propsParam = encodeURIComponent(JSON.stringify(
-                orgProps.map((p: any) => ({ id: p.id, role: mem.role }))
-              ));
-              router.replace(`/(auth)/property-selection?properties=${propsParam}`);
-            }
+            const propsParam = encodeURIComponent(JSON.stringify(
+              orgProps.map((p: any) => ({ id: p.id, role: mem.role }))
+            ));
+            router.replace(`/(auth)/property-selection?properties=${propsParam}`);
           } else {
             router.replace('/(auth)/property-selection');
           }
@@ -162,8 +179,27 @@ export default function OAuthCallback() {
         }
 
         if (hasPropertyAccess) {
-          const mem = (propMems || [])[0];
-          router.replace(`/property/${mem.property_id}`);
+          if (propMems && propMems.length === 1) {
+            const mem = propMems[0];
+            router.replace(`/property/${mem.property_id}`);
+            return;
+          } 
+          
+
+          if (propMems && propMems.length > 1) {
+            const isPropertyAdminOnAny = propMems.some((p: any) => 
+              ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager'].includes(p.role?.toLowerCase() || '')
+            );
+            if (isPropertyAdminOnAny) {
+              router.replace('/super-admin');
+              return;
+            }
+
+            const propsParam = encodeURIComponent(JSON.stringify(
+              propMems.map((p: any) => ({ id: p.property_id, role: p.role }))
+            ));
+            router.replace(`/(auth)/property-selection?properties=${propsParam}`);
+          }
           return;
         }
 

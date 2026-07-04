@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import {
   View,
   Text,
@@ -10,816 +11,2278 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  Alert,
   Dimensions,
   Image,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { serverApi } from '@/lib/serverApi';
 import { useAuth } from '@/hooks/useAuth';
-import SafeBlurView from '@/components/ui/SafeBlurView';
-import SignOutModal from '@/components/ui/SignOutModal';
-import NotificationModal from '@/components/notifications/NotificationModal';
-import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
-import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
-import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
-import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
-import { ppmService } from '@/services/ppmService';
-import WeatherBackground from '@/components/dashboard/WeatherBackground';
-import { useWeather } from '@/hooks/useWeather';
+import { useGamification } from '@/hooks/mst/useGamification';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { useQuery } from '@tanstack/react-query';
 import { queryClient } from '@/utils/queryClient';
+import SkeletonLoader from './lovable/SkeletonLoader';
+import ContentSkeletonLoader from './lovable/ContentSkeletonLoader';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withRepeat,
+  runOnJS,
+  interpolate,
+  Extrapolate,
+  FadeInUp,
+  Easing,
+  LinearTransition,
+} from 'react-native-reanimated';
+import {
+  Gesture,
+  GestureDetector,
+} from 'react-native-gesture-handler';
+import SafeBlurView from '@/components/ui/SafeBlurView';
+import { LevelBadge } from '@/components/gamification/LevelBadge';
+import { XPBar } from '@/components/gamification/XPBar';
+import { StreakChip } from '@/components/gamification/StreakChip';
+import { Leaderboard } from '@/components/gamification/Leaderboard';
+import { AchievementBadge } from '@/components/gamification/AchievementBadge';
+import {
+  defaultMstUser,
+  defaultAchievements,
+  defaultLeaderboard as demoLeaderboard,
+  mapBadgesToAchievements,
+  mapNextAchievementsToAchievements,
+  type UserStats,
+  type LeaderRow,
+  type Achievement,
+} from '@/lib/gamification';
+import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import SignOutModal from '@/components/ui/SignOutModal';
+import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
+import NotificationModal from '@/components/notifications/NotificationModal';
+import Toast from '@/components/ui/Toast';
+import FloatingMenu from '@/components/ui/FloatingMenu';
+import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
+import { Audio } from 'expo-av';
 
-const { width: SW } = Dimensions.get('window');
+const { width: SCREEN_W } = Dimensions.get('window');
 
-// ─── Design tokens (matches lovable style) ─────────────────────────────────────
-const BG = ['#080E1A', '#0D1728', '#111F35'] as const;
-const SSM_ACCENT = '#8B5CF6'; // Purple — brand for soft services
-const SSM_TEAL   = '#06B6D4';
-const SSM_GREEN  = '#10B981';
-const SSM_AMBER  = '#F59E0B';
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
-type Tab = 'overview' | 'stock' | 'checklist' | 'tickets' | 'profile';
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Ticket {
   id: string;
   ticket_number: string;
   title: string;
+  description: string;
   status: string;
   priority: string;
   created_at: string;
   assigned_to?: string | null;
-  assignee?: { full_name: string } | null;
+  raised_by?: string | null;
+  assignee?: {
+    full_name: string;
+    email: string;
+    user_photo_url?: string | null;
+  } | null;
+  creator?: { full_name: string } | null;
+  photo_before_url?: string;
+  sla_due_at?: string;
 }
 
-interface StockItem {
-  id: string;
-  name: string;
-  quantity: number;
-  min_threshold: number | null;
-  category: string | null;
-  unit: string | null;
+type Tab = 'dashboard' | 'daily' | 'profile';
+
+interface Props {
+  propertyId: string;
 }
 
-interface SopTemplate {
-  id: string;
-  name: string;
-  is_active: boolean;
+type MstDashboardQueryData = {
+  property: { name: string } | null;
+  tickets: Ticket[];
+  isCheckedIn: boolean;
+  checklistStats?: { completed: number; total: number };
+};
+
+const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'month', label: 'This Month' },
+  { key: 'all_time', label: 'All Time' },
+];
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function TimeBlock({ val }: { val: number }) {
+  return (
+    <View style={styles.timeBlock}>
+      <Text style={styles.timeBlockText}>{String(val).padStart(2, '0')}</Text>
+    </View>
+  );
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
-function KPICard({ value, label, color, icon, delay = 0 }: {
-  value: string | number; label: string; color: string;
-  icon: keyof typeof Ionicons.glyphMap; delay?: number;
+function ProfileStat({
+  icon,
+  value,
+  label,
+  tint,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+  label: string;
+  tint: string;
 }) {
   return (
-    <Animated.View  style={[sKPI.card, { borderColor: `${color}22` }]}>
-      <LinearGradient colors={[`${color}1A`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-      <View style={[sKPI.iconWrap, { backgroundColor: `${color}1A` }]}>
-        <Ionicons name={icon} size={18} color={color} />
+    <View style={styles.profileStat}>
+      <View style={[styles.profileStatIcon, { backgroundColor: tint + '30' }]}>
+        <Ionicons name={icon} size={16} color={tint} />
       </View>
-      <Text style={sKPI.value}>{value}</Text>
-      <Text style={sKPI.label}>{label}</Text>
-    </Animated.View>
+      <Text style={styles.profileStatValue}>{value}</Text>
+      <Text style={styles.profileStatLabel}>{label}</Text>
+    </View>
   );
 }
 
-const sKPI = StyleSheet.create({
-  card: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1, overflow: 'hidden', gap: 6 },
-  iconWrap: { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  value: { color: '#FFF', fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
-  label: { color: 'rgba(255,255,255,0.45)', fontSize: 11 },
-});
+// ─── Ticket Stack (swipeable) ────────────────────────────────────────────────
 
-function StockRow({ item, index }: { item: StockItem; index: number }) {
-  const isOut  = item.quantity <= 0;
-  const isLow  = !isOut && item.quantity <= (item.min_threshold ?? 10);
-  const color  = isOut ? '#EF4444' : isLow ? '#F59E0B' : '#10B981';
-  const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
+const CARD_H = 210;
+const PEEK_OFFSET = 10;
+const MAX_STACK = 4;
+
+interface TicketStackProps {
+  tickets: Ticket[];
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}
+
+function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: TicketStackProps) {
+  const [order, setOrder] = useState(initialTickets);
+
+  useEffect(() => {
+    setOrder(initialTickets);
+  }, [initialTickets]);
+
+  const sendToBack = useCallback(() => {
+    setOrder((prev) => {
+      if (prev.length < 2) return prev;
+      const [first, ...rest] = prev;
+      return [...rest, first];
+    });
+  }, []);
+
+  const visible = order.slice(0, MAX_STACK);
+  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
 
   return (
-    <Animated.View  style={sStock.row}>
-      <LinearGradient colors={['rgba(255,255,255,0.05)', 'transparent']} style={StyleSheet.absoluteFillObject} />
-      <View style={[sStock.dot, { backgroundColor: color }]} />
-      <View style={sStock.mid}>
-        <Text style={sStock.name} numberOfLines={1}>{item.name}</Text>
-        <Text style={sStock.meta}>{item.category ?? 'Uncategorized'}</Text>
-      </View>
-      <View style={sStock.right}>
-        <Text style={sStock.qty}>{item.quantity}{item.unit ? ` ${item.unit}` : ''}</Text>
-        <View style={[sStock.badge, { backgroundColor: `${color}18` }]}>
-          <Text style={[sStock.badgeText, { color }]}>{status}</Text>
-        </View>
-      </View>
-    </Animated.View>
+    <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
+      {visible.map((t, i) => (
+        <StackCard
+          key={t.id}
+          ticket={t}
+          index={i}
+          total={MAX_STACK}
+          onSwipeComplete={sendToBack}
+          propertyName={propertyName}
+          onViewTicket={onViewTicket}
+        />
+      ))}
+    </View>
   );
 }
 
-const sStock = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', padding: 12, gap: 10, marginBottom: 8, overflow: 'hidden' },
-  dot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
-  mid: { flex: 1 },
-  name: { color: '#FFF', fontSize: 13, fontWeight: '500' },
-  meta: { color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 2 },
-  right: { alignItems: 'flex-end', gap: 4 },
-  qty: { color: '#FFF', fontSize: 13, fontWeight: '700' },
-  badge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-});
+const StackCard = memo(function StackCard({
+  ticket, index, total, onSwipeComplete, propertyName, onViewTicket
+}: {
+  ticket: Ticket;
+  index: number;
+  total: number;
+  onSwipeComplete: () => void;
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}) {
+  const isTop = index === 0;
 
-function TicketRow({ ticket, index, onPress }: { ticket: Ticket; index: number; onPress: () => void }) {
-  const pc: Record<string, string> = { critical: '#EF4444', high: '#F59E0B', medium: '#3B82F6', low: '#10B981' };
-  const color = pc[ticket.priority?.toLowerCase()] ?? '#6B7280';
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const rotate = useSharedValue(0);
+
+  useEffect(() => {
+    if (!isTop) {
+      // When card is sent to the back, smoothly reset its internal swipe state
+      // after a tiny delay so it's hidden while resetting
+      const timeout = setTimeout(() => {
+        translateX.value = 0;
+        translateY.value = 0;
+        rotate.value = 0;
+      }, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTop]);
+
+  const pan = Gesture.Pan()
+    .minDistance(8)
+    .onUpdate((e) => {
+      if (!isTop) return;
+      translateX.value = e.translationX;
+      translateY.value = e.translationY * 0.3;
+      rotate.value = interpolate(e.translationX, [-SCREEN_W, 0, SCREEN_W], [-12, 0, 12], Extrapolate.CLAMP);
+    })
+    .onEnd((e) => {
+      if (!isTop) return;
+      const shouldDismiss = Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 600;
+      if (shouldDismiss) {
+        const dest = e.translationX > 0 ? SCREEN_W * 1.4 : -SCREEN_W * 1.4;
+        translateX.value = withTiming(dest, { duration: 200 }, () => {
+          runOnJS(onSwipeComplete)();
+        });
+        translateY.value = withTiming(e.translationY * 0.5, { duration: 200 });
+      } else {
+        translateX.value = withSpring(0, { damping: 18, stiffness: 130 });
+        translateY.value = withSpring(0, { damping: 18, stiffness: 130 });
+        rotate.value = withSpring(0, { damping: 18, stiffness: 130 });
+      }
+    });
+  const maxOffset = (total - 1) * 16;
+  const yOffset = maxOffset - (index * 16);
+  const scale = 1 - index * 0.05;
+  const bgOpacity = 1 - index * 0.15;
+  const zIndex = total - index;
+
+  const animStyle = useAnimatedStyle(() => {
+    return {
+      top: withSpring(yOffset, { damping: 18, stiffness: 130 }),
+      transform: [{ scale: withSpring(scale, { damping: 18, stiffness: 130 }) }],
+      opacity: withSpring(bgOpacity, { damping: 18, stiffness: 130 }),
+    };
+  }, [yOffset, scale, bgOpacity]);
+
+  const panStyle = useAnimatedStyle(() => {
+    if (!isTop) return { transform: [] };
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { rotate: `${rotate.value}deg` },
+      ],
+    };
+  });
 
   return (
-    <Animated.View >
-      <TouchableOpacity style={sTkt.row} onPress={onPress} activeOpacity={0.82}>
-        <LinearGradient colors={['rgba(255,255,255,0.05)', 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <View style={[sTkt.prio, { backgroundColor: color }]} />
-        <View style={sTkt.mid}>
-          <Text style={sTkt.num}>{ticket.ticket_number}</Text>
-          <Text style={sTkt.title} numberOfLines={1}>{ticket.title}</Text>
-        </View>
-        <View style={sTkt.right}>
-          <View style={[sTkt.statusBadge, { backgroundColor: 'rgba(139,92,246,0.15)' }]}>
-            <Text style={sTkt.statusText}>{ticket.status.replace(/_/g, ' ').toUpperCase()}</Text>
+    <Animated.View
+      style={[
+        styles.tcStackSlot,
+        animStyle,
+        { zIndex },
+      ]}
+      pointerEvents={isTop ? 'auto' : 'none'}
+    >
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[{ flex: 1 }, panStyle]}>
+          <TicketCard ticket={ticket} propertyName={propertyName} onView={() => onViewTicket?.(ticket)} />
+        </Animated.View>
+      </GestureDetector>
+    </Animated.View>
+  );
+});
+
+// ─── Gemini animated gradient border wrapper ───────────────────────────────
+
+const GEMINI_COLORS: readonly [string, string, ...string[]] = [
+  '#3B82F6', '#06B6D4', '#0EA5E9', '#2DD4BF', '#3B82F6',
+];
+
+function GeminiCardBorder({ children }: { children: React.ReactNode }) {
+  const angle = useSharedValue(0);
+
+  useEffect(() => {
+    angle.value = withRepeat(
+      withTiming(360, { duration: 3000, easing: Easing.linear }),
+      -1,
+      false
+    );
+  }, []);
+
+  const spinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${angle.value}deg` }],
+  }));
+
+  return (
+    <View style={geminiStyles.outer}>
+      {/* Spinning gradient — acts as the border */}
+      <Animated.View style={[geminiStyles.gradientSpin, spinStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={GEMINI_COLORS}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </Animated.View>
+      {/* Inner card inset to expose 1.5px border */}
+      <View style={geminiStyles.inner}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+const geminiStyles = StyleSheet.create({
+  outer: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    flex: 1,
+    padding: 1.5,           // this 1.5px gap shows the spinning gradient
+    position: 'relative',
+  },
+  gradientSpin: {
+    position: 'absolute',
+    width: '250%',
+    height: '250%',
+    top: '-75%',
+    left: '-75%',
+  },
+  inner: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(47, 47, 48, 0.90)', // Glassy #2f2f30
+  },
+});
+
+interface TicketCardProps {
+  ticket: Ticket;
+  propertyName?: string;
+  onView?: () => void;
+}
+
+const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView }: TicketCardProps) {
+  // ── Priority badge ──
+  const getPriorityStyle = () => {
+    switch (ticket.priority?.toLowerCase()) {
+      case 'urgent':
+      case 'critical':
+        return { bg: 'rgba(239,68,68,0.25)', text: '#FCA5A5', label: 'URGENT' };
+      case 'high':
+        return { bg: 'rgba(20,184,166,0.25)', text: '#2DD4BF', label: 'HIGH' };
+      case 'medium':
+        return { bg: 'rgba(251,191,36,0.20)', text: '#FCD34D', label: 'MEDIUM' };
+      case 'low':
+        return { bg: 'rgba(99,102,241,0.20)', text: '#A5B4FC', label: 'LOW' };
+      default:
+        return { bg: 'rgba(148,163,184,0.15)', text: '#94A3B8', label: (ticket.priority || 'NORMAL').toUpperCase() };
+    }
+  };
+
+  const pStyle = getPriorityStyle();
+
+  const statusLabel = ticket.status
+    ? ticket.status.replace(/_/g, ' ').toUpperCase()
+    : 'OPEN';
+
+  // Running time (time elapsed since creation)
+  const runningMs = ticket.created_at ? Date.now() - new Date(ticket.created_at).getTime() : 0;
+  const runDays = Math.floor(runningMs / 86400000);
+  const runHrs = Math.floor((runningMs % 86400000) / 3600000);
+  const runMins = Math.floor((runningMs % 3600000) / 60000);
+  const runningStr = runningMs > 0 ? `${runDays}d ${runHrs}h ${runMins}m` : null;
+
+  const formattedDate = ticket.created_at
+    ? new Date(ticket.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
+
+  const handleShare = async () => {
+    try {
+      const msg = `🎫 Ticket: ${ticket.title}\n📋 ${ticket.ticket_number}\n📊 Priority: ${ticket.priority} | Status: ${statusLabel}\n👤 Raised By: ${ticket.creator?.full_name || 'Unknown'}`;
+      await Share.share({
+        message: msg,
+        title: `Ticket ${ticket.ticket_number}`,
+      });
+    } catch (e) {
+      console.warn('Share failed', e);
+    }
+  };
+
+  return (
+    <View style={[styles.tcCard, { 
+      backgroundColor: '#121212', 
+      borderRadius: 20,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.25)'
+    }]}>
+        {/* ── Row 1: Thumb | Title + Badges | Action icons ── */}
+        <View style={styles.tcRow1}>
+          {/* Thumbnail */}
+          <View style={styles.tcThumbBox}>
+            {ticket.photo_before_url ? (
+              <Image source={{ uri: ticket.photo_before_url }} style={styles.tcThumb} resizeMode="cover" />
+            ) : (
+              <View style={styles.tcThumbFallback}>
+                <Ionicons name="image" size={24} color="rgba(255,255,255,0.25)" />
+              </View>
+            )}
+          </View>
+
+          {/* Title + badges */}
+          <View style={styles.tcMiddle}>
+            <Text style={styles.tcTitle} numberOfLines={2}>{ticket.title}</Text>
+            <View style={styles.tcBadgeRow}>
+              <View style={[styles.tcBadge, { backgroundColor: pStyle.bg }]}>
+                <Text style={[styles.tcBadgeText, { color: pStyle.text }]}>{pStyle.label}</Text>
+              </View>
+              <View style={[styles.tcBadge, styles.tcBadgeDark]}>
+                <Text style={styles.tcBadgeDarkText}>{statusLabel}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action icons — Share */}
+          <View style={styles.tcIconCol}>
+            <TouchableOpacity style={styles.tcIconBtn} onPress={handleShare} activeOpacity={0.7}>
+              <Ionicons name="share-outline" size={15} color="rgba(255,255,255,0.70)" />
+            </TouchableOpacity>
           </View>
         </View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-}
 
-const sTkt = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', padding: 12, gap: 10, marginBottom: 8, overflow: 'hidden' },
-  prio: { width: 4, height: '100%', borderRadius: 2, minHeight: 36, flexShrink: 0 },
-  mid: { flex: 1 },
-  num: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  title: { color: '#FFF', fontSize: 13, fontWeight: '500', marginTop: 2 },
-  right: { alignItems: 'flex-end' },
-  statusBadge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3 },
-  statusText: { color: SSM_ACCENT, fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
-});
+        {/* ── Row 2: Raised By ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Raised By:</Text>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.creator?.full_name || 'Unknown'}
+          </Text>
+        </View>
 
-// ─── Tab bar button ────────────────────────────────────────────────────────────
-function TabBtn({ icon, label, active, onPress, badge }: {
-  icon: keyof typeof Ionicons.glyphMap; label: string;
-  active: boolean; onPress: () => void; badge?: number;
-}) {
-  return (
-    <TouchableOpacity style={sTab.btn} onPress={onPress} activeOpacity={0.75}>
-      <View style={{ position: 'relative' }}>
-        <Ionicons name={icon} size={22} color={active ? SSM_ACCENT : 'rgba(255,255,255,0.40)'} />
-        {badge !== undefined && badge > 0 && (
-          <View style={sTab.badge}><Text style={sTab.badgeText}>{badge > 9 ? '9+' : badge}</Text></View>
-        )}
+        {/* ── Row 3: Serving (Assigned To) ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Serving:</Text>
+          <View style={styles.tcMhPill}>
+            <Text style={styles.tcMhPillText}>MH</Text>
+          </View>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.assignee?.full_name || 'Unassigned'}
+          </Text>
+        </View>
+
+        {/* ── Divider ── */}
+        <View style={styles.tcDivider} />
+
+        {/* ── Footer: Ticket ID / Date + Timer + View Btn ── */}
+        <View style={styles.tcFooter}>
+          <Text style={styles.tcFooterTkt}>{ticket.ticket_number} • {formattedDate}</Text>
+          <View style={styles.tcSlaRow}>
+            <Ionicons name="time-outline" size={12} color="#F87171" />
+            <Text style={[styles.tcSlaText, { color: '#FCA5A5' }]}>
+              {runningStr ? runningStr : '0m'}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity style={styles.tcViewBtn} onPress={onView} activeOpacity={0.8}>
+            <Text style={styles.tcViewBtnText}>View</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      <Text style={[sTab.label, active && sTab.labelActive]}>{label}</Text>
-      {active && <View style={sTab.indicator} />}
-    </TouchableOpacity>
   );
-}
-
-const sTab = StyleSheet.create({
-  btn: { flex: 1, alignItems: 'center', paddingVertical: 10, gap: 3 },
-  label: { fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: '600' },
-  labelActive: { color: SSM_ACCENT },
-  indicator: { position: 'absolute', bottom: 0, height: 2, width: 24, backgroundColor: SSM_ACCENT, borderRadius: 1 },
-  badge: { position: 'absolute', top: -4, right: -6, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
-  badgeText: { color: '#FFF', fontSize: 9, fontWeight: '900' },
 });
 
-// ─── Main Dashboard ────────────────────────────────────────────────────────────
-export default function LovableSoftServiceManagerDashboard({ propertyId }: { propertyId: string }) {
+// ─── CountdownTimer (extracted to prevent full dashboard re-render every second) ──
+// Owns its own state so parent doesn't re-render on every tick.
+
+const CountdownTimer = memo(function CountdownTimer() {
+  const [h, setH] = useState(0);
+  const [m, setM] = useState(0);
+  const [s, setS] = useState(0);
+
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const ms = Math.max(0, end.getTime() - now.getTime());
+      setH(Math.floor(ms / 3600000));
+      setM(Math.floor((ms % 3600000) / 60000));
+      setS(Math.floor((ms % 60000) / 1000));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.countdownBlocks}>
+      <TimeBlock val={h} />
+      <Text style={styles.countdownColon}>:</Text>
+      <TimeBlock val={m} />
+      <Text style={styles.countdownColon}>:</Text>
+      <TimeBlock val={s} />
+    </View>
+  );
+});
+
+// ─── Main Dashboard ──────────────────────────────────────────────────────────
+
+type TimeFilter = 'today' | 'month' | 'all_time';
+type ScopeFilter = 'property' | 'my_tasks';
+
+function getCountDateRange(timeFilter: TimeFilter) {
+  if (timeFilter === 'all_time') return {};
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (timeFilter === 'today') {
+    const d = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return { dateFrom: `${d}T00:00:00+05:30`, dateTo: `${d}T23:59:59+05:30` };
+  }
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const d = `${monthStart.getFullYear()}-${pad(monthStart.getMonth() + 1)}-${pad(monthStart.getDate())}`;
+  return { dateFrom: `${d}T00:00:00+05:30` };
+}
+
+async function fetchTicketCountBatch(
+  propertyId: string,
+  scopeFilter: ScopeFilter,
+  timeFilter: TimeFilter,
+  userId?: string,
+) {
+  const dateRange = getCountDateRange(timeFilter);
+  const baseParams: Record<string, string> = {
+    propertyId,
+    limit: '1',
+    ...dateRange,
+  };
+  if (scopeFilter === 'my_tasks' && userId) {
+    baseParams.userId = userId;
+  }
+
+  const OPEN_STATUSES = 'open,waitlist,assigned,in_progress';
+  const CLOSED_STATUSES = 'closed,completed,resolved,pending_validation';
+
+  const [totalRes, openRes, closedRes] = await Promise.all([
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: OPEN_STATUSES }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: CLOSED_STATUSES }),
+  ]);
+
+  const getTotal = (res: any) =>
+    typeof (res?.data as any)?.total === 'number'
+      ? (res?.data as any).total
+      : ((res?.data as any)?.tickets?.length ?? 0);
+
+  return {
+    total: getTotal(totalRes),
+    open: getTotal(openRes),
+    closed: getTotal(closedRes),
+  };
+}
+
+export default function LovableSoftServiceManagerDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
   const { user, signOut, membership } = useAuth();
-  const { weather } = useWeather();
   const router = useRouter();
 
-  // ── State ──
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isTogglingShift, setIsTogglingShift] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
+  const [isCheckingInOut, setIsCheckingInOut] = useState(false);
 
-  // ─── NEW: Unified React Query Data (Source of Truth) ───
-  const { data: dashboardData, refetch, forceRefresh } = useServerQuery<{
-    propertyName: string;
+  // ── Time & scope filters (slice local cache — no extra network requests) ──
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all_time');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('my_tasks');
+
+
+
+  // Modals
+  const [showCreate, setShowCreate] = useState(false);
+  const [showSignOut, setShowSignOut] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [showPermissionOnboarding, setShowPermissionOnboarding] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [toastConfig, setToastConfig] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
+
+  // Gamification
+  const { leaderboard: gamifyLb, myStats } = useGamification(propertyId);
+
+  // ── Server Query ──
+  const {
+    data,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useServerQuery<{
+    property: { name: string } | null;
     tickets: Ticket[];
-    stockItems: StockItem[];
-    sopTotal: number;
-    sopDone: number;
     isCheckedIn: boolean;
-    ppm: { total: number; done: number; pending: number; overdue: number; postponed: number };
+    checklistStats?: { completed: number; total: number };
   }>(
-    queryKeys.property.softService(propertyId),
+    [...queryKeys.property.mstDashboardLovable(propertyId), scopeFilter, user?.id || ''],
     async () => {
-      const [propRes, ticketRes, stockRes, sopRes, sopDoneRes, shiftRes, ppmRes] = await Promise.allSettled([
-        serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], limit: 1, maybeSingle: true }),
-        serverApi.query({ table: 'tickets', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }], orders: [{ column: 'created_at', ascending: false }] }),
-        serverApi.query({ table: 'stock_items', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }] }),
-        serverApi.query({ table: 'sop_templates', action: 'select', select: 'id', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'is_active', value: true }] }),
-        serverApi.query({ table: 'sop_completions', action: 'select', select: 'id', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'completion_date', value: new Date().toISOString().split('T')[0] }] }),
-        serverApi.query({ table: 'resolver_stats', action: 'select', select: 'is_checked_in', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'user_id', value: user?.id }], maybeSingle: true }),
-        ppmService.fetchStats(propertyId).catch(() => ({ success: false, data: null })),
+      const [propRes, ticketRes, shiftRes, checklistRes] = await Promise.all([
+        serverApi.query<{ name: string }[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: propertyId }],
+          limit: 1,
+        }),
+        serverApi.get<{ tickets: Ticket[]; total: number }>('/api/tickets', {
+          propertyId,
+          limit: '100',
+          ...(scopeFilter === 'my_tasks' && user?.id ? { userId: user.id } : {}),
+        }),
+        serverApi.query<{ is_checked_in: boolean }[]>({
+          table: 'resolver_stats',
+          action: 'select',
+          select: 'is_checked_in',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
+          ],
+          limit: 1,
+        }),
+        serverApi.get<{ templates: any[] }>('/api/checklist', { propertyId }),
       ]);
 
-      const propData = (propRes as any)?.value?.data ?? (propRes as any)?.data;
-      const ticketData = ((ticketRes as any)?.value?.data || []) as Ticket[];
-      const stockData = ((stockRes as any)?.value?.data || []) as StockItem[];
-      const sopTotal = ((sopRes as any)?.value?.data || []).length;
-      const sopDone = ((sopDoneRes as any)?.value?.data || []).filter((s: any) => s.status === 'completed').length;
-      const shiftData = (shiftRes as any)?.value?.data ?? (shiftRes as any)?.data;
-      const ppmResult = ppmRes as PromiseSettledResult<any>;
-      const ppmValue = ppmResult.status === 'fulfilled' ? ppmResult.value : null;
-      const ppmData = ppmValue?.success ? ppmValue.data : null;
+      let totalChecklists = 0;
+      let completedChecklists = 0;
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      if (checklistRes.data?.templates) {
+        checklistRes.data.templates.forEach((t) => {
+          if (t.frequency?.toLowerCase() === 'daily') {
+            totalChecklists++;
+            const todaysCompletion = t.completions?.find((c: any) => c.completion_date === todayStr || c.created_at?.startsWith(todayStr));
+            if (todaysCompletion && todaysCompletion.status === 'completed') {
+              completedChecklists++;
+            }
+          }
+        });
+      }
 
       return {
-        propertyName: propData?.name ?? '',
-        tickets: ticketData,
-        stockItems: stockData,
-        sopTotal,
-        sopDone,
-        isCheckedIn: !!(shiftData as any)?.is_checked_in,
-        ppm: {
-          total: ppmData?.total ?? 0,
-          done: ppmData?.done ?? 0,
-          pending: ppmData?.pending ?? 0,
-          overdue: ppmData?.overdue ?? 0,
-          postponed: ppmData?.postponed ?? 0,
-        },
+        property: propRes.data?.[0] ?? null,
+        tickets: (ticketRes.data as any)?.tickets ?? ticketRes.data ?? [],
+        isCheckedIn: shiftRes.data?.[0]?.is_checked_in ?? false,
+        checklistStats: { completed: completedChecklists, total: totalChecklists },
       };
     },
     { staleTime: 1000 * 60 * 5 }
   );
 
-  // Extract data from React Query cache
-  const propertyName = dashboardData?.propertyName ?? '';
-  const tickets = dashboardData?.tickets ?? [];
-  const stockItems = dashboardData?.stockItems ?? [];
-  const sopTotal = dashboardData?.sopTotal ?? 0;
-  const sopDone = dashboardData?.sopDone ?? 0;
-  const isCheckedIn = dashboardData?.isCheckedIn ?? false;
-  const ppmTotal = dashboardData?.ppm.total ?? 0;
-  const ppmDone = dashboardData?.ppm.done ?? 0;
-  const ppmPending = dashboardData?.ppm.pending ?? 0;
-  const ppmOverdue = dashboardData?.ppm.overdue ?? 0;
-  const ppmPostponed = dashboardData?.ppm.postponed ?? 0;
 
-  // Modals
-  const [showSignOut, setShowSignOut]           = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showPermOnboard, setShowPermOnboard]   = useState(false);
 
-  // ── Computed ──
-  const fullName = user?.user_metadata?.full_name ?? 'Manager';
-  const initials = fullName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
-  const orgId    = membership?.org_id ?? '';
+  const hasValidDashboardData =
+    !!data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { tickets?: unknown }).tickets);
 
-  const stockStats = useMemo(() => {
-    const total    = stockItems.length;
-    const lowStock = stockItems.filter(s => s.quantity > 0 && s.quantity <= (s.min_threshold ?? 10)).length;
-    const outStock = stockItems.filter(s => s.quantity <= 0).length;
-    return { total, lowStock, outStock };
-  }, [stockItems]);
+  const property = hasValidDashboardData ? data.property ?? null : null;
+  const tickets = hasValidDashboardData ? data.tickets : [];
+  const isCheckedIn = hasValidDashboardData ? !!data.isCheckedIn : false;
+  const leaderboardData = Array.isArray(gamifyLb) ? gamifyLb : [];
 
+  // Filtered tickets — sliced locally from cached/server data, no extra network call
   const filteredTickets = useMemo(() => {
     let result = [...tickets];
     if (scopeFilter === 'my_tasks') {
-      result = result.filter(t => t.assigned_to === user?.id);
+      result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
+    }
+    if (timeFilter === 'today') {
+      const today = new Date().toISOString().split('T')[0];
+      result = result.filter(t => t.created_at?.startsWith(today));
+    } else if (timeFilter === 'month') {
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+      result = result.filter(t => new Date(t.created_at ?? 0) >= monthStart);
     }
     return result;
-  }, [tickets, scopeFilter, user?.id]);
+  }, [tickets, timeFilter, scopeFilter, user?.id]);
 
-  const ticketStats = useMemo(() => {
-    const open   = filteredTickets.filter(t => ['open', 'in_progress', 'assigned', 'client_raised'].includes(t.status)).length;
-    const mine   = filteredTickets.filter(t => t.assigned_to === user?.id).length;
-    return { total: filteredTickets.length, open, mine };
-  }, [filteredTickets, user?.id]);
+  // Exact ticket counts — not capped by the 100-row list limit
+  const { data: exactTicketCounts } = useQuery({
+    queryKey: ['mst-dashboard-ticket-counts', propertyId, scopeFilter, timeFilter, user?.id || ''],
+    queryFn: () => fetchTicketCountBatch(propertyId, scopeFilter, timeFilter, user?.id),
+    enabled: !!propertyId,
+    staleTime: 1000 * 60 * 5,
+  });
 
+  const shuffledTickets = useMemo(() => {
+    // Only show open tickets on shuffled cards
+    const openTickets = filteredTickets.filter(t => 
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
+    );
+    const next = [...openTickets];
+    for (let i = next.length - 1; i > 0; i -= 1) {
+      const swapIndex = Math.floor(Math.random() * (i + 1));
+      [next[i], next[swapIndex]] = [next[swapIndex], next[i]];
+    }
+    return next;
+  }, [filteredTickets]);
 
   useEffect(() => {
     hasRequestedPermissions().then(requested => {
-      if (!requested) setShowPermOnboard(true);
+      if (!requested) setShowPermissionOnboarding(true);
     });
   }, []);
 
-  const onRefresh = async () => { 
-    setIsRefreshing(true); 
-    await forceRefresh(); 
-    setIsRefreshing(false); 
+  useEffect(() => {
+    if (propertyId && !hasValidDashboardData && !isFetching) {
+      refetch();
+    }
+  }, [propertyId, hasValidDashboardData, isFetching, refetch]);
+
+  const onRefresh = () => {
+    refetch();
+    queryClient.invalidateQueries({ queryKey: ['mst-dashboard-ticket-counts'] });
   };
 
-  const toggleShift = async () => {
-    if (!user?.id || isTogglingShift) return;
-    setIsTogglingShift(true);
+  // ── Shift toggle ──
+  const toggleShift = useCallback(async () => {
+    if (!user?.id || !propertyId || isCheckingInOut) return;
+    setIsCheckingInOut(true);
     const newStatus = !isCheckedIn;
+
+    // Optimistically update React Query cache
+    queryClient.setQueryData(
+      queryKeys.property.mstDashboardLovable(propertyId),
+      (old: MstDashboardQueryData | undefined) =>
+        old ? { ...old, isCheckedIn: newStatus } : old
+    );
+
     try {
       // Use the dedicated API endpoint like Staff dashboard does
       await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
         is_checked_in: newStatus
       });
+
+      try {
+        const { sound } = await Audio.Sound.createAsync({
+          uri: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'
+        });
+        await sound.playAsync();
+      } catch (err) {
+        console.warn('Audio play failed:', err);
+      }
+
+      setToastConfig({
+        visible: true,
+        message: `You are now ${newStatus ? 'ON DUTY' : 'OFF DUTY'}.`,
+        type: 'success'
+      });
+    } catch (error: any) {
+      // Revert on error
       queryClient.setQueryData(
-        queryKeys.property.softService(propertyId),
-        (old: any) => old ? { ...old, isCheckedIn: newStatus } : old
+        queryKeys.property.mstDashboardLovable(propertyId),
+        (old: MstDashboardQueryData | undefined) =>
+          old ? { ...old, isCheckedIn: !newStatus } : old
       );
-    } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Failed to update shift');
+      setToastConfig({
+        visible: true,
+        message: error.message || 'Failed to update shift',
+        type: 'error'
+      });
     } finally {
-      setIsTogglingShift(false);
+      setIsCheckingInOut(false);
     }
-  };
+  }, [isCheckedIn, propertyId, user?.id, isCheckingInOut]);
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────────
+  // ── Stats ──
+  // Use exact counts fetched with limit:1 so properties with >100 tickets still report the true totals.
+  const localStats = useMemo(() => {
+    const total = filteredTickets.length;
+    const open = filteredTickets.filter((t) =>
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
+    ).length;
+    const closed = filteredTickets.filter((t) =>
+      ['closed', 'completed', 'resolved', 'pending_validation'].includes(t.status?.toLowerCase())
+    ).length;
+    return { total, open, closed };
+  }, [filteredTickets]);
+  const stats = exactTicketCounts ?? localStats;
 
-  const renderOverview = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_ACCENT} />}
-    >
-      {/* Hero greeting */}
-      <Animated.View  style={sOv.hero}>
-        <SafeBlurView intensity={25} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <LinearGradient
-          colors={[`${SSM_ACCENT}22`, 'transparent']}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={sOv.heroLeft}>
-          <View style={sOv.avatar}>
-            <LinearGradient colors={[SSM_ACCENT, '#5B3FD6']} style={StyleSheet.absoluteFillObject} />
-            <Text style={sOv.avatarText}>{initials}</Text>
-          </View>
-          <View>
-            <Text style={sOv.greeting}>Hey, {fullName.split(' ')[0]} 👋</Text>
-            <Text style={sOv.sub}>{propertyName || 'Soft Service Manager'}</Text>
+  // ── Gamification user ──
+  const mstUser: UserStats = useMemo(() => {
+    if (!myStats) return defaultMstUser;
+    return {
+      name: user?.user_metadata?.full_name || 'MST User',
+      initials: (user?.user_metadata?.full_name || 'U')
+        .split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2),
+      level: 1 + Math.floor((myStats.all_time?.total_points ?? 0) / 1000),
+      levelName: 'Field Master',
+      xp: myStats.today?.total_points ?? 0,
+      xpForNext: 500,
+      totalXp: myStats.all_time?.total_points ?? 0,
+      streak: myStats.streak?.current ?? 0,
+      weeklyRank: myStats.today?.rank ?? 1,
+      weeklyTotal: myStats.today?.total_in_rank ?? 1,
+    };
+  }, [myStats, user]);
+
+  const achievements: Achievement[] = useMemo(() => {
+    if (!myStats) return defaultAchievements;
+    return [
+      ...mapBadgesToAchievements(myStats.badges),
+      ...mapNextAchievementsToAchievements(myStats.next_achievements),
+    ];
+  }, [myStats]);
+
+  // ── Leaderboard rows ──
+  const leaderboardRows: LeaderRow[] = useMemo(() => {
+    if (leaderboardData.length === 0) return demoLeaderboard;
+    return leaderboardData.map((entry, i) => ({
+      rank: i + 1,
+      name: entry.name || 'Staff',
+      initials: (entry.name || 'S').charAt(0).toUpperCase(),
+      property: property?.name || 'Property',
+      xp: entry.score ?? 0,
+      resolved: entry.tickets_resolved ?? 0,
+      streak: entry.streak_days ?? 0,
+      isMe: entry.user_id === user?.id,
+      user_id: entry.user_id,
+    }));
+  }, [leaderboardData, property, user?.id]);
+
+  const champion: LeaderRow | undefined = leaderboardRows[0];
+
+  // ── Tabs ──
+
+  const renderMyDashboard = () => (
+    <>
+      {/* Gamification strip */}
+      <Animated.View  style={styles.gamifyCard}>
+        <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
+        <View style={styles.gamifyInner}>
+          <LevelBadge level={mstUser.level} size="md" />
+          <View style={styles.gamifyMeta}>
+            <View style={styles.gamifyMetaTop}>
+              <Text style={styles.gamifyLevelName}>{mstUser.levelName}</Text>
+              <View style={styles.gamifyChips}>
+                <StreakChip streak={mstUser.streak} />
+                <View style={styles.rankBadge}>
+                  <Text style={styles.rankBadgeText}>#{mstUser.weeklyRank}</Text>
+                </View>
+              </View>
+            </View>
+            <View style={styles.gamifyXp}>
+              <XPBar xp={mstUser.xp} xpForNext={mstUser.xpForNext} />
+            </View>
           </View>
         </View>
-        {/* Duty toggle */}
-        <TouchableOpacity
-          style={[sOv.dutyBtn, { borderColor: isCheckedIn ? `${SSM_GREEN}55` : 'rgba(239,68,68,0.40)' }]}
-          onPress={toggleShift}
-          disabled={isTogglingShift}
-        >
-          {isTogglingShift
-            ? <ActivityIndicator size="small" color={isCheckedIn ? SSM_GREEN : '#EF4444'} />
-            : <>
-                <View style={[sOv.dutyDot, { backgroundColor: isCheckedIn ? SSM_GREEN : '#EF4444' }]} />
-                <Text style={[sOv.dutyText, { color: isCheckedIn ? SSM_GREEN : '#EF4444' }]}>
-                  {isCheckedIn ? 'ON DUTY' : 'OFF DUTY'}
-                </Text>
-              </>
-          }
-        </TouchableOpacity>
       </Animated.View>
 
-      {/* KPI Row */}
-      <Animated.View  style={sOv.kpiRow}>
-        <KPICard value={ticketStats.open}   label="Open Tickets" color="#3B82F6" icon="ticket-outline" delay={0} />
-        <KPICard value={stockStats.total}   label="Stock Items"  color={SSM_ACCENT}  icon="cube-outline"   delay={60} />
-        <KPICard value={`${sopTotal > 0 ? Math.round(sopDone / sopTotal * 100) : 100}%`} label="SOP Done" color={SSM_GREEN} icon="checkbox-outline" delay={120} />
-      </Animated.View>
-
-      {/* Stock alerts */}
-      {(stockStats.lowStock > 0 || stockStats.outStock > 0) && (
-        <Animated.View  style={sOv.alertCard}>
-          <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-          <View style={sOv.alertRow}>
-            <Ionicons name="warning-outline" size={16} color={SSM_AMBER} />
-            <Text style={sOv.alertTitle}>Stock Alerts</Text>
-          </View>
-          <View style={sOv.alertChips}>
-            {stockStats.lowStock > 0 && (
-              <View style={[sOv.chip, { backgroundColor: `${SSM_AMBER}18` }]}>
-                <Ionicons name="trending-down-outline" size={12} color={SSM_AMBER} />
-                <Text style={[sOv.chipText, { color: SSM_AMBER }]}>{stockStats.lowStock} Low</Text>
-              </View>
-            )}
-            {stockStats.outStock > 0 && (
-              <View style={[sOv.chip, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
-                <Ionicons name="close-circle-outline" size={12} color="#EF4444" />
-                <Text style={[sOv.chipText, { color: '#EF4444' }]}>{stockStats.outStock} Out</Text>
-              </View>
-            )}
-          </View>
-          <TouchableOpacity style={sOv.alertCta} onPress={() => setActiveTab('stock')}>
-            <Text style={sOv.alertCtaText}>View Stock →</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
-
-      {/* SOP / Checklist progress */}
-      <ChecklistProgressCard completed={sopDone} total={sopTotal} delay={200} onPress={() => setActiveTab('checklist')} />
-
-      {/* PPM progress */}
-      <PPMProgressCard
-        propertyId={propertyId}
-        organizationId={orgId}
-        done={ppmDone}
-        total={ppmTotal}
-        pending={ppmPending}
-        overdue={ppmOverdue}
-        postponed={ppmPostponed}
-        delay={240}
-        onPress={() => router.push(`/property/${propertyId}/ppm`)}
-      />
-
-      {/* PPM activity */}
-      <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={320} />
-
-      {/* Quick actions */}
-      <Animated.View >
-        <Text style={sOv.secTitle}>Quick Actions</Text>
-        <View style={sOv.actionsRow}>
-          {[
-            { label: 'Stock',      icon: 'cube-outline' as const,      tab: 'stock'     as Tab, color: SSM_ACCENT },
-            { label: 'Checklists', icon: 'checkbox-outline' as const,  tab: 'checklist' as Tab, color: SSM_GREEN },
-            { label: 'Tickets',    icon: 'ticket-outline' as const,     tab: 'tickets'   as Tab, color: '#3B82F6' },
-            { label: 'QR Scan',   icon: 'qr-code-outline' as const,    tab: null,                color: SSM_TEAL,
-              nav: () => router.push(`/property/${propertyId}/stock/scan` as any) },
-          ].map(({ label, icon, tab, color, nav }) => (
+      {/* Stats card matching Property Admin */}
+      <GlassTile label="Tickets" icon="ticket" delay={80} style={{ marginHorizontal: 0 }}>
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {/* Scope filter */}
+          <View style={styles.timeToggleRow}>
             <TouchableOpacity
-              key={label}
-              style={[sOv.actionBtn, { borderColor: `${color}33` }]}
-              onPress={() => tab ? setActiveTab(tab) : nav?.()}
-              activeOpacity={0.8}
+              style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('property')}
+              activeOpacity={0.7}
             >
-              <LinearGradient colors={[`${color}1A`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-              <Ionicons name={icon} size={22} color={color} />
-              <Text style={[sOv.actionLabel, { color }]}>{label}</Text>
+              <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('my_tasks')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Time filter */}
+          <View style={[styles.timeToggleRow, { marginBottom: 0 }]}>
+            {TICKET_TIME_FILTER_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
+                onPress={() => setTimeFilter(option.key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ alignItems: 'flex-start' }}>
+            <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.open} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.closed} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+          </View>
+        </View>
+      </GlassTile>
+
+      <View style={{ marginTop: 24 }}>
+        <View style={[styles.sectionHeader, { marginTop: 0 }]}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', letterSpacing: 1 }}>RECENT TICKETS</Text>
+          <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
+            <Text style={{ fontSize: 12, color: '#FFFFFF' }}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        {isLoading || isFetching ? (
+          <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+            <ActivityIndicator color="rgba(255,255,255,0.6)" />
+          </View>
+        ) : shuffledTickets.length > 0 ? (
+          <TicketStack
+            tickets={shuffledTickets.slice(0, 5)}
+            propertyName={property?.name}
+            onViewTicket={(t) => router.push({ pathname: '/property/[propertyId]/tickets/[id]', params: { propertyId, id: t.id } } as any)}
+          />
+        ) : (
+          <View style={styles.ticketStackEmpty}>
+            <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+          </View>
+        )}
+      </View>
+
+      <ChecklistProgressCard completed={data?.checklistStats?.completed ?? 0} total={data?.checklistStats?.total ?? 0} delay={280} />
+    </>
+  );
+
+  const renderDailyBoard = () => (
+    <>
+      <Animated.View >
+        <Text style={styles.heroTitle}>Daily Board</Text>
+      </Animated.View>
+
+      <Animated.View  style={styles.countdownCard}>
+        <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
+        <View style={styles.countdownInner}>
+          <View style={styles.countdownLabelRow}>
+            <Ionicons name="time" size={12} color="rgba(255,255,255,0.60)" />
+            <Text style={styles.countdownLabel}>Time left today</Text>
+          </View>
+          <CountdownTimer />
+          <Text style={styles.countdownHint}>Resolve more tickets to climb the board</Text>
+        </View>
+      </Animated.View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionHeaderTitle}>Today's Standings</Text>
+      </View>
+
+      <Leaderboard rows={leaderboardRows} />
+    </>
+  );
+
+  const renderProfile = () => {
+    const unlocked = achievements.filter((a) => a.unlocked);
+    const locked = achievements.filter((a) => !a.unlocked);
+    const myRow = leaderboardRows.find((r) => r.isMe) ?? leaderboardRows[0];
+
+    return (
+      <>
+        {/* Identity card */}
+        <Animated.View  style={styles.identityCard}>
+          <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <View style={styles.identityInner}>
+            <View style={styles.identityTop}>
+              <LinearGradient
+                colors={['#7C5CFA', '#5B3FD6']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.identityAvatar}
+              >
+                <Text style={styles.identityAvatarText}>{mstUser.initials}</Text>
+                <View style={styles.identityLevel}>
+                  <LevelBadge level={mstUser.level} size="sm" />
+                </View>
+              </LinearGradient>
+              <View style={styles.identityInfo}>
+                <Text style={styles.identityName}>{mstUser.name}</Text>
+                <Text style={styles.identityLevelName}>{mstUser.levelName}</Text>
+                <View style={styles.identityChips}>
+                  <StreakChip streak={mstUser.streak} />
+                  <View style={styles.rankBadge}>
+                    <Text style={styles.rankBadgeText}>Rank #{mstUser.weeklyRank}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            <View style={styles.identityXp}>
+              <XPBar xp={mstUser.xp} xpForNext={mstUser.xpForNext} />
+              <Text style={styles.identityXpHint}>
+                {mstUser.xpForNext - mstUser.xp} XP to level {mstUser.level + 1}
+              </Text>
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Lifetime stats */}
+        <View style={styles.profileStatsGrid}>
+          <ProfileStat icon="trophy" value={mstUser.totalXp.toLocaleString()} label="TOTAL XP" tint="#FBBF24" />
+          <ProfileStat icon="checkmark-circle" value={String(myRow?.resolved ?? 0)} label="RESOLVED" tint="#34D399" />
+          <ProfileStat icon="flag" value={`${unlocked.length}/${achievements.length}`} label="BADGES" tint="#60A5FA" />
+        </View>
+
+        {/* Achievements */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionHeaderTitle}>Achievements</Text>
+          <Text style={styles.sectionHeaderHint}>
+            {unlocked.length} of {achievements.length} unlocked
+          </Text>
+        </View>
+        <View style={styles.achievementsGrid}>
+          {[...unlocked, ...locked].map((a, i) => (
+            <AchievementBadge key={a.id} achievement={a} delay={i * 0.05} />
           ))}
         </View>
-      </Animated.View>
-    </ScrollView>
-  );
-
-  const renderStock = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_ACCENT} />}
-    >
-      {/* Header row */}
-      <Animated.View  style={sSection.header}>
-        <Text style={sSection.title}>Stock / Inventory</Text>
-        <TouchableOpacity
-          style={sSection.scanBtn}
-          onPress={() => router.push(`/property/${propertyId}/stock/scan` as any)}
-        >
-          <Ionicons name="qr-code-outline" size={16} color={SSM_ACCENT} />
-          <Text style={sSection.scanText}>Scan</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* Summary chips */}
-      <Animated.View  style={sSection.chips}>
-        <View style={sSection.chip}><Text style={sSection.chipNum}>{stockStats.total}</Text><Text style={sSection.chipLabel}>Total</Text></View>
-        <View style={[sSection.chip, { borderColor: `${SSM_AMBER}33` }]}><Text style={[sSection.chipNum, { color: SSM_AMBER }]}>{stockStats.lowStock}</Text><Text style={sSection.chipLabel}>Low</Text></View>
-        <View style={[sSection.chip, { borderColor: 'rgba(239,68,68,0.3)' }]}><Text style={[sSection.chipNum, { color: '#EF4444' }]}>{stockStats.outStock}</Text><Text style={sSection.chipLabel}>Out</Text></View>
-      </Animated.View>
-
-      {stockItems.length === 0
-        ? <Empty icon="cube-outline" title="No stock items" sub="No items linked to this property." />
-        : stockItems.map((item, i) => <StockRow key={item.id} item={item} index={i} />)
-      }
-
-      {/* Full stock screen CTA */}
-      <TouchableOpacity style={sSection.fullCta} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
-        <LinearGradient colors={[`${SSM_ACCENT}22`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <Ionicons name="open-outline" size={16} color={SSM_ACCENT} />
-        <Text style={sSection.fullCtaText}>Open Full Stock Manager</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  const renderChecklist = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={SSM_GREEN} />}
-    >
-      <Animated.View  style={sSection.header}>
-        <Text style={sSection.title}>Checklists & SOP</Text>
-      </Animated.View>
-
-      {/* Progress visual */}
-      <Animated.View  style={sCl.progressCard}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <LinearGradient colors={[`${SSM_GREEN}18`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <View style={sCl.progressRow}>
-          <View>
-            <Text style={sCl.progressValue}>{sopDone}<Text style={sCl.progressSub}>/{sopTotal}</Text></Text>
-            <Text style={sCl.progressLabel}>Completed Today</Text>
-          </View>
-          <View style={sCl.progressDonut}>
-            <Text style={[sCl.progressPct, { color: SSM_GREEN }]}>
-              {sopTotal > 0 ? Math.round(sopDone / sopTotal * 100) : 100}%
-            </Text>
-            <Text style={sCl.progressPctLabel}>DONE</Text>
-          </View>
-        </View>
-        {/* Bar */}
-        <View style={sCl.barBg}>
-          <View style={[sCl.barFill, { width: `${sopTotal > 0 ? (sopDone / sopTotal) * 100 : 100}%` as any }]} />
-        </View>
-      </Animated.View>
-
-      {/* CTA to full checklist screen */}
-      <TouchableOpacity style={sSection.fullCta} onPress={() => router.push(`/property/${propertyId}/checklist` as any)}>
-        <LinearGradient colors={[`${SSM_GREEN}22`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <Ionicons name="open-outline" size={16} color={SSM_GREEN} />
-        <Text style={[sSection.fullCtaText, { color: SSM_GREEN }]}>Open Checklist Manager</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  const renderTickets = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#3B82F6" />}
-    >
-      <Animated.View  style={sSection.header}>
-        <Text style={sSection.title}>Tickets</Text>
-        <View style={sSection.chips}>
-          <View style={sSection.chip}><Text style={sSection.chipNum}>{ticketStats.open}</Text><Text style={sSection.chipLabel}>Open</Text></View>
-          <View style={sSection.chip}><Text style={sSection.chipNum}>{ticketStats.mine}</Text><Text style={sSection.chipLabel}>Mine</Text></View>
-        </View>
-      </Animated.View>
-
-      <View style={sSection.timeToggleRow}>
-        <TouchableOpacity
-          style={[sSection.timeToggleBtn, scopeFilter === 'property' && sSection.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('property')}
-          activeOpacity={0.7}
-        >
-          <Text style={[sSection.timeToggleText, scopeFilter === 'property' && sSection.timeToggleTextActive]}>Property Level</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[sSection.timeToggleBtn, scopeFilter === 'my_tasks' && sSection.timeToggleBtnActive]}
-          onPress={() => setScopeFilter('my_tasks')}
-          activeOpacity={0.7}
-        >
-          <Text style={[sSection.timeToggleText, scopeFilter === 'my_tasks' && sSection.timeToggleTextActive]}>My Tasks</Text>
-        </TouchableOpacity>
-      </View>
-
-      {filteredTickets.length === 0
-        ? <Empty icon="ticket-outline" title="No tickets" sub="No active tickets for this property." />
-        : filteredTickets.slice(0, 30).map((t, i) => (
-            <TicketRow
-              key={t.id}
-              ticket={t}
-              index={i}
-              onPress={() => router.push(`/property/${propertyId}/tickets/${t.id}` as any)}
-            />
-          ))
-      }
-
-      <TouchableOpacity style={sSection.fullCta} onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
-        <LinearGradient colors={['rgba(59,130,246,0.15)', 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <Ionicons name="open-outline" size={16} color="#3B82F6" />
-        <Text style={[sSection.fullCtaText, { color: '#3B82F6' }]}>Open Full Ticket View</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  const renderProfile = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-    >
-      {/* Profile card */}
-      <Animated.View  style={sPro.card}>
-        <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <LinearGradient colors={[`${SSM_ACCENT}22`, 'transparent']} style={StyleSheet.absoluteFillObject} />
-        <View style={sPro.avatarWrap}>
-          <LinearGradient colors={[SSM_ACCENT, '#5B3FD6']} style={sPro.avatar}>
-            <Text style={sPro.avatarText}>{initials}</Text>
-          </LinearGradient>
-        </View>
-        <Text style={sPro.name}>{fullName}</Text>
-        <Text style={sPro.email}>{user?.email}</Text>
-        <View style={sPro.roleBadge}>
-          <Text style={sPro.roleText}>SOFT SERVICE MANAGER</Text>
-        </View>
-
-        <View style={sPro.divider} />
-
-        {[
-          { label: 'Property',   value: propertyName || '—' },
-          { label: 'Tickets',    value: `${ticketStats.total} total` },
-          { label: 'Stock Items',value: `${stockStats.total} items` },
-          { label: 'SOP Today',  value: `${sopDone}/${sopTotal} completed` },
-        ].map(({ label, value }) => (
-          <View key={label} style={sPro.row}>
-            <Text style={sPro.rowLabel}>{label}</Text>
-            <Text style={sPro.rowValue}>{value}</Text>
-          </View>
-        ))}
-      </Animated.View>
-
-      {/* Sign out */}
-      <TouchableOpacity style={sPro.signOut} onPress={() => setShowSignOut(true)}>
-        <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-        <Text style={sPro.signOutText}>Sign Out</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-
-  // ── Loading (only if no cached data) ──
-  // BLOCK rendering until we have actual data (prevents empty UI flash)
-  if (!dashboardData) {
-    return (
-      <View style={[sMain.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <LinearGradient colors={[...BG]} style={StyleSheet.absoluteFillObject} />
-        <ActivityIndicator size="large" color={SSM_ACCENT} />
-        <Text style={{ color: 'rgba(255,255,255,0.4)', marginTop: 14 }}>Loading…</Text>
-      </View>
+      </>
     );
-  }
+  };
 
-  // ── Main render ──
+  const orgId = membership?.org_id ?? '';
+
+  // Show header shell instantly (from cached membership) with skeleton content below
+  const isDataReady = !!data;
+
   return (
-    <View style={[sMain.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient colors={[...BG]} style={StyleSheet.absoluteFillObject} />
-      <WeatherBackground condition={weather?.condition} />
+      <WeatherBackground condition={undefined} />
 
-      {/* ── Header ── */}
-      <Animated.View  style={sMain.header}>
-        <Image
-          source={require('@/assets/images/autopilot-logo-new.png')}
-          style={sMain.logo}
-          resizeMode="contain"
-        />
-        <View style={sMain.headerRight}>
-          <TouchableOpacity style={sMain.iconBtn} onPress={() => setShowNotifications(true)}>
-            <Ionicons name="notifications-outline" size={22} color="rgba(255,255,255,0.75)" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[sMain.shiftPill, { borderColor: isCheckedIn ? `${SSM_GREEN}55` : 'rgba(239,68,68,0.4)' }]}
-            onPress={toggleShift}
-            disabled={isTogglingShift}
+      <Animated.View  style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
+          <TouchableOpacity 
+            style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }}
+            onPress={() => setShowDrawer(true)}
+            activeOpacity={0.7}
           >
-            <View style={[sMain.shiftDot, { backgroundColor: isCheckedIn ? SSM_GREEN : '#EF4444' }]} />
-            <Text style={[sMain.shiftText, { color: isCheckedIn ? SSM_GREEN : '#EF4444' }]}>
-              {isCheckedIn ? 'ON' : 'OFF'}
-            </Text>
+            <Ionicons name="menu" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-        </View>
-      </Animated.View>
+          <View style={styles.headerCenter}>
+            <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => setActiveTab('profile')}>
+              <LinearGradient
+                colors={['#8B5CF6', '#6366F1']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.headerAvatar}
+              >
+                <Text style={styles.avatarText}>
+                  {user?.user_metadata?.full_name
+                    ? user.user_metadata.full_name.split(' ').map((name: string) => name[0]).join('').toUpperCase().slice(0, 2)
+                    : mstUser.initials}
+                </Text>
+              </LinearGradient>
+              <View style={[styles.nameContainer, { flex: 1 }]}>
+                <Text style={styles.greetingName} numberOfLines={1}>
+                  Hey, {(user?.user_metadata?.full_name || mstUser.name).split(' ')[0]}
+                </Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  {property?.name || 'MST Portal'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.headerRight, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+            <TouchableOpacity 
+              style={[
+                styles.headerIconBtn, 
+                { 
+                  backgroundColor: isCheckedIn ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.10)',
+                  borderColor: isCheckedIn ? 'rgba(16,185,129,0.3)' : 'transparent',
+                  borderWidth: 1,
+                }
+              ]} 
+              onPress={toggleShift} 
+              activeOpacity={0.7}
+              disabled={isCheckingInOut}
+            >
+              {isCheckingInOut ? (
+                <ActivityIndicator size="small" color={isCheckedIn ? '#34D399' : '#FFFFFF'} />
+              ) : (
+                <Ionicons 
+                  name={isCheckedIn ? 'briefcase' : 'briefcase-outline'} 
+                  size={20} 
+                  color={isCheckedIn ? '#34D399' : '#FFFFFF'} 
+                />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowCreate(true)} activeOpacity={0.7}>
+              <Ionicons name="add-circle-outline" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowNotifications(true)} activeOpacity={0.7}>
+              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+              <View style={styles.notificationBadge} />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
 
-      {/* ── Content ── */}
-      <View style={{ flex: 1 }}>
-        {activeTab === 'overview'   && renderOverview()}
-        {activeTab === 'stock'      && renderStock()}
-        {activeTab === 'checklist'  && renderChecklist()}
-        {activeTab === 'tickets'    && renderTickets()}
-        {activeTab === 'profile'    && renderProfile()}
-      </View>
-
-      {/* ── Bottom Nav ── */}
-      <View style={[sMain.bottomNav, { paddingBottom: insets.bottom + 4 }]}>
-        <SafeBlurView intensity={60} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={sMain.bottomNavInner}>
-          <TabBtn icon="grid-outline"     label="Overview"   active={activeTab === 'overview'}   onPress={() => setActiveTab('overview')} />
-          <TabBtn icon="cube-outline"     label="Stock"      active={activeTab === 'stock'}      onPress={() => setActiveTab('stock')} badge={stockStats.outStock + stockStats.lowStock} />
-          <TabBtn icon="checkbox-outline" label="Checklists" active={activeTab === 'checklist'}  onPress={() => setActiveTab('checklist')} />
-          <TabBtn icon="ticket-outline"   label="Tickets"    active={activeTab === 'tickets'}    onPress={() => setActiveTab('tickets')} badge={ticketStats.open} />
-          <TabBtn icon="person-outline"   label="Profile"    active={activeTab === 'profile'}    onPress={() => setActiveTab('profile')} />
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+        }
+        contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
+      >
+        {/* Tab content */}
+        <View style={styles.tabContent}>
+          {!isDataReady ? (
+            <ContentSkeletonLoader />
+          ) : (
+            <>
+              {activeTab === 'dashboard' && renderMyDashboard()}
+              {activeTab === 'daily' && renderDailyBoard()}
+              {activeTab === 'profile' && renderProfile()}
+            </>
+          )}
         </View>
-      </View>
+      </ScrollView>
 
       {/* Modals */}
+      <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
+      <GlobalNavigationDrawer
+        visible={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        propertyId={propertyId ?? ''}
+      />
       <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
-      <PermissionOnboarding visible={showPermOnboard} onComplete={() => setShowPermOnboard(false)} />
+      <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
+
+      <Toast 
+        {...toastConfig} 
+        onClose={() => setToastConfig(prev => ({ ...prev, visible: false }))} 
+      />
     </View>
   );
 }
 
-// ─── Empty State ────────────────────────────────────────────────────────────────
-function Empty({ icon, title, sub }: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }) {
-  return (
-    <View style={{ alignItems: 'center', paddingTop: 60, gap: 12 }}>
-      <Ionicons name={icon} size={48} color="rgba(255,255,255,0.10)" />
-      <Text style={{ color: '#FFF', fontSize: 17, fontWeight: '700' }}>{title}</Text>
-      <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center' }}>{sub}</Text>
-    </View>
-  );
-}
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
-const sMain = StyleSheet.create({
-  container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
-  logo: { width: 140, height: 36 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  iconBtn: { width: 38, height: 38, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.07)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' },
-  shiftPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.04)' },
-  shiftDot: { width: 6, height: 6, borderRadius: 3 },
-  shiftText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  bottomNav: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' },
-  bottomNavInner: { flexDirection: 'row', paddingTop: 4 },
-});
+const styles = StyleSheet.create({
+  tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
+  container: {
+    flex: 1,
+    backgroundColor: '#4A1A1A',
+  },
+  scroll: {
+    flex: 1,
+    zIndex: 10,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.55)',
+  },
 
-const sOv = StyleSheet.create({
-  hero: { borderRadius: 20, padding: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 4 },
-  heroLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  avatarText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
-  greeting: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  sub: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
-  dutyBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.04)' },
-  dutyDot: { width: 6, height: 6, borderRadius: 3 },
-  dutyText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  kpiRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  alertCard: { borderRadius: 16, padding: 14, borderWidth: 1, borderColor: `${SSM_AMBER}33`, overflow: 'hidden', marginBottom: 14 },
-  alertRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  alertTitle: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  alertChips: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  chipText: { fontSize: 12, fontWeight: '700' },
-  alertCta: { alignSelf: 'flex-start' },
-  alertCtaText: { color: SSM_AMBER, fontSize: 12, fontWeight: '700' },
-  secTitle: { color: '#FFF', fontSize: 16, fontWeight: '700', marginBottom: 12, marginTop: 8 },
-  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  actionBtn: { width: (SW - 52) / 2, borderRadius: 16, padding: 14, borderWidth: 1, overflow: 'hidden', gap: 8 },
-  actionLabel: { fontSize: 13, fontWeight: '700' },
-});
+  // Shell header
+  shellHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  hamburgerBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerCenter: {
+    flex: 1,
+    marginLeft: 16,
+    marginRight: 16,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  nameContainer: {
+    marginLeft: 12,
+    minWidth: 0,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.60)',
+    marginTop: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 4,
+  },
 
-const sSection = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, marginBottom: 14 },
-  title: { color: '#FFF', fontSize: 18, fontWeight: '700' },
-  scanBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, backgroundColor: `${SSM_ACCENT}18`, borderWidth: 1, borderColor: `${SSM_ACCENT}33` },
-  scanText: { color: SSM_ACCENT, fontSize: 13, fontWeight: '700' },
-  chips: { flexDirection: 'row', gap: 8 },
-  chip: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
-  chipNum: { color: '#FFF', fontSize: 16, fontWeight: '800' },
-  chipLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
-  fullCta: { borderRadius: 14, borderWidth: 1, borderColor: `${SSM_ACCENT}33`, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, overflow: 'hidden', marginTop: 10 },
-  fullCtaText: { color: SSM_ACCENT, fontSize: 14, fontWeight: '700' },
+  // Shell drawer
+  drawerPanel: {
+    width: 288,
+    backgroundColor: 'rgba(11, 17, 25, 0.98)',
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  drawerLogoContainer: {
+    flex: 1,
+  },
+  drawerLogo: {
+    width: 180,
+    height: 42,
+  },
+  drawerCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  drawerSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  drawerSectionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 1.5,
+  },
+  drawerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  drawerItemLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.82)',
+  },
+  drawerSignOut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  drawerSignOutText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
+  drawerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+
+  // Top bar
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  avatarGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 22,
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  greeting: {
+    flex: 1,
+    minWidth: 0,
+  },
+  greetingName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  greetingTime: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.60)',
+    marginTop: 1,
+  },
+  notifBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  notifDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+
+  // Tab content
+  tabContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+
+  // Hero title
+  heroTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textTransform: 'uppercase',
+    lineHeight: 34,
+    letterSpacing: -0.5,
+  },
+
+  // Gamification strip
+  gamifyCard: {
+    marginTop: 20,
+    marginBottom: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  gamifyInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+  },
+  gamifyMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  gamifyMetaTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  gamifyLevelName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  gamifyChips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rankBadge: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(251,191,36,0.20)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  rankBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FDE68A',
+  },
+  gamifyXp: {
+    marginTop: 8,
+  },
+
+  // Filter chips
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(99,102,241,0.35)',
+    borderColor: 'rgba(99,102,241,0.50)',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.70)',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
   timeToggleRow: {
     flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 4,
     width: '100%',
-    marginBottom: 14,
   },
   timeToggleBtn: {
     flex: 1,
     paddingVertical: 6,
+    borderRadius: 8,
     alignItems: 'center',
-    borderRadius: 6,
   },
   timeToggleBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   timeToggleText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
   },
   timeToggleTextActive: {
     color: '#FFF',
+    fontWeight: '700',
+  },
+
+  // Stats card
+  statsCard: {
+    marginTop: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  statsCardInner: {
+    padding: 16,
+  },
+  ticketStackSection: {
+    marginTop: 18,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  ticketStackTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.72)',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 14,
+  },
+  ticketStackEmpty: {
+    minHeight: 120,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  ticketStackEmptyText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.58)',
+    textAlign: 'center',
+  },
+  statsCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 12,
+  },
+  customizeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  customizeBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.80)',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statsWide: {
+    marginTop: 12,
+  },
+  statTile: {
+    flex: 1,
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  statTileWide: {
+    paddingVertical: 24,
+  },
+  statTileGlow: {
+    position: 'absolute',
+    top: -40,
+    right: -40,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    opacity: 0.4,
+  },
+  statTileValue: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -1,
+  },
+  statTileLabel: {
+    marginTop: 6,
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.70)',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+
+  // Section header
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 32,
+    marginBottom: 12,
+  },
+  sectionHeaderTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.60)',
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+  },
+  sectionHeaderHint: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.40)',
+    letterSpacing: 0.5,
+  },
+
+  // ─── Ticket Card (screenshot-style: dark teal) ────────────────────────────
+  tcStackSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: CARD_H,
+  },
+  // Card shell — bg handled by GeminiCardBorder.inner (#1B3040)
+  tcCard: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    padding: 14,
+    gap: 6,
+  },
+  // Row 1: thumb | title+badges | icons
+  tcRow1: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  tcThumbBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexShrink: 0,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcThumb: {
+    width: 64,
+    height: 64,
+  },
+  tcThumbFallback: {
+    width: 64,
+    height: 64,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcMiddle: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  tcTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 18,
+  },
+  tcBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  tcBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  tcBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  tcBadgeDark: {
+    backgroundColor: 'rgba(30,41,59,0.80)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  tcBadgeDarkText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 0.3,
+  },
+  // Two vertically-stacked icon buttons — top right
+  tcIconCol: {
+    gap: 6,
+    flexShrink: 0,
+  },
+  tcIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Meta rows (Raised By / Serving)
+  tcMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tcMetaLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    fontWeight: '500',
+    width: 62,
+  },
+  tcMetaValue: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    flex: 1,
+  },
+  // "MH" pill
+  tcMhPill: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  tcMhPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 0.5,
+  },
+  // Thin divider
+  tcDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  // Footer
+  tcFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tcFooterTkt: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.40)',
+    fontWeight: '500',
+  },
+  tcSlaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  tcSlaText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  tcViewBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexShrink: 0,
+  },
+  tcViewBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  // Legacy (unused but kept to avoid TS errors)
+  tcTopRow: { flexDirection: 'row' },
+  tcThumbPlaceholder: {},
+  tcContent: { flex: 1 },
+  tcActionCol: { gap: 6 },
+  tcMetaSection: { gap: 4 },
+  tcServingPill: { backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  tcServingPillText: { fontSize: 9, fontWeight: '800', color: '#FFFFFF' },
+  tcFooterId: { fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 },
+
+  // Legacy (kept for safety)
+  ticketCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(30,30,50,0.85)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.45,
+    shadowRadius: 60,
+    elevation: 20,
+    overflow: 'hidden',
+  },
+  ticketCardInner: {
+    padding: 16,
+  },
+  ticketHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  ticketIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(60,60,90,0.50)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ticketHeaderInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  ticketId: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  ticketDate: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.60)',
+    marginTop: 2,
+  },
+  ticketHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  ticketActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ticketBadges: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+  },
+  ticketBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  ticketBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  ticketTitle: {
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    lineHeight: 22,
+  },
+  ticketAssignee: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  ticketAssigneeAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#8B5CF6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ticketAssigneeInitials: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  ticketAssigneeName: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.80)',
+  },
+  ticketFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+  },
+  ticketFooterLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.50)',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+  },
+  ticketSlaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(239,68,68,0.20)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    alignSelf: 'flex-start',
+  },
+  ticketSlaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FCA5A5',
+  },
+  ticketScore: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  ticketActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  ticketViewBtn: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: '#8B5CF6',
+    paddingVertical: 12,
+    alignItems: 'center',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  ticketViewBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  ticketAcceptBtn: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  ticketAcceptBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.90)',
+  },
+
+  // Daily board
+  countdownCard: {
+    marginTop: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  countdownInner: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  countdownLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  countdownLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.60)',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  countdownBlocks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  timeBlock: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  timeBlockText: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontVariant: ['tabular-nums'],
+  },
+  countdownColon: {
+    fontSize: 24,
+    fontWeight: '300',
+    color: 'rgba(255,255,255,0.30)',
+  },
+  countdownHint: {
+    marginTop: 12,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+  },
+
+  // Live flow
+  championCard: {
+    marginTop: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  championInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    padding: 20,
+  },
+  championAvatarWrap: {
+    position: 'relative',
+  },
+  championAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.45)',
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  championAvatarText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  crownBadge: {
+    position: 'absolute',
+    top: -10,
+    left: '50%',
+    marginLeft: -10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#F59E0B',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  championInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  championLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FDE68A',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+  },
+  championName: {
+    marginTop: 2,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  championMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.60)',
+  },
+  // Profile
+  identityCard: {
+    marginTop: 8,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  identityInner: {
+    padding: 20,
+  },
+  identityTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  identityAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
+    shadowColor: '#7C5CFA',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 28,
+    elevation: 12,
+    position: 'relative',
+  },
+  identityAvatarText: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  identityLevel: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+  },
+  identityInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  identityName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  identityLevelName: {
+    marginTop: 2,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.60)',
+  },
+  identityChips: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  identityXp: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+  },
+  identityXpHint: {
+    marginTop: 8,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  profileStatsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  profileStat: {
+    flex: 1,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    padding: 12,
+    alignItems: 'center',
+    backdropFilter: 'blur(20px)',
+  },
+  profileStatIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileStatValue: {
+    marginTop: 8,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  profileStatLabel: {
+    marginTop: 4,
+    fontSize: 9,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+  },
+  achievementsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 20,
+  },
+
+  // Ask Cassandra
+  askCassandraWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    alignItems: 'center',
+  },
+  askCassandraBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
+    paddingLeft: 16,
+    paddingRight: 6,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  askCassandraLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  askCassandraOrb: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 
-const sCl = StyleSheet.create({
-  progressCard: { borderRadius: 18, padding: 16, borderWidth: 1, borderColor: `${SSM_GREEN}33`, overflow: 'hidden', marginBottom: 14 },
-  progressRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  progressValue: { color: '#FFF', fontSize: 36, fontWeight: '800' },
-  progressSub: { color: 'rgba(255,255,255,0.4)', fontSize: 20, fontWeight: '400' },
-  progressLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 2 },
-  progressDonut: { alignItems: 'center' },
-  progressPct: { fontSize: 28, fontWeight: '800' },
-  progressPctLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  barBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 3 },
-  barFill: { height: 6, backgroundColor: SSM_GREEN, borderRadius: 3 },
-});
-
-const sPro = StyleSheet.create({
-  card: { borderRadius: 22, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 4, alignItems: 'center', marginBottom: 14 },
-  avatarWrap: { marginBottom: 12 },
-  avatar: { width: 72, height: 72, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#FFF', fontSize: 26, fontWeight: '800' },
-  name: { color: '#FFF', fontSize: 20, fontWeight: '700' },
-  email: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 4 },
-  roleBadge: { marginTop: 10, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: `${SSM_ACCENT}22`, borderWidth: 1, borderColor: `${SSM_ACCENT}44` },
-  roleText: { color: SSM_ACCENT, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  divider: { width: '100%', height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 16 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
-  rowLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 13 },
-  rowValue: { color: '#FFF', fontSize: 13, fontWeight: '600' },
-  signOut: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)', backgroundColor: 'rgba(239,68,68,0.06)' },
-  signOutText: { color: '#EF4444', fontSize: 15, fontWeight: '700' },
-});

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import {
   View,
@@ -11,47 +11,47 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  Alert,
   Dimensions,
-  Modal,
   Image,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useWeather } from '@/hooks/useWeather';
+import { useRouter } from 'expo-router';
+import { serverApi } from '@/lib/serverApi';
+import { useAuth } from '@/hooks/useAuth';
+import { useGamification } from '@/hooks/mst/useGamification';
+import { queryKeys } from '@/utils/queryKeys';
+import { useServerQuery } from '@/hooks/useServerQuery';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '@/utils/queryClient';
+import SkeletonLoader from './lovable/SkeletonLoader';
+import ContentSkeletonLoader from './lovable/ContentSkeletonLoader';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withRepeat,
   runOnJS,
   interpolate,
+  Extrapolate,
   FadeInUp,
-  FadeInDown,
+  Easing,
+  LinearTransition,
 } from 'react-native-reanimated';
 import {
   Gesture,
   GestureDetector,
 } from 'react-native-gesture-handler';
-import { useRouter } from 'expo-router';
-import { serverApi } from '@/lib/serverApi';
-import { useAuth } from '@/hooks/useAuth';
-import { useGamification } from '@/hooks/mst/useGamification';
-import { useStaffDashboardQuery } from '@/hooks/useStaffDashboardQuery';
-import { GlassTile } from './DashboardComponents';
-import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
-import SkeletonLoader from './lovable/SkeletonLoader';
-
-// WeatherBackground removed — using static sunny gradient instead
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import { LevelBadge } from '@/components/gamification/LevelBadge';
 import { XPBar } from '@/components/gamification/XPBar';
 import { StreakChip } from '@/components/gamification/StreakChip';
 import { Leaderboard } from '@/components/gamification/Leaderboard';
 import { AchievementBadge } from '@/components/gamification/AchievementBadge';
-import MobilePropertySelector from '../shared/MobilePropertySelector';
 import {
   defaultMstUser,
   defaultAchievements,
@@ -62,19 +62,18 @@ import {
   type LeaderRow,
   type Achievement,
 } from '@/lib/gamification';
-import PPMActivityTile from '@/components/dashboard/PPMActivityTile';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
-import TicketStack from '@/components/shared/TicketStack';
-import PPMProgressCard from '@/components/dashboard/PPMProgressCard';
-import { ppmService } from '@/services/ppmService';
-
+import { GlassTile } from './DashboardComponents';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import SignOutModal from '@/components/ui/SignOutModal';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
 import NotificationModal from '@/components/notifications/NotificationModal';
 import Toast from '@/components/ui/Toast';
+import FloatingMenu from '@/components/ui/FloatingMenu';
+import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
 import { Audio } from 'expo-av';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -87,6 +86,7 @@ interface Ticket {
   priority: string;
   created_at: string;
   assigned_to?: string | null;
+  raised_by?: string | null;
   assignee?: {
     full_name: string;
     email: string;
@@ -97,89 +97,31 @@ interface Ticket {
   sla_due_at?: string;
 }
 
-type Tab = 'dashboard' | 'daily' | 'operations' | 'profile';
+type Tab = 'dashboard' | 'daily' | 'profile';
 
 interface Props {
   propertyId: string;
 }
 
+type MstDashboardQueryData = {
+  property: { name: string } | null;
+  tickets: Ticket[];
+  isCheckedIn: boolean;
+  checklistStats?: { completed: number; total: number };
+};
+
+const TICKET_TIME_FILTER_OPTIONS: Array<{ key: TimeFilter; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'month', label: 'This Month' },
+  { key: 'all_time', label: 'All Time' },
+];
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
-
-function StatTile({
-  value,
-  label,
-  tint,
-  wide = false,
-  onPress,
-}: {
-  value: string;
-  label: string;
-  tint: [string, string];
-  wide?: boolean;
-  onPress?: () => void;
-}) {
-  const content = (
-    <LinearGradient
-      colors={tint}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.statTile, wide && styles.statTileWide]}
-    >
-      <View style={styles.statTileGlow} />
-      <Text style={styles.statTileValue}>{value}</Text>
-      <Text style={styles.statTileLabel}>{label}</Text>
-    </LinearGradient>
-  );
-
-  if (onPress) {
-    return (
-      <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={[wide ? { flex: 1 } : { flex: 1 }]}>
-        {content}
-      </TouchableOpacity>
-    );
-  }
-  return content;
-}
 
 function TimeBlock({ val }: { val: number }) {
   return (
     <View style={styles.timeBlock}>
       <Text style={styles.timeBlockText}>{String(val).padStart(2, '0')}</Text>
-    </View>
-  );
-}
-
-function PropertyFlowTile({
-  name,
-  code,
-  active,
-}: {
-  name: string;
-  code: string;
-  active: number;
-}) {
-  return (
-    <View style={styles.flowTile}>
-      <View style={styles.flowTileInner}>
-        <View style={styles.flowTileHeader}>
-          <Ionicons name="location" size={12} color="rgba(255,255,255,0.55)" />
-          <Text style={styles.flowTileCode}>{code}</Text>
-        </View>
-        <Text style={styles.flowTileName}>{name}</Text>
-        <View style={styles.flowTileAvatars}>
-          {Array.from({ length: active }).map((_, i) => (
-            <View key={i} style={[styles.flowTileAvatar, { marginLeft: i > 0 ? -6 : 0 }]}>
-              <Text style={styles.flowTileAvatarText}>{String.fromCharCode(65 + i)}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.flowTileStatus}>
-          <View style={styles.flowTileDot} />
-          <Text style={styles.flowTileStatusText}>
-            {active} MST{active > 1 ? 's' : ''} on-site
-          </Text>
-        </View>
-      </View>
     </View>
   );
 }
@@ -206,116 +148,475 @@ function ProfileStat({
   );
 }
 
-function TabButton({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
+// ─── Ticket Stack (swipeable) ────────────────────────────────────────────────
+
+const CARD_H = 210;
+const PEEK_OFFSET = 10;
+const MAX_STACK = 4;
+
+interface TicketStackProps {
+  tickets: Ticket[];
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}
+
+function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: TicketStackProps) {
+  const [order, setOrder] = useState(initialTickets);
+
+  useEffect(() => {
+    setOrder(initialTickets);
+  }, [initialTickets]);
+
+  const sendToBack = useCallback(() => {
+    setOrder((prev) => {
+      if (prev.length < 2) return prev;
+      const [first, ...rest] = prev;
+      return [...rest, first];
+    });
+  }, []);
+
+  const visible = order.slice(0, MAX_STACK);
+  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
+
   return (
-    <TouchableOpacity
-      style={[styles.tabButton, active && styles.tabButtonActive]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={active ? '#FFFFFF' : 'rgba(255,255,255,0.55)'}
-      />
-      <Text style={[styles.tabButtonLabel, active && styles.tabButtonLabelActive]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+    <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
+      {visible.map((t, i) => (
+        <StackCard
+          key={t.id}
+          ticket={t}
+          index={i}
+          total={MAX_STACK}
+          onSwipeComplete={sendToBack}
+          propertyName={propertyName}
+          onViewTicket={onViewTicket}
+        />
+      ))}
+    </View>
   );
 }
 
+const StackCard = memo(function StackCard({
+  ticket, index, total, onSwipeComplete, propertyName, onViewTicket
+}: {
+  ticket: Ticket;
+  index: number;
+  total: number;
+  onSwipeComplete: () => void;
+  propertyName?: string;
+  onViewTicket?: (t: Ticket) => void;
+}) {
+  const isTop = index === 0;
 
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const rotate = useSharedValue(0);
+
+  useEffect(() => {
+    if (!isTop) {
+      // When card is sent to the back, smoothly reset its internal swipe state
+      // after a tiny delay so it's hidden while resetting
+      const timeout = setTimeout(() => {
+        translateX.value = 0;
+        translateY.value = 0;
+        rotate.value = 0;
+      }, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTop]);
+
+  const pan = Gesture.Pan()
+    .minDistance(8)
+    .onUpdate((e) => {
+      if (!isTop) return;
+      translateX.value = e.translationX;
+      translateY.value = e.translationY * 0.3;
+      rotate.value = interpolate(e.translationX, [-SCREEN_W, 0, SCREEN_W], [-12, 0, 12], Extrapolate.CLAMP);
+    })
+    .onEnd((e) => {
+      if (!isTop) return;
+      const shouldDismiss = Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 600;
+      if (shouldDismiss) {
+        const dest = e.translationX > 0 ? SCREEN_W * 1.4 : -SCREEN_W * 1.4;
+        translateX.value = withTiming(dest, { duration: 200 }, () => {
+          runOnJS(onSwipeComplete)();
+        });
+        translateY.value = withTiming(e.translationY * 0.5, { duration: 200 });
+      } else {
+        translateX.value = withSpring(0, { damping: 18, stiffness: 130 });
+        translateY.value = withSpring(0, { damping: 18, stiffness: 130 });
+        rotate.value = withSpring(0, { damping: 18, stiffness: 130 });
+      }
+    });
+  const maxOffset = (total - 1) * 16;
+  const yOffset = maxOffset - (index * 16);
+  const scale = 1 - index * 0.05;
+  const bgOpacity = 1 - index * 0.15;
+  const zIndex = total - index;
+
+  const animStyle = useAnimatedStyle(() => {
+    return {
+      top: withSpring(yOffset, { damping: 18, stiffness: 130 }),
+      transform: [{ scale: withSpring(scale, { damping: 18, stiffness: 130 }) }],
+      opacity: withSpring(bgOpacity, { damping: 18, stiffness: 130 }),
+    };
+  }, [yOffset, scale, bgOpacity]);
+
+  const panStyle = useAnimatedStyle(() => {
+    if (!isTop) return { transform: [] };
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { rotate: `${rotate.value}deg` },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.tcStackSlot,
+        animStyle,
+        { zIndex },
+      ]}
+      pointerEvents={isTop ? 'auto' : 'none'}
+    >
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[{ flex: 1 }, panStyle]}>
+          <TicketCard ticket={ticket} propertyName={propertyName} onView={() => onViewTicket?.(ticket)} />
+        </Animated.View>
+      </GestureDetector>
+    </Animated.View>
+  );
+});
+
+// ─── Gemini animated gradient border wrapper ───────────────────────────────
+
+const GEMINI_COLORS: readonly [string, string, ...string[]] = [
+  '#3B82F6', '#06B6D4', '#0EA5E9', '#2DD4BF', '#3B82F6',
+];
+
+function GeminiCardBorder({ children }: { children: React.ReactNode }) {
+  const angle = useSharedValue(0);
+
+  useEffect(() => {
+    angle.value = withRepeat(
+      withTiming(360, { duration: 3000, easing: Easing.linear }),
+      -1,
+      false
+    );
+  }, []);
+
+  const spinStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${angle.value}deg` }],
+  }));
+
+  return (
+    <View style={geminiStyles.outer}>
+      {/* Spinning gradient — acts as the border */}
+      <Animated.View style={[geminiStyles.gradientSpin, spinStyle]} pointerEvents="none">
+        <LinearGradient
+          colors={GEMINI_COLORS}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </Animated.View>
+      {/* Inner card inset to expose 1.5px border */}
+      <View style={geminiStyles.inner}>
+        {children}
+      </View>
+    </View>
+  );
+}
+
+const geminiStyles = StyleSheet.create({
+  outer: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    flex: 1,
+    padding: 1.5,           // this 1.5px gap shows the spinning gradient
+    position: 'relative',
+  },
+  gradientSpin: {
+    position: 'absolute',
+    width: '250%',
+    height: '250%',
+    top: '-75%',
+    left: '-75%',
+  },
+  inner: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(47, 47, 48, 0.90)', // Glassy #2f2f30
+  },
+});
+
+interface TicketCardProps {
+  ticket: Ticket;
+  propertyName?: string;
+  onView?: () => void;
+}
+
+const TicketCard = React.memo(function TicketCard({ ticket, propertyName, onView }: TicketCardProps) {
+  // ── Priority badge ──
+  const getPriorityStyle = () => {
+    switch (ticket.priority?.toLowerCase()) {
+      case 'urgent':
+      case 'critical':
+        return { bg: 'rgba(239,68,68,0.25)', text: '#FCA5A5', label: 'URGENT' };
+      case 'high':
+        return { bg: 'rgba(20,184,166,0.25)', text: '#2DD4BF', label: 'HIGH' };
+      case 'medium':
+        return { bg: 'rgba(251,191,36,0.20)', text: '#FCD34D', label: 'MEDIUM' };
+      case 'low':
+        return { bg: 'rgba(99,102,241,0.20)', text: '#A5B4FC', label: 'LOW' };
+      default:
+        return { bg: 'rgba(148,163,184,0.15)', text: '#94A3B8', label: (ticket.priority || 'NORMAL').toUpperCase() };
+    }
+  };
+
+  const pStyle = getPriorityStyle();
+
+  const statusLabel = ticket.status
+    ? ticket.status.replace(/_/g, ' ').toUpperCase()
+    : 'OPEN';
+
+  // Running time (time elapsed since creation)
+  const runningMs = ticket.created_at ? Date.now() - new Date(ticket.created_at).getTime() : 0;
+  const runDays = Math.floor(runningMs / 86400000);
+  const runHrs = Math.floor((runningMs % 86400000) / 3600000);
+  const runMins = Math.floor((runningMs % 3600000) / 60000);
+  const runningStr = runningMs > 0 ? `${runDays}d ${runHrs}h ${runMins}m` : null;
+
+  const formattedDate = ticket.created_at
+    ? new Date(ticket.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
+
+  const handleShare = async () => {
+    try {
+      const msg = `🎫 Ticket: ${ticket.title}\n📋 ${ticket.ticket_number}\n📊 Priority: ${ticket.priority} | Status: ${statusLabel}\n👤 Raised By: ${ticket.creator?.full_name || 'Unknown'}`;
+      await Share.share({
+        message: msg,
+        title: `Ticket ${ticket.ticket_number}`,
+      });
+    } catch (e) {
+      console.warn('Share failed', e);
+    }
+  };
+
+  return (
+    <View style={[styles.tcCard, { 
+      backgroundColor: '#121212', 
+      borderRadius: 20,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.25)'
+    }]}>
+        {/* ── Row 1: Thumb | Title + Badges | Action icons ── */}
+        <View style={styles.tcRow1}>
+          {/* Thumbnail */}
+          <View style={styles.tcThumbBox}>
+            {ticket.photo_before_url ? (
+              <Image source={{ uri: ticket.photo_before_url }} style={styles.tcThumb} resizeMode="cover" />
+            ) : (
+              <View style={styles.tcThumbFallback}>
+                <Ionicons name="image" size={24} color="rgba(255,255,255,0.25)" />
+              </View>
+            )}
+          </View>
+
+          {/* Title + badges */}
+          <View style={styles.tcMiddle}>
+            <Text style={styles.tcTitle} numberOfLines={2}>{ticket.title}</Text>
+            <View style={styles.tcBadgeRow}>
+              <View style={[styles.tcBadge, { backgroundColor: pStyle.bg }]}>
+                <Text style={[styles.tcBadgeText, { color: pStyle.text }]}>{pStyle.label}</Text>
+              </View>
+              <View style={[styles.tcBadge, styles.tcBadgeDark]}>
+                <Text style={styles.tcBadgeDarkText}>{statusLabel}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Action icons — Share */}
+          <View style={styles.tcIconCol}>
+            <TouchableOpacity style={styles.tcIconBtn} onPress={handleShare} activeOpacity={0.7}>
+              <Ionicons name="share-outline" size={15} color="rgba(255,255,255,0.70)" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Row 2: Raised By ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Raised By:</Text>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.creator?.full_name || 'Unknown'}
+          </Text>
+        </View>
+
+        {/* ── Row 3: Serving (Assigned To) ── */}
+        <View style={styles.tcMetaRow}>
+          <Text style={styles.tcMetaLabel}>Serving:</Text>
+          <View style={styles.tcMhPill}>
+            <Text style={styles.tcMhPillText}>MH</Text>
+          </View>
+          <Text style={styles.tcMetaValue} numberOfLines={1}>
+            {ticket.assignee?.full_name || 'Unassigned'}
+          </Text>
+        </View>
+
+        {/* ── Divider ── */}
+        <View style={styles.tcDivider} />
+
+        {/* ── Footer: Ticket ID / Date + Timer + View Btn ── */}
+        <View style={styles.tcFooter}>
+          <Text style={styles.tcFooterTkt}>{ticket.ticket_number} • {formattedDate}</Text>
+          <View style={styles.tcSlaRow}>
+            <Ionicons name="time-outline" size={12} color="#F87171" />
+            <Text style={[styles.tcSlaText, { color: '#FCA5A5' }]}>
+              {runningStr ? runningStr : '0m'}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity style={styles.tcViewBtn} onPress={onView} activeOpacity={0.8}>
+            <Text style={styles.tcViewBtnText}>View</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+  );
+});
+
+// ─── CountdownTimer (extracted to prevent full dashboard re-render every second) ──
+// Owns its own state so parent doesn't re-render on every tick.
+
+const CountdownTimer = memo(function CountdownTimer() {
+  const [h, setH] = useState(0);
+  const [m, setM] = useState(0);
+  const [s, setS] = useState(0);
+
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const ms = Math.max(0, end.getTime() - now.getTime());
+      setH(Math.floor(ms / 3600000));
+      setM(Math.floor((ms % 3600000) / 60000));
+      setS(Math.floor((ms % 60000) / 1000));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.countdownBlocks}>
+      <TimeBlock val={h} />
+      <Text style={styles.countdownColon}>:</Text>
+      <TimeBlock val={m} />
+      <Text style={styles.countdownColon}>:</Text>
+      <TimeBlock val={s} />
+    </View>
+  );
+});
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
+
+type TimeFilter = 'today' | 'month' | 'all_time';
+type ScopeFilter = 'property' | 'my_tasks';
+
+function getCountDateRange(timeFilter: TimeFilter) {
+  if (timeFilter === 'all_time') return {};
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (timeFilter === 'today') {
+    const d = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    return { dateFrom: `${d}T00:00:00+05:30`, dateTo: `${d}T23:59:59+05:30` };
+  }
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const d = `${monthStart.getFullYear()}-${pad(monthStart.getMonth() + 1)}-${pad(monthStart.getDate())}`;
+  return { dateFrom: `${d}T00:00:00+05:30` };
+}
+
+async function fetchTicketCountBatch(
+  propertyId: string,
+  scopeFilter: ScopeFilter,
+  timeFilter: TimeFilter,
+  userId?: string,
+) {
+  const dateRange = getCountDateRange(timeFilter);
+  const baseParams: Record<string, string> = {
+    propertyId,
+    limit: '1',
+    ...dateRange,
+  };
+  if (scopeFilter === 'my_tasks' && userId) {
+    baseParams.userId = userId;
+  }
+
+  const OPEN_STATUSES = 'open,waitlist,assigned,in_progress';
+  const CLOSED_STATUSES = 'closed,completed,resolved,pending_validation';
+
+  const [totalRes, openRes, closedRes] = await Promise.all([
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: OPEN_STATUSES }),
+    serverApi.get<{ tickets: any[]; total: number }>('/api/tickets', { ...baseParams, status: CLOSED_STATUSES }),
+  ]);
+
+  const getTotal = (res: any) =>
+    typeof (res?.data as any)?.total === 'number'
+      ? (res?.data as any).total
+      : ((res?.data as any)?.tickets?.length ?? 0);
+
+  return {
+    total: getTotal(totalRes),
+    open: getTotal(openRes),
+    closed: getTotal(closedRes),
+  };
+}
 
 export default function LovableStaffDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
   const { user, signOut, membership } = useAuth();
-  const { weather } = useWeather();
   const router = useRouter();
 
-  // Use property role to determine dashboard features (matching Web App logic)
-  const propRole = useMemo(() => {
-    const prop = membership?.properties?.find(p => p.id === propertyId);
-    return (prop?.role || membership?.org_role || 'staff').toLowerCase().replace(/\s+/g, '_');
-  }, [membership, propertyId]);
-
-  const STAFF_TECHNICAL_ROLES = ['mst', 'technician', 'fe', 'se', 'bms_operator'];
-  const isTechnical = STAFF_TECHNICAL_ROLES.includes(propRole) || propRole.includes('technical');
-  const isSoftServices = propRole.includes('soft_service') || propRole.includes('housekeeping');
-  const isManager = propRole.includes('manager') || propRole.includes('supervisor') || propRole.includes('admin');
-
-  // ─── NEW: Unified React Query Data (Source of Truth) ───
-  const { data: staffData, isFetching, forceRefresh } = useStaffDashboardQuery(propertyId, {
-    userId: user?.id ?? '',
-    initialLoadingOnMount: false, // Instant render from cache
-  });
-
-  // Extract data from React Query cache
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [scopeFilter, setScopeFilter] = useState<'property' | 'my_tasks'>('my_tasks');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [property, setProperty] = useState<{ name: string } | null>(staffData?.property ?? null);
-  const [tickets, setTickets] = useState<Ticket[]>(staffData?.tickets ?? []);
-  const [isCheckedIn, setIsCheckedIn] = useState(staffData?.isCheckedIn ?? false);
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [isCheckingInOut, setIsCheckingInOut] = useState(false);
-  const [userSkills, setUserSkills] = useState<string[]>(staffData?.userSkills ?? []);
-  const [specialization, setSpecialization] = useState<string | null>(staffData?.specialization ?? null);
 
-  // PPM stats from React Query
-  const [ppmTotal, setPpmTotal]   = useState(staffData?.ppm.total ?? 0);
-  const [ppmDone, setPpmDone]     = useState(staffData?.ppm.done ?? 0);
-  const [ppmPending, setPpmPending] = useState(staffData?.ppm.pending ?? 0);
-  const [ppmOverdue, setPpmOverdue] = useState(staffData?.ppm.overdue ?? 0);
-  const [ppmPostponed, setPpmPostponed] = useState(staffData?.ppm.postponed ?? 0);
+  // ── Time & scope filters (slice local cache — no extra network requests) ──
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all_time');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('my_tasks');
 
 
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
   const [showPermissionOnboarding, setShowPermissionOnboarding] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [showDrawer, setShowDrawer] = useState(false);
   const [toastConfig, setToastConfig] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
 
   // Gamification
-  const { leaderboard: gamifyLb, myStats, loading: gamifyLoading } = useGamification(propertyId);
+  const { leaderboard: gamifyLb, myStats } = useGamification(propertyId);
 
-  // Countdown
-  const [countdown, setCountdown] = useState('00:00:00');
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = new Date();
-      const end = new Date(now);
-      end.setHours(23, 59, 59, 999);
-      const ms = Math.max(0, end.getTime() - now.getTime());
-      const hh = Math.floor(ms / 3600000);
-      const mm = Math.floor((ms % 3600000) / 60000);
-      const ss = Math.floor((ms % 60000) / 1000);
-      setCountdown(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // ── Data fetching ──
-  const fetchData = useCallback(async () => {
-    if (!propertyId) return;
-    try {
-      // Fetch all data in parallel using serverApi
-      const [propRes, ticketRes, shiftRes, skillsRes, resolverStatsRes, ppmRes] = await Promise.allSettled([
+  // ── Server Query ──
+  const {
+    data,
+    isLoading,
+    isFetching,
+    refetch,
+  } = useServerQuery<{
+    property: { name: string } | null;
+    tickets: Ticket[];
+    isCheckedIn: boolean;
+    checklistStats?: { completed: number; total: number };
+  }>(
+    [...queryKeys.property.mstDashboardLovable(propertyId), scopeFilter, user?.id || ''],
+    async () => {
+      const [propRes, ticketRes, shiftRes, checklistRes] = await Promise.all([
         serverApi.query<{ name: string }[]>({
           table: 'properties',
           action: 'select',
@@ -323,12 +624,10 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
           filters: [{ op: 'eq', column: 'id', value: propertyId }],
           limit: 1,
         }),
-        serverApi.query<Ticket[]>({
-          table: 'tickets',
-          action: 'select',
-          select: '*',
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'created_at', ascending: false }],
+        serverApi.get<{ tickets: Ticket[]; total: number }>('/api/tickets', {
+          propertyId,
+          limit: '100',
+          ...(scopeFilter === 'my_tasks' && user?.id ? { userId: user.id } : {}),
         }),
         serverApi.query<{ is_checked_in: boolean }[]>({
           table: 'resolver_stats',
@@ -340,103 +639,100 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
           ],
           limit: 1,
         }),
-        serverApi.query<{ skill_group_code: string }[]>({
-          table: 'mst_skills',
-          action: 'select',
-          select: 'skill_group_code',
-          filters: [
-            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
-            { op: 'eq', column: 'property_id', value: propertyId },
-          ],
-          limit: 1,
-        }),
-        serverApi.query<{ skills: string[]; specialization: string }[]>({
-          table: 'resolver_stats',
-          action: 'select',
-          select: 'skills, specialization',
-          filters: [
-            { op: 'eq', column: 'user_id', value: user?.id ?? '' },
-            { op: 'eq', column: 'property_id', value: propertyId },
-          ],
-          limit: 1,
-        }),
-        ppmService.fetchStats(propertyId).catch(() => null),
+        serverApi.get<{ templates: any[] }>('/api/checklist', { propertyId }),
       ]);
 
-      // Helper to get data from PromiseSettledResult
-      const getData = (result: PromiseSettledResult<any>): any => {
-        return result.status === 'fulfilled' ? result.value : null;
-      };
+      let totalChecklists = 0;
+      let completedChecklists = 0;
+      const todayStr = new Date().toISOString().split('T')[0];
 
-      // Update state
-      const propData = getData(propRes)?.data?.[0];
-      if (propData) setProperty(propData);
-
-      const ticketData = getData(ticketRes)?.data ?? [];
-      if (ticketData) setTickets(ticketData);
-
-      const shiftData = getData(shiftRes)?.data?.[0];
-      if (shiftData) setIsCheckedIn(!!shiftData.is_checked_in);
-
-      // Fetch specialization
-      let cachedUserSkills = userSkills;
-      let cachedSpecialization = specialization;
-
-      const skills = getData(skillsRes)?.data?.[0];
-      if (skills?.skill_group_code) {
-        const spec = skills.skill_group_code.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-        setUserSkills([skills.skill_group_code]);
-        setSpecialization(spec);
-        cachedUserSkills = [skills.skill_group_code];
-        cachedSpecialization = spec;
-      } else {
-        const resolverStats = getData(resolverStatsRes)?.data?.[0];
-        if (resolverStats?.skills && Array.isArray(resolverStats.skills)) {
-          setUserSkills(resolverStats.skills);
-          cachedUserSkills = resolverStats.skills;
-          if (resolverStats.skills.length > 0) {
-            const spec = resolverStats.skills[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-            setSpecialization(spec);
-            cachedSpecialization = spec;
+      if (checklistRes.data?.templates) {
+        checklistRes.data.templates.forEach((t) => {
+          if (t.frequency?.toLowerCase() === 'daily') {
+            totalChecklists++;
+            const todaysCompletion = t.completions?.find((c: any) => c.completion_date === todayStr || c.created_at?.startsWith(todayStr));
+            if (todaysCompletion && todaysCompletion.status === 'completed') {
+              completedChecklists++;
+            }
           }
-        }
+        });
       }
 
-      // PPM stats
-      let cachedPpmTotal = 0, cachedPpmDone = 0, cachedPpmPending = 0, cachedPpmOverdue = 0, cachedPpmPostponed = 0;
-      const ppmResult = getData(ppmRes);
-      if (ppmResult?.success && ppmResult?.data) {
-        cachedPpmTotal = ppmResult.data.total ?? 0;
-        cachedPpmDone = ppmResult.data.done ?? 0;
-        cachedPpmPending = ppmResult.data.pending ?? 0;
-        cachedPpmOverdue = ppmResult.data.overdue ?? 0;
-        cachedPpmPostponed = ppmResult.data.postponed ?? 0;
-        setPpmTotal(cachedPpmTotal);
-        setPpmDone(cachedPpmDone);
-        setPpmPending(cachedPpmPending);
-        setPpmOverdue(cachedPpmOverdue);
-        setPpmPostponed(cachedPpmPostponed);
-      }
+      return {
+        property: propRes.data?.[0] ?? null,
+        tickets: (ticketRes.data as any)?.tickets ?? ticketRes.data ?? [],
+        isCheckedIn: shiftRes.data?.[0]?.is_checked_in ?? false,
+        checklistStats: { completed: completedChecklists, total: totalChecklists },
+      };
+    },
+    { staleTime: 1000 * 60 * 5 }
+  );
 
-      // Note: Caching is now handled by React Query, no need for manual saveStaffCache
 
-    } catch (err) {
-      console.warn('[LovableStaffDashboard] fetch error:', err);
-    } finally {
-      setIsRefreshing(false);
+
+  const hasValidDashboardData =
+    !!data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    Array.isArray((data as { tickets?: unknown }).tickets);
+
+  const property = hasValidDashboardData ? data.property ?? null : null;
+  const tickets = hasValidDashboardData ? data.tickets : [];
+  const isCheckedIn = hasValidDashboardData ? !!data.isCheckedIn : false;
+  const leaderboardData = Array.isArray(gamifyLb) ? gamifyLb : [];
+
+  // Filtered tickets — sliced locally from cached/server data, no extra network call
+  const filteredTickets = useMemo(() => {
+    let result = [...tickets];
+    if (scopeFilter === 'my_tasks') {
+      result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
     }
-  }, [propertyId, user?.id]);
+    if (timeFilter === 'today') {
+      const today = new Date().toISOString().split('T')[0];
+      result = result.filter(t => t.created_at?.startsWith(today));
+    } else if (timeFilter === 'month') {
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+      result = result.filter(t => new Date(t.created_at ?? 0) >= monthStart);
+    }
+    return result;
+  }, [tickets, timeFilter, scopeFilter, user?.id]);
+
+  // Exact ticket counts — not capped by the 100-row list limit
+  const { data: exactTicketCounts } = useQuery({
+    queryKey: ['mst-dashboard-ticket-counts', propertyId, scopeFilter, timeFilter, user?.id || ''],
+    queryFn: () => fetchTicketCountBatch(propertyId, scopeFilter, timeFilter, user?.id),
+    enabled: !!propertyId,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const shuffledTickets = useMemo(() => {
+    // Only show open tickets on shuffled cards
+    const openTickets = filteredTickets.filter(t => 
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
+    );
+    const next = [...openTickets];
+    for (let i = next.length - 1; i > 0; i -= 1) {
+      const swapIndex = Math.floor(Math.random() * (i + 1));
+      [next[i], next[swapIndex]] = [next[swapIndex], next[i]];
+    }
+    return next;
+  }, [filteredTickets]);
 
   useEffect(() => {
     hasRequestedPermissions().then(requested => {
       if (!requested) setShowPermissionOnboarding(true);
     });
-  }, [propertyId]);
+  }, []);
 
-  const onRefresh = async () => {
-    setIsRefreshing(true);
-    await forceRefresh();
-    setIsRefreshing(false);
+  useEffect(() => {
+    if (propertyId && !hasValidDashboardData && !isFetching) {
+      refetch();
+    }
+  }, [propertyId, hasValidDashboardData, isFetching, refetch]);
+
+  const onRefresh = () => {
+    refetch();
+    queryClient.invalidateQueries({ queryKey: ['mst-dashboard-ticket-counts'] });
   };
 
   // ── Shift toggle ──
@@ -445,37 +741,19 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     setIsCheckingInOut(true);
     const newStatus = !isCheckedIn;
 
+    // Optimistically update React Query cache
+    queryClient.setQueryData(
+      queryKeys.property.mstDashboardLovable(propertyId),
+      (old: MstDashboardQueryData | undefined) =>
+        old ? { ...old, isCheckedIn: newStatus } : old
+    );
+
     try {
-      // TODO: shift_logs does not exist in saas_one schema
-      // if (newStatus) {
-      //   const { data: newShift, error: shiftErr }: any = await (supabase
-      //     .from('shift_logs') as any)
-      //     .insert({
-      //       user_id: user.id,
-      //       property_id: propertyId,
-      //       status: 'active',
-      //       check_in_at: new Date().toISOString(),
-      //     })
-      //     .select()
-      //     .single();
-      //   if (shiftErr) throw shiftErr;
-      //   setActiveShiftId(newShift.id);
-      // } else {
-      //   if (activeShiftId) {
-      //     await (supabase.from('shift_logs') as any)
-      //       .update({ status: 'completed', check_out_at: new Date().toISOString() })
-      //       .eq('id', activeShiftId);
-      //   }
-      //   setActiveShiftId(null);
-      // }
+      // Use the dedicated API endpoint like Staff dashboard does
+      await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
+        is_checked_in: newStatus
+      });
 
-        // Call the shift-status endpoint which updates both resolver_stats and shift_logs
-        await serverApi.post(`/api/users/shift-status?propertyId=${propertyId}`, {
-          is_checked_in: newStatus
-        });
-
-      setIsCheckedIn(newStatus);
-      
       try {
         const { sound } = await Audio.Sound.createAsync({
           uri: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'
@@ -491,38 +769,35 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         type: 'success'
       });
     } catch (error: any) {
+      // Revert on error
+      queryClient.setQueryData(
+        queryKeys.property.mstDashboardLovable(propertyId),
+        (old: MstDashboardQueryData | undefined) =>
+          old ? { ...old, isCheckedIn: !newStatus } : old
+      );
       setToastConfig({
         visible: true,
         message: error.message || 'Failed to update shift',
         type: 'error'
       });
-      setIsCheckedIn(!newStatus);
     } finally {
       setIsCheckingInOut(false);
     }
-  }, [isCheckedIn, propertyId, user?.id, activeShiftId, isCheckingInOut]);
-
-  // ── Filtered Tickets ──
-  const filteredTickets = useMemo(() => {
-    let result = [...tickets];
-    if (!isTechnical && scopeFilter === 'my_tasks') {
-      result = result.filter(t => t.assigned_to === user?.id || t.raised_by === user?.id);
-    }
-    return result;
-  }, [tickets, scopeFilter, user?.id, isTechnical]);
+  }, [isCheckedIn, propertyId, user?.id, isCheckingInOut]);
 
   // ── Stats ──
-  const stats = useMemo(() => {
+  // Use exact counts fetched with limit:1 so properties with >100 tickets still report the true totals.
+  const localStats = useMemo(() => {
     const total = filteredTickets.length;
-    const active = filteredTickets.filter((t) =>
-      ['open', 'in_progress', 'blocked', 'client_raised'].includes(t.status)
+    const open = filteredTickets.filter((t) =>
+      ['open', 'waitlist', 'assigned', 'in_progress'].includes(t.status?.toLowerCase())
     ).length;
-    const completed = filteredTickets.filter((t) =>
-      ['resolved', 'closed'].includes(t.status)
+    const closed = filteredTickets.filter((t) =>
+      ['closed', 'completed', 'resolved', 'pending_validation'].includes(t.status?.toLowerCase())
     ).length;
-    const assignedToMe = filteredTickets.filter(t => t.assigned_to === user?.id).length;
-    return { total, active, completed, assignedToMe };
-  }, [filteredTickets, user]);
+    return { total, open, closed };
+  }, [filteredTickets]);
+  const stats = exactTicketCounts ?? localStats;
 
   // ── Gamification user ──
   const mstUser: UserStats = useMemo(() => {
@@ -556,8 +831,8 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   // ── Leaderboard rows ──
   const leaderboardRows: LeaderRow[] = useMemo(() => {
-    if (gamifyLb.length === 0) return demoLeaderboard;
-    return gamifyLb.map((entry, i) => ({
+    if (leaderboardData.length === 0) return demoLeaderboard;
+    return leaderboardData.map((entry, i) => ({
       rank: i + 1,
       name: entry.name || 'Staff',
       initials: (entry.name || 'S').charAt(0).toUpperCase(),
@@ -568,7 +843,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       isMe: entry.user_id === user?.id,
       user_id: entry.user_id,
     }));
-  }, [gamifyLb, property, user?.id]);
+  }, [leaderboardData, property, user?.id]);
 
   const champion: LeaderRow | undefined = leaderboardRows[0];
 
@@ -598,81 +873,85 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         </View>
       </Animated.View>
 
-      {/* Stats card */}
-      {isTechnical ? (
-        <GlassTile label="Tickets" icon="ticket" delay={80} onPress={() => router.push(`/property/${propertyId}/tickets`)}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <View style={{ alignItems: 'flex-start' }}>
-              <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
-              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.active} />
-              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.completed} />
-              <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
-            </View>
+      {/* Stats card matching Property Admin */}
+      <GlassTile label="Tickets" icon="ticket" delay={80} style={{ marginHorizontal: 0 }}>
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {/* Scope filter */}
+          <View style={styles.timeToggleRow}>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('property')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
+              onPress={() => setScopeFilter('my_tasks')}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
+            </TouchableOpacity>
           </View>
-        </GlassTile>
-      ) : (
-        <Animated.View  style={styles.statsCard}>
-          <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
-          <View style={styles.statsCardInner}>
-            <View style={styles.statsCardHeader}>
-              <View style={styles.timeToggleRow}>
-                <TouchableOpacity
-                  style={[styles.timeToggleBtn, scopeFilter === 'property' && styles.timeToggleBtnActive]}
-                  onPress={() => setScopeFilter('property')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.timeToggleText, scopeFilter === 'property' && styles.timeToggleTextActive]}>Property Level</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.timeToggleBtn, scopeFilter === 'my_tasks' && styles.timeToggleBtnActive]}
-                  onPress={() => setScopeFilter('my_tasks')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.timeToggleText, scopeFilter === 'my_tasks' && styles.timeToggleTextActive]}>My Tasks</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <View style={styles.statsGrid}>
-              <StatTile value={String(stats.total)} label="TOTAL" tint={['rgba(99,102,241,0.35)', 'rgba(79,70,229,0.20)']} onPress={() => router.push(`/property/${propertyId}/tickets`)} />
-              <StatTile value={String(stats.active)} label="ACTIVE" tint={['rgba(59,130,246,0.30)', 'rgba(37,99,235,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=active`)} />
-            </View>
-            <View style={[styles.statsGrid, { marginTop: 12 }]}>
-              <StatTile value={String(stats.completed)} label="COMPLETED" tint={['rgba(16,185,129,0.30)', 'rgba(5,150,105,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=completed`)} />
-              <StatTile value={String(stats.assignedToMe)} label="ASSIGNED TO ME" tint={['rgba(245,158,11,0.30)', 'rgba(217,119,6,0.15)']} onPress={() => router.push(`/property/${propertyId}/tickets?filter=mine`)} />
-            </View>
+
+          {/* Time filter */}
+          <View style={[styles.timeToggleRow, { marginBottom: 0 }]}>
+            {TICKET_TIME_FILTER_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option.key}
+                style={[styles.timeToggleBtn, timeFilter === option.key && styles.timeToggleBtnActive]}
+                onPress={() => setTimeFilter(option.key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.timeToggleText, timeFilter === option.key && styles.timeToggleTextActive]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        </Animated.View>
-      )}
+        </View>
 
-      <ChecklistProgressCard completed={stats.completed} total={stats.total} delay={280} />
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ alignItems: 'flex-start' }}>
+            <AnimatedNumber style={styles.tileMetricMid} value={stats.total} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>TOTAL</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#FCA5A5' }]} value={stats.open} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>OPEN</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <AnimatedNumber style={[styles.tileMetricMid, { color: '#10B981' }]} value={stats.closed} />
+            <Text style={[styles.tileSubtext, { marginTop: 0, fontSize: 10, letterSpacing: 1 }]}>CLOSED</Text>
+          </View>
+        </View>
+      </GlassTile>
 
-      <PPMProgressCard
-        propertyId={propertyId}
-        organizationId={orgId}
-        done={ppmDone}
-        total={ppmTotal}
-        pending={ppmPending}
-        overdue={ppmOverdue}
-        postponed={ppmPostponed}
-        delay={320}
-        onPress={() => router.push(`/property/${propertyId}/ppm`)}
-      />
-
-      <PPMActivityTile propertyId={propertyId} organizationId={orgId} delay={380} />
-
-      {/* Property Requests */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionHeaderTitle}>Property Requests</Text>
-        <Text style={styles.sectionHeaderHint}>Tap top card to cycle</Text>
+      <View style={{ marginTop: 24 }}>
+        <View style={[styles.sectionHeader, { marginTop: 0 }]}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFF', letterSpacing: 1 }}>RECENT TICKETS</Text>
+          <TouchableOpacity onPress={() => router.push(`/property/${propertyId}/tickets` as any)}>
+            <Text style={{ fontSize: 12, color: '#FFFFFF' }}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        {isLoading || isFetching ? (
+          <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+            <ActivityIndicator color="rgba(255,255,255,0.6)" />
+          </View>
+        ) : shuffledTickets.length > 0 ? (
+          <TicketStack
+            tickets={shuffledTickets.slice(0, 5)}
+            propertyName={property?.name}
+            onViewTicket={(t) => router.push({ pathname: '/property/[propertyId]/tickets/[id]', params: { propertyId, id: t.id } } as any)}
+          />
+        ) : (
+          <View style={styles.ticketStackEmpty}>
+            <Text style={styles.ticketStackEmptyText}>No tickets for this filter</Text>
+          </View>
+        )}
       </View>
 
-      <TicketStack tickets={tickets.slice(0, 5)} />
+      <ChecklistProgressCard completed={data?.checklistStats?.completed ?? 0} total={data?.checklistStats?.total ?? 0} delay={280} />
     </>
   );
 
@@ -689,13 +968,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
             <Ionicons name="time" size={12} color="rgba(255,255,255,0.60)" />
             <Text style={styles.countdownLabel}>Time left today</Text>
           </View>
-          <View style={styles.countdownBlocks}>
-            <TimeBlock val={parseInt(countdown.split(':')[0], 10)} />
-            <Text style={styles.countdownColon}>:</Text>
-            <TimeBlock val={parseInt(countdown.split(':')[1], 10)} />
-            <Text style={styles.countdownColon}>:</Text>
-            <TimeBlock val={parseInt(countdown.split(':')[2], 10)} />
-          </View>
+          <CountdownTimer />
           <Text style={styles.countdownHint}>Resolve more tickets to climb the board</Text>
         </View>
       </Animated.View>
@@ -705,114 +978,6 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </View>
 
       <Leaderboard rows={leaderboardRows} />
-    </>
-  );
-
-  const renderOperations = () => (
-    <>
-      <Animated.View >
-        <Text style={styles.heroTitle}>Operations</Text>
-      </Animated.View>
-
-      <Animated.View  style={styles.championCard}>
-        <SafeBlurView intensity={30} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={styles.championInner}>
-          <View style={styles.championInfo}>
-            <Text style={styles.championLabel}>Your Specialization</Text>
-            <Text style={styles.championName}>{specialization || 'General Staff'}</Text>
-            <Text style={styles.championMeta}>Access to {userSkills.length > 0 ? userSkills.length : 'all'} module groups</Text>
-          </View>
-          <View style={styles.championAvatarWrap}>
-            <LinearGradient
-              colors={['#8B5CF6', '#6366F1']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.championAvatar}
-            >
-              <Ionicons name="briefcase" size={24} color="#FFFFFF" />
-            </LinearGradient>
-          </View>
-        </View>
-      </Animated.View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionHeaderTitle}>Available Modules</Text>
-      </View>
-
-      <View style={styles.flowGrid}>
-        {/* Conditionally visible modules */}
-        {!isSoftServices && (
-          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/visitors` as any)}>
-            <View style={styles.flowTileInner}>
-              <View style={styles.flowTileHeader}>
-                <Ionicons name="people" size={20} color="#60A5FA" />
-              </View>
-              <Text style={styles.flowTileName}>Visitors</Text>
-              <View style={styles.flowTileStatus}>
-                <Text style={styles.flowTileStatusText}>Visitor Management</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {(!isSoftServices || isManager) && (
-          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/stock` as any)}>
-            <View style={styles.flowTileInner}>
-              <View style={styles.flowTileHeader}>
-                <Ionicons name="cube" size={20} color="#34D399" />
-              </View>
-              <Text style={styles.flowTileName}>Stock</Text>
-              <View style={styles.flowTileStatus}>
-                <Text style={styles.flowTileStatusText}>Inventory & Scans</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Technical Modules */}
-        {isTechnical && (
-          <>
-            <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/diesel` as any)}>
-              <View style={styles.flowTileInner}>
-                <View style={styles.flowTileHeader}>
-                  <Ionicons name="water" size={20} color="#FBBF24" />
-                </View>
-                <Text style={styles.flowTileName}>Diesel</Text>
-                <View style={styles.flowTileStatus}>
-                  <Text style={styles.flowTileStatusText}>Record Readings</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/electricity` as any)}>
-              <View style={styles.flowTileInner}>
-                <View style={styles.flowTileHeader}>
-                  <Ionicons name="flash" size={20} color="#F472B6" />
-                </View>
-                <Text style={styles.flowTileName}>Electricity</Text>
-                <View style={styles.flowTileStatus}>
-                  <Text style={styles.flowTileStatusText}>Meter Readings</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* Soft Services Modules */}
-        {isSoftServices && (
-          <TouchableOpacity style={styles.flowTile} onPress={() => router.push(`/property/${propertyId}/checklist` as any)}>
-            <View style={styles.flowTileInner}>
-              <View style={styles.flowTileHeader}>
-                <Ionicons name="checkbox" size={20} color="#A78BFA" />
-              </View>
-              <Text style={styles.flowTileName}>Checklists</Text>
-              <View style={styles.flowTileStatus}>
-                <Text style={styles.flowTileStatusText}>Daily Operations</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-      </View>
     </>
   );
 
@@ -884,16 +1049,8 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 
   const orgId = membership?.org_id ?? '';
 
-  // BLOCK rendering until we have actual data (prevents empty UI flash)
-  if (!staffData) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" />
-        <WeatherBackground condition={undefined} />
-        <SkeletonLoader />
-      </View>
-    );
-  }
+  // Show header shell instantly (from cached membership) with skeleton content below
+  const isDataReady = !!data;
 
   return (
     <View style={styles.container}>
@@ -901,8 +1058,12 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       <WeatherBackground condition={undefined} />
 
       <Animated.View  style={[styles.shellHeader, { paddingTop: insets.top + 16 }]}>
-          <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setShowDrawer(true)} activeOpacity={0.7}>
-            <Ionicons name="menu" size={28} color="#FFFFFF" />
+          <TouchableOpacity 
+            style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' }}
+            onPress={() => setShowDrawer(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="menu" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <TouchableOpacity style={styles.profileRow} activeOpacity={0.7} onPress={() => setActiveTab('profile')}>
@@ -922,7 +1083,9 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
                 <Text style={styles.greetingName} numberOfLines={1}>
                   Hey, {(user?.user_metadata?.full_name || mstUser.name).split(' ')[0]}
                 </Text>
-                <MobilePropertySelector currentPropertyId={propertyId} />
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  {property?.name || 'MST Portal'}
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -964,103 +1127,34 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
+          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
         {/* Tab content */}
         <View style={styles.tabContent}>
-          {activeTab === 'dashboard' && renderMyDashboard()}
-          {activeTab === 'daily' && renderDailyBoard()}
-          {activeTab === 'operations' && renderOperations()}
-          {activeTab === 'profile' && renderProfile()}
+          {!isDataReady ? (
+            <ContentSkeletonLoader />
+          ) : (
+            <>
+              {activeTab === 'dashboard' && renderMyDashboard()}
+              {activeTab === 'daily' && renderDailyBoard()}
+              {activeTab === 'profile' && renderProfile()}
+            </>
+          )}
         </View>
       </ScrollView>
 
       {/* Modals */}
       <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
+      <GlobalNavigationDrawer
+        visible={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        propertyId={propertyId ?? ''}
+      />
       <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
       <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
-      <Modal visible={showDrawer} transparent animationType="fade" onRequestClose={() => setShowDrawer(false)}>
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }]}>
-            <View style={styles.drawerHeader}>
-              <View style={styles.drawerLogoContainer}>
-                <Image
-                  source={require('@/assets/images/autopilot-logo-new.png')}
-                  style={[styles.drawerLogo, { tintColor: '#FFFFFF' }]}
-                  resizeMode="contain"
-                />
-              </View>
-              <TouchableOpacity onPress={() => setShowDrawer(false)} style={styles.drawerCloseBtn}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.drawerSectionHeader}>
-                <Ionicons name="construct-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>MAINTENANCE PORTAL</Text>
-              </View>
-              {[
-                { label: 'Overview', icon: 'grid-outline', action: () => setActiveTab('dashboard') },
-                { label: 'Requests', icon: 'ticket-outline', route: 'tickets' },
-                { label: 'Live Flow Map', icon: 'git-branch-outline', route: 'flow-map' },
-                { label: 'Visitors', icon: 'people-outline', route: 'visitors' },
-                { label: 'Diesel', icon: 'flame-outline', route: 'diesel', color: '#F97316' },
-                { label: 'Electricity Logger', icon: 'flash-outline', route: 'electricity', color: '#EAB308' },
-                { label: 'Checklists', icon: 'clipboard-outline', route: 'checklist' },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.label}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    if (item.action) {
-                      item.action();
-                    } else if (item.route) {
-                      router.push(`/property/${propertyId}/${item.route}` as any);
-                    }
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color={item.color || 'rgba(255,255,255,0.6)'} />
-                  <Text style={[styles.drawerItemLabel, item.color && { color: item.color }]}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-
-              <View style={[styles.drawerSectionHeader, { marginTop: 20 }]}>
-                <Ionicons name="person-outline" size={14} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.drawerSectionLabel}>ACCOUNT</Text>
-              </View>
-              {[
-                { label: 'Settings', icon: 'settings-outline', route: 'settings' },
-                { label: 'Profile', icon: 'person-outline', local: true },
-              ].map((item) => (
-                <TouchableOpacity
-                  key={item.label}
-                  style={styles.drawerItem}
-                  onPress={() => {
-                    setShowDrawer(false);
-                    if (item.local) {
-                      setActiveTab('profile');
-                      return;
-                    }
-                    router.push(`/property/${propertyId}/${item.route}` as any);
-                  }}
-                >
-                  <Ionicons name={item.icon as any} size={20} color="rgba(255,255,255,0.6)" />
-                  <Text style={styles.drawerItemLabel}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.drawerSignOut} onPress={() => { setShowDrawer(false); setShowSignOut(true); }}>
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-              <Text style={styles.drawerSignOutText}>Logout</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.drawerBackdrop} onPress={() => setShowDrawer(false)} />
-        </View>
-      </Modal>
 
       <Toast 
         {...toastConfig} 
@@ -1073,6 +1167,8 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  tileMetricMid: { fontSize: 28, fontWeight: '800', color: '#FFFFFF' },
+  tileSubtext: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 },
   container: {
     flex: 1,
     backgroundColor: '#4A1A1A',
@@ -1109,8 +1205,8 @@ const styles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 12,
+    marginLeft: 16,
+    marginRight: 16,
   },
   profileRow: {
     flexDirection: 'row',
@@ -1328,6 +1424,7 @@ const styles = StyleSheet.create({
   // Gamification strip
   gamifyCard: {
     marginTop: 20,
+    marginBottom: 20,
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
@@ -1373,6 +1470,64 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+  // Filter chips
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(99,102,241,0.35)',
+    borderColor: 'rgba(99,102,241,0.50)',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.70)',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  timeToggleRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 10,
+    padding: 4,
+    width: '100%',
+  },
+  timeToggleBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  timeToggleBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  timeToggleText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  timeToggleTextActive: {
+    color: '#FFF',
+    fontWeight: '700',
+  },
+
   // Stats card
   statsCard: {
     marginTop: 20,
@@ -1383,6 +1538,35 @@ const styles = StyleSheet.create({
   },
   statsCardInner: {
     padding: 16,
+  },
+  ticketStackSection: {
+    marginTop: 18,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  ticketStackTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.72)',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 14,
+  },
+  ticketStackEmpty: {
+    minHeight: 120,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  ticketStackEmptyText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.58)',
+    textAlign: 'center',
   },
   statsCardHeader: {
     flexDirection: 'row',
@@ -1474,7 +1658,177 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Ticket card (for stack)
+  // ─── Ticket Card (screenshot-style: dark teal) ────────────────────────────
+  tcStackSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: CARD_H,
+  },
+  // Card shell — bg handled by GeminiCardBorder.inner (#1B3040)
+  tcCard: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    padding: 14,
+    gap: 6,
+  },
+  // Row 1: thumb | title+badges | icons
+  tcRow1: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  tcThumbBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexShrink: 0,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcThumb: {
+    width: 64,
+    height: 64,
+  },
+  tcThumbFallback: {
+    width: 64,
+    height: 64,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  tcMiddle: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  tcTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 18,
+  },
+  tcBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  tcBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  tcBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  tcBadgeDark: {
+    backgroundColor: 'rgba(30,41,59,0.80)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  tcBadgeDarkText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 0.3,
+  },
+  // Two vertically-stacked icon buttons — top right
+  tcIconCol: {
+    gap: 6,
+    flexShrink: 0,
+  },
+  tcIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Meta rows (Raised By / Serving)
+  tcMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tcMetaLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.45)',
+    fontWeight: '500',
+    width: 62,
+  },
+  tcMetaValue: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    flex: 1,
+  },
+  // "MH" pill
+  tcMhPill: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  tcMhPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.75)',
+    letterSpacing: 0.5,
+  },
+  // Thin divider
+  tcDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  // Footer
+  tcFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  tcFooterTkt: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.40)',
+    fontWeight: '500',
+  },
+  tcSlaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  tcSlaText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  tcViewBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexShrink: 0,
+  },
+  tcViewBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  // Legacy (unused but kept to avoid TS errors)
+  tcTopRow: { flexDirection: 'row' },
+  tcThumbPlaceholder: {},
+  tcContent: { flex: 1 },
+  tcActionCol: { gap: 6 },
+  tcMetaSection: { gap: 4 },
+  tcServingPill: { backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  tcServingPillText: { fontSize: 9, fontWeight: '800', color: '#FFFFFF' },
+  tcFooterId: { fontSize: 10, color: 'rgba(255,255,255,0.4)', flex: 1 },
+
+  // Legacy (kept for safety)
   ticketCard: {
     borderRadius: 24,
     borderWidth: 1,
@@ -1622,6 +1976,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   ticketViewBtn: {
+    flex: 1,
     borderRadius: 999,
     backgroundColor: '#8B5CF6',
     paddingVertical: 12,
@@ -1636,49 +1991,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
-  },
-  customizeBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  timeToggleRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
-    padding: 4,
-    width: '100%',
-  },
-  timeToggleBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    alignItems: 'center',
-    borderRadius: 6,
-  },
-  timeToggleBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  timeToggleText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  timeToggleTextActive: {
-    color: '#FFF',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-  },
-  tileMetricMid: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#FFF',
-    letterSpacing: -0.5,
-  },
-  tileSubtext: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
-    marginTop: 4,
   },
   ticketAcceptBtn: {
     flex: 1,
@@ -1818,83 +2130,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.60)',
   },
-  flowGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
-  },
-  flowTile: {
-    width: (SCREEN_W - 52) / 2,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    overflow: 'hidden',
-  },
-  flowTileInner: {
-    padding: 14,
-  },
-  flowTileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  flowTileCode: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.55)',
-    letterSpacing: 1.6,
-    textTransform: 'uppercase',
-  },
-  flowTileName: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    lineHeight: 20,
-  },
-  flowTileAvatars: {
-    flexDirection: 'row',
-    marginTop: 12,
-  },
-  flowTileAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.20)',
-    backgroundColor: '#4C3FB8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  flowTileAvatarText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  flowTileStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-  },
-  flowTileDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#34D399',
-    shadowColor: '#34D399',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  flowTileStatusText: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.55)',
-  },
-
   // Profile
   identityCard: {
     marginTop: 8,
@@ -2010,40 +2245,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  // Bottom nav
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 30,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.10)',
-  },
-  bottomNavBlur: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 10,
-    backgroundColor: 'rgba(11,15,25,0.85)',
-  },
-  tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-  },
-  tabButtonActive: {},
-  tabButtonLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.55)',
-  },
-  tabButtonLabelActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-
   // Ask Cassandra
   askCassandraWrap: {
     position: 'absolute',
@@ -2084,3 +2285,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+

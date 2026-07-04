@@ -21,7 +21,7 @@ import { serverApi } from '@/lib/serverApi';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { Colors, DesignTokens } from '@/constants/Colors';
 import { useOnboardingStore } from '@/store/onboardingStore';
-
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Property {
   id: string;
@@ -116,6 +116,7 @@ export default function OnboardingScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const theme = Colors[colorScheme];
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const isFocused = useIsOnScreen();
   const { user, refreshMembership } = useAuth();
   const supabase = createClient();

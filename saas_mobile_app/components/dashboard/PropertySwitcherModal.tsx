@@ -5,7 +5,7 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -85,15 +85,18 @@ export default function PropertySwitcherModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-
-
-            {/* Individual Properties */}
-            {properties.map((p) => {
+          <FlatList
+            data={properties}
+            keyExtractor={(p) => p.id}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.list}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            renderItem={({ item: p }) => {
               const isActive = p.id === currentPropertyId;
               return (
                 <TouchableOpacity
-                  key={p.id}
                   style={[styles.item, isActive && styles.itemActive]}
                   onPress={() => handleSelectProperty(p.id)}
                   activeOpacity={0.7}
@@ -122,8 +125,8 @@ export default function PropertySwitcherModal({
                   )}
                 </TouchableOpacity>
               );
-            })}
-          </ScrollView>
+            }}
+          />
           <SafeAreaView edges={['bottom']} />
         </View>
       </View>

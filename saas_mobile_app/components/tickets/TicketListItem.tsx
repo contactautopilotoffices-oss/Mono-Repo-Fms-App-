@@ -21,6 +21,7 @@ interface TicketListItemProps {
   assignedTo?: string;
   assigneePhotoUrl?: string | null;
   photoUrl?: string;
+  resolvedAt?: string | null;
   escalationChain?: { name: string; avatar?: string | null }[];
   hasMaterial?: boolean;
   materialCount?: number;
@@ -50,17 +51,46 @@ function formatTimeAgo(dateStr: string): string {
 
 export default function TicketListItem({
   id, title, status, priority, ticketNumber,
-  createdAt, assignedTo, assigneePhotoUrl, photoUrl,
+  createdAt, resolvedAt, assignedTo, assigneePhotoUrl, photoUrl,
   escalationChain, hasMaterial, materialCount, onPress,
 }: TicketListItemProps) {
   const [timeAgo, setTimeAgo] = useState(() => formatTimeAgo(createdAt));
-  const isClosed = ['resolved', 'closed'].includes(status);
+  const isClosed = ['resolved', 'closed', 'completed'].includes(status?.toLowerCase() || '');
+
+  // Live timer logic matching TicketCard.tsx
+  const dateObj = React.useMemo(() => new Date(createdAt), [createdAt]);
+  const resolvedObj = React.useMemo(() => resolvedAt ? new Date(resolvedAt) : null, [resolvedAt]);
+  
+  const [internalTick, setInternalTick] = useState(0);
 
   useEffect(() => {
     if (isClosed) return;
-    const interval = setInterval(() => setTimeAgo(formatTimeAgo(createdAt)), 30000);
+    const interval = setInterval(() => {
+      setTimeAgo(formatTimeAgo(createdAt));
+      setInternalTick(prev => prev + 1);
+    }, 1000);
     return () => clearInterval(interval);
   }, [createdAt, isClosed]);
+
+  const elapsedSec = React.useMemo(
+    () => {
+      const end = (isClosed && resolvedObj) ? resolvedObj.getTime() : Date.now();
+      return Math.max(0, Math.floor((end - dateObj.getTime()) / 1000));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [internalTick, dateObj, isClosed, resolvedObj]
+  );
+
+  const formatElapsed = (sec: number) => {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
 
   const pCfg = PRIORITY_CONFIG[priority?.toLowerCase()] ?? PRIORITY_CONFIG.low;
 
@@ -160,12 +190,21 @@ export default function TicketListItem({
           )}
         </View>
 
-        {/* Right side: photo + chevron */}
+        {/* Right side: photo + chevron + timer pill */}
         <View style={styles.rightSide}>
-          {photoUrl && (
-            <Image source={{ uri: photoUrl }} style={styles.ticketPhoto} />
-          )}
-          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
+          <View style={styles.rightSideTop}>
+            {photoUrl && (
+              <Image source={{ uri: photoUrl }} style={styles.ticketPhoto} />
+            )}
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" style={{ alignSelf: 'center' }} />
+          </View>
+          <View style={{ flex: 1 }} />
+          <View style={[styles.timerPill, isClosed ? styles.timerPillClosed : styles.timerPillOpen]}>
+            <Ionicons name="timer-outline" size={12} color={isClosed ? '#94A3B8' : '#F59E0B'} />
+            <Text style={[styles.timerPillText, { color: isClosed ? '#94A3B8' : '#F59E0B' }]}>
+              {formatElapsed(elapsedSec)}
+            </Text>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -348,18 +387,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   escInitialsText: {
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: '700',
   },
   rightSide: {
-    justifyContent: 'center',
+    width: 90,
+    paddingRight: 14,
+    paddingVertical: 14,
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.06)',
+  },
+  rightSideTop: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 12,
+    justifyContent: 'flex-end',
     gap: 8,
   },
   ticketPhoto: {
-    width: 48,
-    height: 48,
+    width: 44,
+    height: 44,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  timerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  timerPillClosed: {
+    backgroundColor: 'rgba(148,163,184,0.15)',
+  },
+  timerPillOpen: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+  },
+  timerPillText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

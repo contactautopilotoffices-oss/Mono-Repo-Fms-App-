@@ -218,6 +218,23 @@ export default function LovableSuperAdminDashboard() {
     });
   }, [properties, debouncedQuery]);
 
+  // ── Loading: show skeleton only if no cache AND membership still loading ────────
+  const isLoading = isMembershipLoading || (!hasLoadedInitialData && properties.length === 0);
+
+  if (isLoading) {
+    return (
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar barStyle="light-content" />
+        <LinearGradient
+          colors={['#1c2135', '#0f121e', '#07090e']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <WeatherBackground condition={weather?.condition} />
+        <SkeletonLoader />
+      </View>
+    );
+  }
+
   // Access denied
   if (!hasAccess) {
     return (
@@ -236,18 +253,6 @@ export default function LovableSuperAdminDashboard() {
         <TouchableOpacity style={styles.accessSignOut} onPress={signOut}>
           <Text style={styles.accessSignOutText}>Sign Out</Text>
         </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ── Loading: show skeleton only if no cache AND membership still loading ────────
-  const isLoading = !hasLoadedInitialData && properties.length === 0;
-
-  if (isLoading) {
-    return (
-      <View style={[styles.loadingContainer, { backgroundColor: BG, paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" />
-        <SkeletonLoader />
       </View>
     );
   }
@@ -307,7 +312,9 @@ export default function LovableSuperAdminDashboard() {
             <View style={[styles.mainHeader, { paddingTop: insets.top + 12 }]}>
               <View>
                 <Text style={styles.mainTitle}>Properties</Text>
-                <Text style={styles.mainSubtitle}>Super Admin Dashboard</Text>
+                <Text style={styles.mainSubtitle}>
+                  {isSuperAdmin ? 'Super Admin Dashboard' : 'Property Selector'}
+                </Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 {isSuperAdmin && (

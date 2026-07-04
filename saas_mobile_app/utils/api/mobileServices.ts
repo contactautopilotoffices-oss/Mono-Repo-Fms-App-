@@ -14,6 +14,7 @@ export interface VmsCheckInPayload {
 
 export interface PpmUpdatePayload {
   id: string;
+  propertyId?: string;
   status: 'pending' | 'done' | 'postponed' | 'skipped';
   done_date?: string;
   remark?: string;

@@ -353,6 +353,7 @@ export default function LiveFlowMap() {
             }
             ticketNumber={ticket.ticket_number}
             createdAt={ticket.created_at}
+            resolvedAt={ticket.resolved_at}
             assignedTo={ticket.assignee?.full_name || 'Unassigned'}
             assigneePhotoUrl={ticket.assignee?.user_photo_url}
             photoUrl={ticket.photo_before_url}

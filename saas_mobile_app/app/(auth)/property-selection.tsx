@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { apiFetch } from '@/utils/api/mobileApi';
 import { Colors } from '@/constants/Colors';
 import { useDashboardStore } from '@/stores/dashboardStore';
+import { serverApi } from '@/lib/serverApi';
 import { queryClient } from '@/utils/queryClient';
 import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
 
@@ -103,25 +104,28 @@ export default function PropertySelectionScreen() {
 
     const fetchNames = async () => {
       const ids = properties.map((p) => p.id);
-      // Fetch all properties by making parallel requests for each ID
-      const nameMap: Record<string, string> = {};
-      await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const res = await apiFetch<{ success: boolean; data: { id: string; name: string } }>(`/api/properties/${id}`);
-            if (res.success && res.data) {
-              nameMap[res.data.id] = res.data.name;
-            }
-          } catch {
-            // Ignore individual failures
-          }
-        })
-      );
-      setPropertyNames(nameMap);
+      try {
+        const res = await serverApi.query<any[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'id, name',
+          filters: [{ op: 'in', column: 'id', values: ids }]
+        });
+        
+        if (res.data) {
+          const nameMap: Record<string, string> = {};
+          res.data.forEach((p: any) => {
+            nameMap[p.id] = p.name;
+          });
+          setPropertyNames(nameMap);
+        }
+      } catch (err) {
+        console.error('Failed to fetch property names', err);
+      }
     };
 
     fetchNames();
-}, [properties]);
+  }, [properties]);
 
   // Auto-redirect removed to allow explicit selection by the user
   // useEffect(() => {

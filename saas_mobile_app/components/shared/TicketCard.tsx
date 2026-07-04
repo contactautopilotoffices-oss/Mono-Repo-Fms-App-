@@ -23,6 +23,7 @@ export interface TicketCardProps {
   status: 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'OPEN' | 'PENDING_VALIDATION';
   ticketNumber: string;
   createdAt: string;
+  resolvedAt?: string | null;
   assignedTo?: string;
   assigneePhotoUrl?: string | null;
   photoUrl?: string;
@@ -56,6 +57,7 @@ const TicketCard = memo(function TicketCard({
   tick, glass, blurIntensity = 40, blurContent = false, raisedByName,
 }: TicketCardProps) {
   const dateObj = useMemo(() => new Date(createdAt), [createdAt]);
+  const resolvedObj = useMemo(() => resolvedAt ? new Date(resolvedAt) : null, [resolvedAt]);
   const dateStr = dateObj.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
   const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
@@ -92,12 +94,24 @@ const TicketCard = memo(function TicketCard({
   const isClosed = ['COMPLETED', 'CLOSED', 'RESOLVED'].includes(status?.toUpperCase() || '');
   const isCritical = priority?.toUpperCase() === 'CRITICAL' && !isClosed;
 
-  // Elapsed time: reads from parent's shared tick if provided, otherwise computes once.
-  // No setInterval per card — exactly ONE timer drives all cards from the parent.
+  const [internalTick, setInternalTick] = useState(0);
+
+  useEffect(() => {
+    if (isClosed || tick !== undefined) return;
+    const interval = setInterval(() => {
+      setInternalTick(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isClosed, tick]);
+
+  // Elapsed time: reads from parent's shared tick if provided, otherwise uses internal tick.
   const elapsedSec = useMemo(
-    () => Math.floor((Date.now() - dateObj.getTime()) / 1000),
+    () => {
+      const end = (isClosed && resolvedObj) ? resolvedObj.getTime() : Date.now();
+      return Math.max(0, Math.floor((end - dateObj.getTime()) / 1000));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tick ?? 0, dateObj]
+    [tick ?? internalTick, dateObj, isClosed, resolvedObj]
   );
 
   const formatElapsed = (sec: number) => {
@@ -186,6 +200,14 @@ const TicketCard = memo(function TicketCard({
         </View>
       </View>
 
+      {/* Timing Pill */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: isClosed ? (isDark ? 'rgba(148,163,184,0.15)' : '#F1F5F9') : 'rgba(245, 158, 11, 0.12)', alignSelf: 'flex-start', marginTop: 4 }}>
+        <Ionicons name="timer-outline" size={12} color={isClosed ? '#94A3B8' : '#F59E0B'} />
+        <Text style={{ fontSize: 12, fontWeight: '700', color: isClosed ? '#94A3B8' : '#F59E0B' }}>
+          {formatElapsed(elapsedSec)}
+        </Text>
+      </View>
+
       {/* Badges */}
       <View style={styles.badgeRow}>
         <View style={[styles.badge, { backgroundColor: pStyle.bg, borderColor: pStyle.bg }]}>
@@ -260,12 +282,6 @@ const TicketCard = memo(function TicketCard({
       <View style={[styles.footer, { borderTopColor: colors.border, paddingTop: compact ? 8 : 10 }]}>
         <View style={styles.footerLeft}>
           <Text style={[styles.metaText, { color: colors.textSecondary, fontWeight: '700' }, compact && { fontSize: 9, marginBottom: 0 }]}>{ticketNumber} • {dateStr}</Text>
-          <View style={styles.timerRow}>
-            <Ionicons name="timer-outline" size={compact ? 9 : 11} color={timerColor} />
-            <Text style={[styles.timerText, { color: timerColor }, compact && { fontSize: 9 }]}>
-              {isClosed ? `Closed` : formatElapsed(elapsedSec)}
-            </Text>
-          </View>
         </View>
         <TouchableOpacity style={[styles.viewBtn, compact && { paddingHorizontal: 10, paddingVertical: 5 }]} onPress={onClick}>
           <Text style={[styles.viewBtnText, compact && { fontSize: 10 }]}>View</Text>

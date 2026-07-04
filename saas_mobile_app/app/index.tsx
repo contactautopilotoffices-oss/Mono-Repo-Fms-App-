@@ -3,6 +3,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { View, Text } from 'react-native';
 import { useEffect } from 'react';
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet } from 'react-native';
 
 export default function Index() {
   const { user, isLoading, membership, isMembershipLoading } = useAuth();
@@ -16,7 +19,12 @@ export default function Index() {
   // Wait for both Auth and Membership to finish loading
   if (isLoading || isMembershipLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#121212' }}>
+      <View style={{ flex: 1 }}>
+        <LinearGradient
+          colors={['#1c2135', '#0f121e', '#07090e']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <WeatherBackground condition={undefined} />
         <SkeletonLoader />
       </View>
     );
@@ -36,7 +44,12 @@ export default function Index() {
   // membership cache expires or fetch is slow.
   if (!membership) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#121212' }}>
+      <View style={{ flex: 1 }}>
+        <LinearGradient
+          colors={['#1c2135', '#0f121e', '#07090e']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <WeatherBackground condition={undefined} />
         <SkeletonLoader />
       </View>
     );

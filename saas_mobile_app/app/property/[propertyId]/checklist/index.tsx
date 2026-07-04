@@ -2566,6 +2566,12 @@ export default function ChecklistScreen() {
             )}
           />
         </KeyboardAvoidingView>
+        <MediaViewerModal
+          visible={!!mediaViewer}
+          uri={mediaViewer?.uri || null}
+          type={mediaViewer?.type || 'photo'}
+          onClose={() => setMediaViewer(null)}
+        />
       </View>
     );
   }
@@ -2949,6 +2955,12 @@ export default function ChecklistScreen() {
               </View>
             );
           }}
+        />
+        <MediaViewerModal
+          visible={!!mediaViewer}
+          uri={mediaViewer?.uri || null}
+          type={mediaViewer?.type || 'photo'}
+          onClose={() => setMediaViewer(null)}
         />
       </View>
     );

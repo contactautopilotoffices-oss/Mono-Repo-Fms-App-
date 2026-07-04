@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, FlatList, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { useRouter, usePathname } from 'expo-router';
 import { queryClient } from '@/utils/queryClient';
 
@@ -69,10 +69,16 @@ export default function MobilePropertySelector({ currentPropertyId }: { currentP
                 <Ionicons name="close" size={24} color="#64748B" />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.scrollArea}>
-              {properties.map((prop: any) => (
+            <FlatList
+              data={properties}
+              keyExtractor={(p) => p.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollArea}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              renderItem={({ item: prop }) => (
                 <TouchableOpacity
-                  key={prop.id}
                   style={[
                     styles.propertyRow,
                     prop.id === currentPropertyId && styles.propertyRowActive,
@@ -101,8 +107,8 @@ export default function MobilePropertySelector({ currentPropertyId }: { currentP
                     <Ionicons name="checkmark-circle" size={22} color="#8B5CF6" />
                   )}
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              )}
+            />
           </View>
         </TouchableOpacity>
       </Modal>

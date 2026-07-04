@@ -356,119 +356,46 @@ export async function checkPropertyAccess(
   userOverride?: { id: string; email?: string } | null
 ): Promise<PropertyAccessResponse> {
   try {
-    const supabase = createClient();
-
-    // Get current user — prefer passed-in user (from AuthContext) to avoid session
-    // hydration issues between the mobileApi singleton and AuthContext's client.
-    let user = userOverride ?? null;
-    if (!user) {
-      console.log('[checkPropertyAccess] No userOverride — attempting getSession');
-      const { data: sessionData } = await supabase.auth.getSession();
-      user = sessionData?.session?.user ?? null;
-    }
-    console.log('[checkPropertyAccess] Acting user:', user?.email, 'id:', user?.id);
-    if (!user) {
-      console.log('[checkPropertyAccess] No user — returning unauthorized');
-      return { authorized: false };
-    }
-
-    // 1. Handle org-wide "all" overview for org admins
+    // Org-wide "all" overview for org admins. The server property-access endpoint
+    // is scoped to a single property and doesn't understand the 'all' sentinel, so
+    // we resolve this case here via the server query proxy (RLS-bypassed server-side).
     if (propertyId === 'all') {
-      console.log('[checkPropertyAccess] Org-wide overview requested');
-      const { data: orgMemberships, error: orgError } = await supabase
-        .from('organization_memberships')
-        .select('role')
-        .eq('user_id', user.id)
-        .eq('is_active', true) as { data: { role: string }[] | null; error: unknown };
-      if (orgError) console.error('[checkPropertyAccess] org_memberships error:', orgError);
+      // Resolve the acting user — prefer the passed-in user to avoid session
+      // hydration races between the mobileApi singleton and AuthContext's client.
+      let user = userOverride ?? null;
+      if (!user) {
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        user = sessionData?.session?.user ?? null;
+      }
+      if (!user) return { authorized: false };
+
+      const { data: orgMemberships } = await serverApi.query<{ role: string }[]>({
+        table: 'organization_memberships',
+        action: 'select',
+        select: 'role',
+        filters: [
+          { op: 'eq', column: 'user_id', value: user.id },
+          { op: 'eq', column: 'is_active', value: true },
+        ],
+      });
 
       const adminRole = orgMemberships?.find((m) =>
         ['org_admin', 'org_super_admin', 'owner', 'admin'].includes(m.role)
       )?.role;
-      if (adminRole) {
-        console.log('[checkPropertyAccess] Org-wide access granted:', adminRole);
-        return { authorized: true, role: adminRole };
-      }
-      console.log('[checkPropertyAccess] No org admin membership for all-properties view');
-      return { authorized: false };
+      return adminRole ? { authorized: true, role: adminRole } : { authorized: false };
     }
 
-    // 2. Check if master admin
-    console.log('[checkPropertyAccess] Checking users table for:', user.id);
-    const { data: userProfile, error: userError } = await supabase
-      .from('users')
-      .select('is_master_admin')
-      .eq('id', user.id)
-      .maybeSingle() as { data: { is_master_admin: boolean } | null; error: unknown };
-    if (userError) console.error('[checkPropertyAccess] users table error:', userError);
-    if (userProfile?.is_master_admin) {
-      console.log('[checkPropertyAccess] Master admin confirmed');
-      return { authorized: true, role: 'master_admin' };
-    }
-
-    // 2. Get property's organization
-    console.log('[checkPropertyAccess] Checking properties table for:', propertyId);
-    const { data: property, error: propError } = await supabase
-      .from('properties')
-      .select('organization_id')
-      .eq('id', propertyId)
-      .maybeSingle() as { data: { organization_id: string } | null; error: unknown };
-    if (propError) console.error('[checkPropertyAccess] properties table error:', propError);
-    console.log('[checkPropertyAccess] Property org_id:', property?.organization_id);
-
-    // 3. Org-level access check
-    if (property?.organization_id) {
-      console.log('[checkPropertyAccess] Checking org memberships for org:', property.organization_id, 'user:', user.id);
-      const { data: orgMembership, error: orgError } = await supabase
-        .from('organization_memberships')
-        .select('role')
-        .eq('user_id', user.id)
-        .eq('organization_id', property.organization_id)
-        .eq('is_active', true)
-        .maybeSingle() as { data: { role: string } | null; error: unknown };
-      if (orgError) console.error('[checkPropertyAccess] org_memberships error:', orgError);
-      console.log('[checkPropertyAccess] Org membership:', orgMembership);
-
-      if (orgMembership && ['org_admin', 'org_super_admin', 'owner', 'admin'].includes(orgMembership.role)) {
-        console.log('[checkPropertyAccess] Org-level access granted:', orgMembership.role);
-        return { authorized: true, role: orgMembership.role };
-      }
-
-      // Super tenant: must have property in their portfolio
-      if (orgMembership?.role === 'super_tenant') {
-        const { data: stProp } = await supabase
-          .from('super_tenant_properties')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('property_id', propertyId)
-          .eq('organization_id', property.organization_id)
-          .maybeSingle();
-        if (stProp) {
-          console.log('[checkPropertyAccess] Super-tenant portfolio access granted');
-          return { authorized: true, role: 'super_tenant' };
-        }
-      }
-    }
-
-    // 4. Property-level membership check
-    console.log('[checkPropertyAccess] Checking property_memberships for:', user.id, 'property:', propertyId);
-    const { data: propMembership, error: propMemError } = await supabase
-      .from('property_memberships')
-      .select('role')
-      .eq('user_id', user.id)
-      .eq('property_id', propertyId)
-      .or('is_active.eq.true,is_active.is.null')
-      .maybeSingle() as { data: { role: string } | null; error: unknown };
-    if (propMemError) console.error('[checkPropertyAccess] property_memberships error:', propMemError);
-    console.log('[checkPropertyAccess] Property membership:', propMembership);
-
-    if (propMembership) {
-      console.log('[checkPropertyAccess] Property-level access granted:', propMembership.role);
-      return { authorized: true, role: propMembership.role };
-    }
-
-    console.log('[checkPropertyAccess] No matching membership — returning unauthorized');
-    return { authorized: false };
+    // Specific property — delegate the full master-admin / org / property /
+    // super-tenant evaluation to the server. It derives the user from the auth
+    // token, so no userOverride plumbing is needed here.
+    const { data, error } = await serverApi.get<PropertyAccessResponse>(
+      '/api/auth/property-access',
+      { propertyId }
+    );
+    // A 403 (no access) surfaces as an error here — treat as unauthorized.
+    if (error || !data) return { authorized: false };
+    return data;
   } catch (err) {
     console.error('[checkPropertyAccess] Unexpected error:', err);
     return { authorized: false, role: 'unknown' };
@@ -1130,46 +1057,53 @@ export async function fetchUsersList(orgId?: string, propertyId?: string): Promi
  * This adds an existing user to a property/org membership.
  */
 export async function createMemberUser(data: CreateUserRequest): Promise<CreateUserResponse> {
-  const supabase = createClient();
   try {
     // Check if user exists by email
-    const { data: existingUser, error: lookupError } = await (supabase as any)
-      .from('users')
-      .select('id, full_name, email')
-      .eq('email', data.email.toLowerCase().trim())
-      .maybeSingle();
+    const { data: existingUser, error: lookupError } = await serverApi.query<{ id: string; full_name: string; email: string }>({
+      table: 'users',
+      action: 'select',
+      select: 'id, full_name, email',
+      filters: [{ op: 'eq', column: 'email', value: data.email.toLowerCase().trim() }],
+      maybeSingle: true,
+    });
 
-    if (lookupError) throw lookupError;
+    if (lookupError) throw new Error(lookupError.message);
     if (!existingUser) {
       return { success: false, error: 'User not found. Ask the user to sign up first, then add them here.' };
     }
 
     // Add to property membership if propertyId given
     if (data.property_id) {
-      const { error: memError } = await (supabase as any)
-        .from('property_memberships')
-        .upsert({
+      const { error: memError } = await serverApi.query({
+        table: 'property_memberships',
+        action: 'upsert',
+        values: {
           user_id: existingUser.id,
           property_id: data.property_id,
           organization_id: data.organization_id,
           role: data.role || 'staff',
           is_active: true,
           joined_at: new Date().toISOString(),
-        }, { onConflict: 'user_id,property_id' });
-      if (memError) throw memError;
+        },
+        mutationOptions: { onConflict: 'user_id,property_id' },
+      });
+      if (memError) throw new Error(memError.message);
     }
 
     // Always add to org membership
-    const { error: orgMemError } = await (supabase as any)
-      .from('organization_memberships')
-      .upsert({
+    const { error: orgMemError } = await serverApi.query({
+      table: 'organization_memberships',
+      action: 'upsert',
+      values: {
         user_id: existingUser.id,
         organization_id: data.organization_id,
         role: data.role || 'staff',
         is_active: true,
         joined_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,organization_id' });
-    if (orgMemError) throw orgMemError;
+      },
+      mutationOptions: { onConflict: 'user_id,organization_id' },
+    });
+    if (orgMemError) throw new Error(orgMemError.message);
 
     return {
       success: true,
@@ -1201,23 +1135,30 @@ export interface UpdateRoleResponse {
  * Replaces the Vercel API call.
  */
 export async function updateMemberRole(data: UpdateRoleRequest): Promise<UpdateRoleResponse> {
-  const supabase = createClient();
   try {
     if (data.propertyId) {
-      const { error } = await (supabase as any)
-        .from('property_memberships')
-        .update({ role: data.newRole })
-        .eq('user_id', data.userId)
-        .eq('property_id', data.propertyId);
-      if (error) throw error;
+      const { error } = await serverApi.query({
+        table: 'property_memberships',
+        action: 'update',
+        values: { role: data.newRole },
+        filters: [
+          { op: 'eq', column: 'user_id', value: data.userId },
+          { op: 'eq', column: 'property_id', value: data.propertyId },
+        ],
+      });
+      if (error) throw new Error(error.message);
     }
     if (data.organizationId) {
-      const { error } = await (supabase as any)
-        .from('organization_memberships')
-        .update({ role: data.newRole })
-        .eq('user_id', data.userId)
-        .eq('organization_id', data.organizationId);
-      if (error) throw error;
+      const { error } = await serverApi.query({
+        table: 'organization_memberships',
+        action: 'update',
+        values: { role: data.newRole },
+        filters: [
+          { op: 'eq', column: 'user_id', value: data.userId },
+          { op: 'eq', column: 'organization_id', value: data.organizationId },
+        ],
+      });
+      if (error) throw new Error(error.message);
     }
     return { success: true };
   } catch (err: any) {

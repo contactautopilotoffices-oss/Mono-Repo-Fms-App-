@@ -89,13 +89,13 @@ export const mmkvAsyncStorage = {
     }
     return AsyncStorage.multiGet(keys);
   },
-  multiSet: async (keyValuePairs: string[][]): Promise<void> => {
+  multiSet: async (keyValuePairs: [string, string][]): Promise<void> => {
     if (isMMKVAvailable) {
       keyValuePairs.forEach(([key, value]) => {
         mmkvStorage.set(key, value);
       });
     } else {
-      await AsyncStorage.multiSet(keyValuePairs);
+      await AsyncStorage.multiSet(keyValuePairs as [string, string][]);
     }
   },
   multiRemove: async (keys: readonly string[]): Promise<void> => {

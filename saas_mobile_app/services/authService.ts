@@ -20,6 +20,7 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { createClient } from '@/utils/supabase/client';
+import { serverApi } from '@/lib/serverApi';
 import { ApiResponse, User } from '@/types';
 
 export interface LoginCredentials {
@@ -45,8 +46,6 @@ export interface UpdatePasswordData {
 
 // Create the OAuth redirect URL for mobile
 function getRedirectUrl(): string {
-  // Use expo-linking to create a proper deep link
-  const { makeUrl } = Linking;
   // For mobile, we use a custom scheme URL that will be caught by expo-router
   return 'autopilot://callback';
 }
@@ -62,12 +61,14 @@ export const authService = {
       });
       if (error) throw error;
       // Fetch the users row to get the app-level User shape
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', data.user!.id)
-        .maybeSingle();
-      return { data: { user: userRow as User, session: data.session }, error: null, status: 200 };
+      const { data: userRow } = await serverApi.query<any>({
+        table: 'users',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'id', value: data.user!.id }],
+        maybeSingle: true,
+      });
+      return { data: { user: userRow as unknown as User, session: data.session }, error: null, status: 200 };
     } catch (error) {
       return { data: null, error: error as Error, status: 401 };
     }
@@ -83,12 +84,14 @@ export const authService = {
         options: { data: { full_name: data.fullName } },
       });
       if (error) throw error;
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authData.user!.id)
-        .maybeSingle();
-      return { data: { user: userRow as User }, error: null, status: 201 };
+      const { data: userRow } = await serverApi.query<any>({
+        table: 'users',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'id', value: authData.user!.id }],
+        maybeSingle: true,
+      });
+      return { data: { user: userRow as unknown as User }, error: null, status: 201 };
     } catch (error) {
       return { data: null, error: error as Error, status: 400 };
     }
@@ -139,12 +142,14 @@ export const authService = {
       const { data, error } = await supabase.auth.getSession();
       if (error) throw error;
       if (!data.session) return { data: { user: null, session: null }, error: null, status: 200 };
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', data.session.user.id)
-        .maybeSingle();
-      return { data: { user: userRow as User, session: data.session }, error: null, status: 200 };
+      const { data: userRow } = await serverApi.query<any>({
+        table: 'users',
+        action: 'select',
+        select: '*',
+        filters: [{ op: 'eq', column: 'id', value: data.session.user.id }],
+        maybeSingle: true,
+      });
+      return { data: { user: userRow as unknown as User, session: data.session }, error: null, status: 200 };
     } catch (error) {
       return { data: null, error: error as Error, status: 401 };
     }
@@ -311,13 +316,18 @@ export const authService = {
 
         // Ensure user profile exists
         if (user) {
-          await supabase.from('users').upsert({
-            id: user.id,
-            full_name: user.user_metadata?.full_name || user.email?.split('@')[0],
-            email: user.email!,
-            phone: user.phone || user.user_metadata?.phone || null,
-            metadata: user.user_metadata,
-          }, { onConflict: 'id' });
+          await serverApi.query({
+            table: 'users',
+            action: 'upsert',
+            values: {
+              id: user.id,
+              full_name: user.user_metadata?.full_name || user.email?.split('@')[0],
+              email: user.email!,
+              phone: user.phone || user.user_metadata?.phone || null,
+              metadata: user.user_metadata,
+            },
+            mutationOptions: { onConflict: 'id' },
+          });
         }
 
         return { data: { user }, error: null, status: 200 };

@@ -220,6 +220,10 @@ async function storePushToken(
     });
 
     if (error) {
+      if (error.message?.includes('401') || error.message?.includes('Missing bearer token')) {
+        console.warn('[Push] Primary store failed (unauthenticated), skipping fallback.');
+        return false;
+      }
       console.warn('[Push] Primary store failed, trying /api/push-tokens/register:', error.message);
 
       // Fallback: use serverApi.post() — this attaches the bearer token automatically

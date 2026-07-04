@@ -43,6 +43,12 @@ import {
   UtensilsCrossed,
 } from 'lucide-react-native';
 import SkeletonLoader from '@/components/ui/SkeletonLoader';
+import DashboardSkeleton from '@/components/dashboard/lovable/SkeletonLoader';
+import ContentSkeletonLoader from '@/components/dashboard/lovable/ContentSkeletonLoader';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
+import TicketListItemSkeleton from '@/components/tickets/TicketListItemSkeleton';
+import ChecklistSkeleton from '@/components/checklist/ChecklistSkeleton';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Ionicons } from '@expo/vector-icons';
 import { TicketCreateModal } from '../../../components/tickets/TicketCreateModal';
@@ -512,8 +518,41 @@ export default function PropertyLayout() {
   // In that gap, accessState.checking=false, authLoading=false, but membership=null.
   if (authLoading || accessState.checking || (user && !membership)) {
     console.log('[PropertyLayout] Loading — authLoading:', authLoading, 'accessChecking:', accessState.checking, 'membershipNull:', !membership);
+    
+    // Render the skeleton that matches the UI component going to load
+    if (currentRoute === 'index' || currentRoute === 'dashboard') {
+      return (
+        <View style={{ flex: 1 }}>
+          <LinearGradient
+            colors={['#1c2135', '#0f121e', '#07090e']}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <WeatherBackground condition={undefined} />
+          <DashboardSkeleton />
+        </View>
+      );
+    }
+    
+    if (currentRoute === 'tickets') {
+      return (
+        <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 60 }}>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <TicketListItemSkeleton key={i} />
+          ))}
+        </View>
+      );
+    }
+
+    if (currentRoute === 'checklist') {
+      return (
+        <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 60 }}>
+          <ChecklistSkeleton />
+        </View>
+      );
+    }
+
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 60 }}>
         <SkeletonLoader type="list" count={5} />
       </View>
     );

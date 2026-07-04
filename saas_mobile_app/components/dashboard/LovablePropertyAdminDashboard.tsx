@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SkeletonLoader from './lovable/SkeletonLoader';
+import ContentSkeletonLoader from './lovable/ContentSkeletonLoader';
 import { Ionicons } from '@expo/vector-icons';
 import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
@@ -38,7 +39,7 @@ import NotificationModal from '@/components/notifications/NotificationModal';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import ChecklistProgressCard from '@/components/dashboard/ChecklistProgressCard';
 import PermissionOnboarding, { hasRequestedPermissions } from '@/components/onboarding/PermissionOnboarding';
-import PropertySwitcherModal from '@/components/dashboard/PropertySwitcherModal';
+import DashboardPropertySwitcher from '@/components/dashboard/DashboardPropertySwitcher';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
 import { SPACING, STATUS_COLORS } from '@/constants/designSystem';
 import { GlassTile, MiniBarChart, AttentionCard } from './DashboardComponents';
@@ -114,7 +115,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   const [showNeedsAttention, setShowNeedsAttention] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showPropertySwitcher, setShowPropertySwitcher] = useState(false);
+
   const [showDrawer, setShowDrawer] = useState(false);
   const [timeFilter, setTimeFilter] = useState<'today' | 'month' | 'all'>('all');
 
@@ -297,15 +298,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
   };
 
   // ─── Loading State ───
-  // BLOCK rendering until we have actual data (prevents empty UI flash)
-  if (!data) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top, backgroundColor: '#121212' }]}>
-        <StatusBar barStyle="light-content" />
-        <SkeletonLoader />
-      </View>
-    );
-  }
+  // Show header shell instantly (from cached membership) with skeleton content below
+  const isDataReady = !!data;
 
   // ─── Refresh Handler ───
   const onRefresh = async () => {
@@ -344,20 +338,12 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         </View>
 
         <View style={styles.headerRight}>
-          {canSwitchProperty && (
-            <TouchableOpacity style={[styles.headerIconBtn, { overflow: 'hidden', padding: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 16 }]} onPress={() => setShowPropertySwitcher(true)} activeOpacity={0.7}>
-              {propertyPhoto ? (
-                <Image source={{ uri: propertyPhoto }} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
-              ) : (
-                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="business" size={18} color="#FFFFFF" />
-                </View>
-              )}
-              <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#0B0B0F', borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="swap-vertical" size={10} color="#FFFFFF" />
-              </View>
-            </TouchableOpacity>
-          )}
+          <DashboardPropertySwitcher
+            canSwitchProperty={canSwitchProperty}
+            propertyPhoto={propertyPhoto}
+            propertyId={propertyId}
+            orgId={orgId}
+          />
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => setShowCreateModal(true)} activeOpacity={0.7}>
             <Ionicons name="add-circle-outline" size={28} color="#FFFFFF" />
           </TouchableOpacity>
@@ -374,6 +360,10 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />}
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
+        {!isDataReady ? (
+          <ContentSkeletonLoader />
+        ) : (
+          <>
         <Animated.View  style={styles.overviewHeader}>
           <Text style={styles.overviewTitle}>PROPERTY OVERVIEW</Text>
         </Animated.View>
@@ -533,6 +523,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
             )}
           </GlassTile>
         </View>
+          </>
+        )}
       </ScrollView>
 
       {/* Modals */}
@@ -560,18 +552,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
       <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} propertyId={propertyId} />
       <PermissionOnboarding visible={showPermissionOnboarding} onComplete={() => setShowPermissionOnboarding(false)} />
 
-      {canSwitchProperty && (
-        <PropertySwitcherModal
-          visible={showPropertySwitcher}
-          onClose={() => setShowPropertySwitcher(false)}
-          currentPropertyId={propertyId}
-          orgId={orgId}
-          onSelect={(newPropertyId) => {
-            setShowPropertySwitcher(false);
-            router.replace(`/property/${newPropertyId}/dashboard` as never);
-          }}
-        />
-      )}
+
 
       <GlobalNavigationDrawer visible={showDrawer} onClose={() => setShowDrawer(false)} propertyId={propertyId} />
     </View>

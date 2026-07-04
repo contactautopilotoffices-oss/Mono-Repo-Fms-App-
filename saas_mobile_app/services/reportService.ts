@@ -72,7 +72,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     if (resolvedPropertyId) ticketStatusFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
     else if (orgId) ticketStatusFilters.push({ op: 'eq', column: 'organization_id', value: orgId });
 
-    const ticketStatusRes = await serverApi.query<{ status: string }>({
+    const ticketStatusRes = await serverApi.query<{ status: string }[]>({
       table: 'tickets',
       action: 'select',
       select: 'status',
@@ -94,7 +94,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     if (resolvedPropertyId) resolvedTodayFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
     else if (orgId) resolvedTodayFilters.push({ op: 'eq', column: 'organization_id', value: orgId });
 
-    const resolvedTodayRes = await serverApi.query<{ id: string }>({
+    const resolvedTodayRes = await serverApi.query<{ id: string }[]>({
       table: 'tickets',
       action: 'select',
       select: 'id',
@@ -107,7 +107,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     const visitorFilters: any[] = [{ op: 'gte', column: 'checkin_time', value: `${todayStr}T00:00:00.000Z` }];
     if (resolvedPropertyId) visitorFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
 
-    const visitorRes = await serverApi.query<{ id: string; status: string }>({
+    const visitorRes = await serverApi.query<{ id: string; status: string }[]>({
       table: 'visitor_logs',
       action: 'select',
       select: 'id, status',
@@ -127,7 +127,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     const stockFilters: any[] = [];
     if (resolvedPropertyId) stockFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
 
-    const stockRes = await serverApi.query<{ id: string }>({
+    const stockRes = await serverApi.query<{ id: string }[]>({
       table: 'stock_items',
       action: 'select',
       select: 'id',
@@ -140,7 +140,7 @@ export async function getDashboardStats(propertyId?: string): Promise<ApiRespons
     const userFilters: any[] = [];
     if (resolvedPropertyId) userFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
 
-    const userRes = await serverApi.query<{ id: string }>({
+    const userRes = await serverApi.query<{ id: string }[]>({
       table: 'property_memberships',
       action: 'select',
       select: 'id',
@@ -190,7 +190,7 @@ export async function getTicketStats(propertyId?: string): Promise<ApiResponse<T
     if (resolvedPropertyId) ticketFilters.push({ op: 'eq', column: 'property_id', value: resolvedPropertyId });
     else if (orgId) ticketFilters.push({ op: 'eq', column: 'organization_id', value: orgId });
 
-    const res = await serverApi.query<{ status: string; priority: string }>({
+    const res = await serverApi.query<{ status: string; priority: string }[]>({
       table: 'tickets',
       action: 'select',
       select: 'status, priority',

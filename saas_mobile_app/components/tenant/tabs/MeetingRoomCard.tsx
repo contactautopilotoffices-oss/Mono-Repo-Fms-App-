@@ -648,12 +648,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  customTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 16,
-  },
+
   dropdownContainer: {
     flex: 1,
   },
@@ -712,12 +707,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: 'bold',
   },
-  timeLabel: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.5)',
-    fontWeight: 'bold',
-    marginBottom: 6,
-  },
+
   slotsScroll: {
     gap: 8,
     paddingBottom: 4,

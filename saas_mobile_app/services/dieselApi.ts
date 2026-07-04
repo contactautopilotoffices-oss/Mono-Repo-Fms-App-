@@ -8,7 +8,7 @@
  * - Optimized averaging with single query for all periods
  */
 
-import { serverApi } from '@/lib/serverApi';
+import { serverApi, QueryFilter } from '@/lib/serverApi';
 import { format, subDays, subMonths } from 'date-fns';
 
 // ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ export const dieselApi = {
       const prevMonthStart = format(subMonths(new Date(), 2), 'yyyy-MM-dd');
       const thirtyDaysAgo = format(subDays(new Date(), 30), 'yyyy-MM-dd');
 
-      const baseFilters = generatorId
+      const baseFilters: QueryFilter[] = generatorId
         ? [
             { op: 'eq', column: 'property_id', value: propertyId },
             { op: 'eq', column: 'generator_id', value: generatorId },
@@ -394,13 +394,13 @@ export const dieselApi = {
           table: 'diesel_readings',
           action: 'select',
           select: '*',
-          filters: [...baseFilters, { op: 'eq', column: 'reading_date', value: today }],
+          filters: [...baseFilters, { op: 'eq' as const, column: 'reading_date', value: today }],
         }),
         serverApi.query<DieselReading[]>({
           table: 'diesel_readings',
           action: 'select',
           select: '*',
-          filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: monthStart }],
+          filters: [...baseFilters, { op: 'gte' as const, column: 'reading_date', value: monthStart }],
           orders: [{ column: 'reading_date', ascending: false }],
         }),
         serverApi.query<DieselReading[]>({
@@ -409,8 +409,8 @@ export const dieselApi = {
           select: '*',
           filters: [
             ...baseFilters,
-            { op: 'gte', column: 'reading_date', value: prevMonthStart },
-            { op: 'lt', column: 'reading_date', value: monthStart },
+            { op: 'gte' as const, column: 'reading_date', value: prevMonthStart },
+            { op: 'lt' as const, column: 'reading_date', value: monthStart },
           ],
           orders: [{ column: 'reading_date', ascending: false }],
         }),
@@ -418,7 +418,7 @@ export const dieselApi = {
           table: 'diesel_readings',
           action: 'select',
           select: '*',
-          filters: [...baseFilters, { op: 'gte', column: 'reading_date', value: thirtyDaysAgo }],
+          filters: [...baseFilters, { op: 'gte' as const, column: 'reading_date', value: thirtyDaysAgo }],
           orders: [{ column: 'reading_date', ascending: false }],
         }),
       ]);

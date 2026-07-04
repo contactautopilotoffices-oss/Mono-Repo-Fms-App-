@@ -232,11 +232,9 @@ export default function TicketsScreen() {
     }
 
     // Advanced filters
+    const categoryInner = categoryFilter !== 'all' ? '!inner' : '';
     if (categoryFilter !== 'all') {
-      // NOTE: Filtering on joined tables in PostgREST is complex.
-      // We assume skill_groups table filtering might not be fully supported by serverApi directly
-      // as easily as .eq('skill_group.code', ...). 
-      // If serverApi supports embedded filters, great.
+      // NOTE: Inner join is required for filtering by a relation
       queryFilters.push({ op: 'eq', column: 'skill_group.code', value: categoryFilter });
     }
     if (raisedByFilter !== 'all') {
@@ -251,12 +249,17 @@ export default function TicketsScreen() {
       queryFilters.push({ op: 'neq', column: 'internal', value: true });
     }
 
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      queryFilters.push({ op: 'or', expression: `title.ilike.*${q}*,ticket_number.ilike.*${q}*,description.ilike.*${q}*` });
+    }
+
     return {
       table: 'tickets',
       action: 'select',
       select: `id, title, description, status, priority, ticket_number, created_at, updated_at,
                property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
-               skill_group:skill_groups(name, code),
+               skill_group:skill_groups${categoryInner}(name, code),
                assignee:users!assigned_to(id, full_name, user_photo_url),
                creator:users!raised_by(id, full_name, property_memberships(role)),
                ticket_escalation_logs(from_level, to_level, escalated_at,
@@ -268,7 +271,7 @@ export default function TicketsScreen() {
       limit,
       offset,
     };
-  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant]);
+  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant, searchQuery]);
 
 const defaultCounts: Record<StatusFilter, number> = {
   all: 0, mine: 0, open: 0, closed: 0,
@@ -413,14 +416,30 @@ const displayedTickets = useMemo(() => {
     } else if (materialFilter === 'without_material') {
       source = source.filter((t: Ticket) => (t.material_requests?.length ?? 0) === 0);
     }
-    if (!searchQuery.trim()) return source;
-    const q = searchQuery.toLowerCase().trim();
-    return source.filter((t: Ticket) =>
-      t.title.toLowerCase().includes(q) ||
-      (t.ticket_number ?? '').toLowerCase().includes(q) ||
-      (t.description ?? '').toLowerCase().includes(q)
-    );
-  }, [data, isNeedsAttentionMode, searchQuery, materialFilter, ticketTypeFilter]);
+    
+    let result = [...source];
+    
+    // Server handles search now, but we keep this as fallback for memory items
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter((t: Ticket) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.ticket_number ?? '').toLowerCase().includes(q) ||
+        (t.description ?? '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sort by priority (client-side since it's an enum string)
+    if (sortBy === 'priority_high' || sortBy === 'priority_low') {
+      result.sort((a, b) => {
+        const pA = PRIORITY_ORDER[a.priority?.toLowerCase()] ?? 99;
+        const pB = PRIORITY_ORDER[b.priority?.toLowerCase()] ?? 99;
+        return sortBy === 'priority_high' ? pA - pB : pB - pA;
+      });
+    }
+
+    return result;
+  }, [data, isNeedsAttentionMode, searchQuery, materialFilter, ticketTypeFilter, sortBy]);
 const hasMore = data?.hasMore ?? false;
 const statusCounts = data?.statusCounts ?? defaultCounts;
 
@@ -514,6 +533,7 @@ const onRefresh = () => {
         priority={item.priority ?? 'medium'}
         ticketNumber={item.ticket_number ?? item.id.slice(0, 8).toUpperCase()}
         createdAt={item.created_at}
+        resolvedAt={item.resolved_at}
         assignedTo={item.assignee?.full_name}
         assigneePhotoUrl={item.assignee?.user_photo_url}
         photoUrl={item.photo_before_url ?? undefined}

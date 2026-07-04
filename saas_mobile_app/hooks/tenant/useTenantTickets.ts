@@ -63,7 +63,7 @@ export function useTenantTickets(propertyId: string | undefined, userId: string 
         filters: filtersArr,
         limit: LIMIT,
         offset: pageParam,
-        orderBy: { column: 'created_at', ascending: false }
+        orders: [{ column: 'created_at', ascending: false }]
       });
       
       if (res.error) {

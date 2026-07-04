@@ -61,6 +61,7 @@ import {
 } from '@/lib/cassandra';
 import type { ChatSession } from '@/lib/cassandra';
 import { apiFetch } from '@/utils/api/mobileApi';
+import { serverApi } from '@/lib/serverApi';
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const SendIcon = ({ size = 20, color = '#fff' }: { size?: number; color?: string }) => (
@@ -545,13 +546,10 @@ export const CassandraSessionModal: React.FC<CassandraSessionModalProps> = ({
       const propId = selectedPropertyId ?? 'no-property';
       const uid = user?.id ?? 'anon';
       const path = `before-photos/${propId}/${uid}/${Date.now()}.jpg`;
-      const { error } = await supabase.storage.from('ticket_photos').upload(path, arrayBuffer, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
-      if (error) throw error;
-      const { data: publicUrlData } = supabase.storage.from('ticket_photos').getPublicUrl(path);
-      return publicUrlData.publicUrl;
+      const { error } = await serverApi.uploadFile('ticket_photos', path, arrayBuffer, 'image/jpeg');
+      if (error) throw new Error(error.message);
+      const { data: publicUrlData } = await serverApi.getPublicUrl('ticket_photos', path);
+      return publicUrlData?.publicUrl ?? null;
     } catch (err: any) {
       console.error('[uploadImageToStorage] failed:', err);
       toast.error('Failed to upload image: ' + (err?.message ?? 'unknown error'));
