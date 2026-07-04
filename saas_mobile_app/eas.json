@@ -15,15 +15,12 @@
       }
     },
     "preview": {
+      "node": "22.11.0",
       "distribution": "internal",
-      "env": {
-        "NODE_VERSION": "22"
-      },
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "NODE_VERSION": "22",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
