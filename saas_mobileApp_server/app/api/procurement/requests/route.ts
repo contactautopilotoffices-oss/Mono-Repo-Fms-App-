@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { canManageOrganization, canManageProperty, getUserProfile } from "@/lib/authorization";
 import { canUserSeePrices } from "@/lib/procurement";
+import { notifyMaterialRequestCreated } from "@/lib/notificationService";
 
 async function canReadOrganizationRequests(userId: string, organizationId: string) {
   const profile = await getUserProfile(userId);
@@ -220,6 +221,30 @@ export async function POST(request: NextRequest) {
       action: "procurement_requested",
       new_value: `Requested ${lineItems.length} materials`,
     });
+
+    // ── Push notification: alert the assigned procurement handler ────────────
+    // Non-blocking — a notification failure must never fail request creation.
+    try {
+      if (assignee_uid) {
+        const { data: requester } = await admin
+          .from("users")
+          .select("full_name")
+          .eq("id", userId)
+          .maybeSingle();
+        const firstItemName = lineItems[0]?.name ?? "materials";
+        const itemLabel =
+          lineItems.length > 1 ? `${firstItemName} +${lineItems.length - 1} more` : firstItemName;
+        await notifyMaterialRequestCreated(
+          materialRequest.id,
+          itemLabel,
+          requester?.full_name ?? "A user",
+          assignee_uid,
+          property_id
+        );
+      }
+    } catch (notifErr) {
+      console.error("[Notifications] material request created push failed:", notifErr);
+    }
 
     return NextResponse.json(materialRequest, { status: 201 });
   } catch (error) {

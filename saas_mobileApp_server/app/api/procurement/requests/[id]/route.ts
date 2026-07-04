@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { canManageOrganization, canManageProperty } from "@/lib/authorization";
+import { sendPushNotification, NOTIFICATION_TYPES } from "@/lib/notificationService";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -45,6 +46,38 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { data, error } = await admin.from("material_requests").update(patch).eq("id", id).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // ── Push notification: inform the requester of an approval/rejection ──────
+    // Non-blocking — a notification failure must never fail the status update.
+    try {
+      if ((status === "approved" || status === "rejected") && data?.requested_by) {
+        const { data: firstItem } = await admin
+          .from("material_request_items")
+          .select("name")
+          .eq("request_id", id)
+          .limit(1)
+          .maybeSingle();
+        const itemLabel = firstItem?.name ?? "your material request";
+        const approved = status === "approved";
+        await sendPushNotification({
+          userId: data.requested_by,
+          propertyId: data.property_id ?? undefined,
+          organizationId: data.organization_id ?? undefined,
+          type: approved
+            ? NOTIFICATION_TYPES.MATERIAL_REQUEST_APPROVED
+            : NOTIFICATION_TYPES.MATERIAL_REQUEST_REJECTED,
+          title: approved ? "Request Approved" : "Request Rejected",
+          message: approved
+            ? `Your request for ${itemLabel} has been approved`
+            : `Your request for ${itemLabel} was rejected${notes ? `: ${notes}` : ""}`,
+          deepLink: `/property/${data.property_id}/stock/${id}`,
+          priority: "NORMAL",
+        });
+      }
+    } catch (notifErr) {
+      console.error("[Notifications] material request decision push failed:", notifErr);
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("[saas-mobile-server] procurement requests PATCH error:", error);

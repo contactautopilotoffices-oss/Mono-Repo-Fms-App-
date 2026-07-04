@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const supabaseAdmin = createAdminClient();
     const { data: tokens, error: tokenError } = await supabaseAdmin
       .from('push_tokens')
-      .select('token, platform')
+      .select('token, device_info')
       .eq('user_id', auth.user.id)
       .eq('is_active', true);
 

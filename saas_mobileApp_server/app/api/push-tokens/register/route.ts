@@ -15,11 +15,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { userId, token, propertyId, organizationId, deviceInfo } = body;
+    const { token, propertyId, deviceInfo } = body;
 
-    if (!userId || !token) {
-      return NextResponse.json({ error: 'userId and token are required' }, { status: 400 });
+    if (!token) {
+      return NextResponse.json({ error: 'token is required' }, { status: 400 });
     }
+
+    // Security: always bind the token to the authenticated user derived from the
+    // verified bearer token — never trust a body-supplied userId (which would let
+    // one user register a device against another user's account).
+    const userId = auth.user.id;
 
     const supabase = createAdminClient();
 

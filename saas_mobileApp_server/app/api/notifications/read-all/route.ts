@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
       query = query.eq('property_id', propertyId);
     }
 
-    const { count, error } = await query.select('id', { count: 'exact', head: true });
+    const { data, error } = await query.select('id');
+    const count = data ? data.length : 0;
 
     if (error) {
       console.error('[Notifications] Mark all read error:', error);

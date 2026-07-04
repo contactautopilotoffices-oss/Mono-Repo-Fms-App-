@@ -381,7 +381,7 @@ export async function GET(request: NextRequest) {
       
       const wSources = (res as any).waterStats?.sources;
       if (wSources) {
-        ['today', 'month', 'all'].forEach(period => {
+        (['today', 'month', 'all'] as const).forEach(period => {
           Object.keys(wSources[period] || {}).forEach(sType => {
             if (!acc.sources[period][sType]) acc.sources[period][sType] = { count: 0, cost: 0, qty: 0 };
             acc.sources[period][sType].count += wSources[period][sType].count;

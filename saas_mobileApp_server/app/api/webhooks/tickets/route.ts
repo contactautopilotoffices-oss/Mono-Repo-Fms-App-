@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
         // Notify the creator when status changes (especially resolved/closed)
         if (raisedByUserId) {
           let notifTitle = `Ticket Update: ${ticketNumber || 'TKT'}`;
-          let notifType = NOTIFICATION_TYPES.TICKET_UPDATED;
+          let notifType: string = NOTIFICATION_TYPES.TICKET_UPDATED;
           
           if (currentStatus === 'resolved') {
             notifTitle = `Ticket Resolved: ${ticketNumber || 'TKT'}`;

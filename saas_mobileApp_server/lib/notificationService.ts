@@ -211,7 +211,9 @@ export async function sendPushNotification(payload: NotificationPayload): Promis
         android: {
           priority: fcmPriority,
           notification: {
-            channelId: payload.priority === 'CRITICAL' ? 'emergency' : 'default',
+            // Must match a channel the app creates (only 'default' and 'critical'
+            // exist). Posting to a missing channel is silently dropped on Android 8+.
+            channelId: payload.priority === 'CRITICAL' ? 'critical' : 'default',
             clickAction: 'FLUTTER_NOTIFICATION_CLICK',
           },
         },

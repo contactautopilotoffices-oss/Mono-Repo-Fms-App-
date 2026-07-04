@@ -132,20 +132,20 @@ async function handleIncomingUserMessage(payload: any) {
       }
     }
 
-    // Store the inbound message for audit/support purposes
-    await admin.from('whatsapp_inbound_messages').insert({
-      from_phone: from,
-      message_text: messageText,
-      message_raw: payload,
-      user_id: userId,
-      source: 'aisensy',
-      received_at: new Date().toISOString(),
-    }).throwOnError().then(() => {
+    try {
+      await admin.from('whatsapp_inbound_messages').insert({
+        from_phone: from,
+        message_text: messageText,
+        message_raw: payload,
+        user_id: userId,
+        source: 'aisensy',
+        received_at: new Date().toISOString(),
+      }).throwOnError();
       console.log('[AiSensy Webhook] Inbound message stored');
-    }).catch((err: any) => {
+    } catch (err: any) {
       // Table may not exist yet — just log, don't fail
       console.warn('[AiSensy Webhook] Could not store inbound message (table may not exist):', err.message);
-    });
+    }
   } catch (err: any) {
     console.error('[AiSensy Webhook] handleIncomingUserMessage error:', err);
   }
@@ -164,17 +164,18 @@ async function handleMessageStatusUpdate(payload: any) {
 
   try {
     const admin = createAdminClient();
-    await admin.from('whatsapp_message_status').upsert({
-      message_id: messageId,
-      status,
-      phone,
-      updated_at: new Date().toISOString(),
-      raw: payload,
-    }, { onConflict: 'message_id' }).throwOnError().then(() => {
+    try {
+      await admin.from('whatsapp_message_status').upsert({
+        message_id: messageId,
+        status,
+        phone,
+        updated_at: new Date().toISOString(),
+        raw: payload,
+      }, { onConflict: 'message_id' }).throwOnError();
       console.log(`[AiSensy Webhook] Status stored: ${messageId} → ${status}`);
-    }).catch((err: any) => {
+    } catch (err: any) {
       console.warn('[AiSensy Webhook] Could not store status (table may not exist):', err.message);
-    });
+    }
   } catch (err: any) {
     console.error('[AiSensy Webhook] handleMessageStatusUpdate error:', err);
   }
