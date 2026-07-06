@@ -177,7 +177,7 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000000',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
   logo: {
     width: '100%',
     height: '100%',
-    tintColor: '#FFFFFF',
+    tintColor: '#000000',
   },
 });
 

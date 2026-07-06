@@ -21,7 +21,7 @@ const BACKGROUND_IMAGES: Record<string, any> = {
   'rainy': require('@/assets/images/weather-rain.png'),
   'cosmic': require('@/assets/images/weather-moon.png'),
   'custom': require('@/assets/images/launch-bg.png'),
-  'default': require('@/assets/images/default-dashboard-bg.png'),
+  'default': require('@/assets/images/launch-bg.png'),
 };
 
 const THEME_GRADIENTS: Record<string, readonly [string, string, ...string[]]> = {

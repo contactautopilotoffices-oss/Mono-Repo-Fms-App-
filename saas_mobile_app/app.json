@@ -8,14 +8,13 @@
       "translucent": true,
       "barStyle": "light-content"
     },
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/autopilot-logo-new.png",
     "scheme": "autopilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/autopilot-logo-new.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F1521"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
@@ -23,8 +22,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#708F96"
+        "foregroundImage": "./assets/images/autopilot-logo-new.png",
+        "backgroundColor": "#FFFFFF"
       },
       "package": "com.autopilot.app",
       "googleServicesFile": "./google-services.json",
@@ -51,9 +50,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/autopilot-logo-new.png",
-          "imageWidth": 280,
-          "resizeMode": "contain",
-          "backgroundColor": "#0F1521"
+          "backgroundColor": "#FFFFFF"
         }
       ],
       [
@@ -78,7 +75,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/notification-icon.png",
-          "color": "#708F96",
+          "color": "#000000",
           "sounds": [
             "./assets/sounds/notification.wav"
           ],

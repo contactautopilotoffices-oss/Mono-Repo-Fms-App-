@@ -396,8 +396,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.06)',
   },
   rightSideTop: {
     flexDirection: 'row',

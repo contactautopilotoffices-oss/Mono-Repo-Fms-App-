@@ -192,7 +192,7 @@ export const Colors = {
 export const DASHBOARD_BACKGROUNDS = {
   default: {
     label: 'Default',
-    image: require('@/assets/images/default-dashboard-bg.png'),
+    image: require('@/assets/images/launch-bg.png'),
   },
   sunny: {
     label: 'Sunny',

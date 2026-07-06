@@ -83,7 +83,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
     if (userRole === 'staff' || userRole === 'maintenance_staff' || userRole === 'mst') {
       return [
         {
-          title: 'MAINTENANCE PORTAL',
+          title: userRole === 'staff' ? 'STAFF PORTAL' : 'MAINTENANCE PORTAL',
           items: [
             { label: 'Overview', route: 'dashboard', icon: 'grid-outline' },
             { label: 'Requests', route: 'tickets', icon: 'ticket-outline' },
