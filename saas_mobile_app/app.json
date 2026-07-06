@@ -13,7 +13,6 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/autopilot-logo-new.png",
       "backgroundColor": "#FFFFFF"
     },
     "ios": {
@@ -49,7 +48,6 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/autopilot-logo-new.png",
           "backgroundColor": "#FFFFFF"
         }
       ],
