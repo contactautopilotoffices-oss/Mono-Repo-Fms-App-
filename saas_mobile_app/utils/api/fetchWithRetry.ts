@@ -14,7 +14,7 @@ export async function fetchWithRetry(
       if (msg.includes('network request failed') || msg.includes('timeout') || msg.includes('network')) {
         if (i === maxRetries - 1) throw err;
         const delay = 1000 * Math.pow(2, i);
-        console.warn([fetchWithRetry] Network error on , retrying in ms... (Attempt  of ));
+        console.warn(`[fetchWithRetry] Network error on ${url}, retrying in ${delay}ms... (Attempt ${i + 1} of ${maxRetries})`);
         await new Promise((res) => setTimeout(res, delay));
       } else {
         throw err;
