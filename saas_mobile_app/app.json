@@ -22,7 +22,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/autopilot-logo-new.png",
+        "foregroundImage": "./assets/images/autopilot-logo-adaptive.png",
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.autopilot.app",
