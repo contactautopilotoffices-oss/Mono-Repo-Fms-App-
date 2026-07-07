@@ -1,6 +1,6 @@
 import { Redirect } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { useEffect } from 'react';
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 import WeatherBackground from '@/components/dashboard/WeatherBackground';
@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
 
 export default function Index() {
-  const { user, isLoading, membership, isMembershipLoading } = useAuth();
+  const { user, isLoading, membership, isMembershipLoading, signOut } = useAuth();
 
   useEffect(() => {
     if (__DEV__) {
@@ -105,9 +105,15 @@ export default function Index() {
       <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', marginBottom: 8 }}>
         No Properties Assigned
       </Text>
-      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center' }}>
+      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
         You don't have access to any properties yet. Contact your administrator.
       </Text>
+      <TouchableOpacity 
+        onPress={() => signOut()}
+        style={{ paddingVertical: 12, paddingHorizontal: 24, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 8 }}
+      >
+        <Text style={{ color: '#fff', fontSize: 14, fontWeight: '500' }}>Log Out</Text>
+      </TouchableOpacity>
     </View>
   );
 }
