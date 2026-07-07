@@ -174,6 +174,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (orgError) {
           console.error('[AuthContext] org membership fetch error:', orgError);
+          // If it's a real network/server error, throw to use fallback cache
+          throw new Error(`Failed to fetch org membership: ${orgError.message || 'Unknown error'}`);
         }
 
         // Safely extract org from join result — guard against null/undefined join
@@ -181,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const fetchedOrgId = typeof orgFromJoin?.id === 'string' ? orgFromJoin.id : null;
 
         // Fetch all property memberships for this user
-        const { data: propData } = await serverApi.query<any[]>({
+        const { data: propData, error: propError } = await serverApi.query<any[]>({
           table: 'property_memberships',
           action: 'select',
           select: `
@@ -198,6 +200,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
           ],
         });
+
+        if (propError) {
+          console.error('[AuthContext] property membership fetch error:', propError);
+          // Throw to prevent caching an empty array during network failures
+          throw new Error(`Failed to fetch properties: ${propError.message || 'Unknown error'}`);
+        }
 
         let builtProperties: PropertyInfo[] = (propData ?? []).reduce<PropertyInfo[]>(
           (acc, p: any) => {
