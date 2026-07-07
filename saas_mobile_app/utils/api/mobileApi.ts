@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { serverApi } from '@/lib/serverApi';
+import { fetchWithRetry } from './fetchWithRetry';
 
 // ---------------------------------------------------------------------
 // Supabase client-with-token (used for server-side API calls)
@@ -148,7 +149,7 @@ export async function apiFetch<T>(
     }
   }
 
-  const response = await fetch(`${MOBILE_API_BASE}${endpoint}`, {
+  const response = await fetchWithRetry(`${MOBILE_API_BASE}${endpoint}`, {
     ...options,
     headers,
   });

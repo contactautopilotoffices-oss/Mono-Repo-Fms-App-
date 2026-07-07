@@ -5,7 +5,8 @@
 // Supabase directly. The interface is identical so all callers are unaffected.
 // ============================================================================
 
-import { getSupabaseToken } from '@/utils/supabase/mobile-auth';
+import { getCurrentUserId, getSupabaseToken } from '@/utils/supabase/mobile-auth';
+import { fetchWithRetry } from '@/utils/api/fetchWithRetry';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -104,7 +105,7 @@ async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
     }
 
     console.log(`[serverApi] POST ${MOBILE_SERVER_URL}${endpoint}`);
-    return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
+    return fetchWithRetry(`${MOBILE_SERVER_URL}${endpoint}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -186,7 +187,7 @@ async function serverGet(
 
     console.log(`[serverApi] GET ${url.toString()}`);
 
-    return fetch(url.toString(), {
+    return fetchWithRetry(url.toString(), {
       method: 'GET',
       headers,
     });
@@ -388,7 +389,7 @@ export const serverApi = {
           }
         }
       }
-      return fetch(`${MOBILE_SERVER_URL}${endpoint}`, {
+      return fetchWithRetry(`${MOBILE_SERVER_URL}${endpoint}`, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
@@ -470,7 +471,7 @@ export const serverApi = {
       };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const response = await fetch(`${MOBILE_SERVER_URL}/api/storage/upload`, {
+      const response = await fetchWithRetry(`${MOBILE_SERVER_URL}/api/storage/upload`, {
         method: 'POST',
         body: JSON.stringify({
           bucket,
