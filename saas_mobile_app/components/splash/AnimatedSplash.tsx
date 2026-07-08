@@ -21,12 +21,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStore } from '@/stores/dashboardStore';
 import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
 
-const MIN_DISPLAY_MS = 800; // Minimum time logo is visible (reduced from 2200)
-const ENTRANCE_DURATION = 600; // Smooth zoom-in duration (reduced from 1600)
-const EXIT_DURATION = 400;      // Fade-up duration (reduced from 700)
-const SCALE_INITIAL = 0.15;     // Start far away
-const SCALE_FINAL = 2.8;        // Logo comes right up to the screen
-const EXIT_SCALE = 0;           // Zoom the logo out completely before removing splash
+const MIN_DISPLAY_MS = 100; // Minimum time logo is visible
+const ENTRANCE_DURATION = 100; // Almost instant entrance
+const EXIT_DURATION = 300;      // Snappy fade-out duration
+const SCALE_INITIAL = 1.0;     // Match native splash size exactly
+const SCALE_FINAL = 1.0;        // Stay at native size
+const EXIT_SCALE = 1.2;         // Subtle grow while fading out
 const EXIT_TRANSLATE_Y = 0;     // Keep centered while zooming out
 
 interface AnimatedSplashProps {
