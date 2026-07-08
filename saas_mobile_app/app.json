@@ -6,7 +6,8 @@
     "orientation": "portrait",
     "androidStatusBar": {
       "translucent": true,
-      "barStyle": "light-content"
+      "barStyle": "light-content",
+      "backgroundColor": "#FFFFFF"
     },
     "icon": "./assets/images/notification-icon.png",
     "scheme": "autopilot",
@@ -116,8 +117,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "3f76dac0-cfa7-4187-a7da-52e89ba4827d"
+        "projectId": "23a9e583-83ba-4253-8a64-f83e7a39f2d9"
       }
-    }
+    },
+    "owner": "harry23potter32"
   }
 }
