@@ -182,55 +182,7 @@ export function classifyWithRules(text: string) {
   return { issue_code: null, skill_group: 'technical' as SkillGroup, confidence: 'low' as Confidence, scores };
 }
 
-/* ─── Groq LLM Classification ────────────────────────────────────────────── */
-
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-
-function buildSystemPrompt(): string {
-  return `You are an expert facilities incident triage system.
-Your job is to infer the primary cause, secondary contributing factors, correct priority, and safety risks of maintenance tickets.
-
-Rules:
-1. Reason about context, negation, time, and cause vs symptom.
-2. Identify the PRIMARY category responsible (from the provided list).
-3. Identify a SECONDARY category if relevant (from the provided list), otherwise null.
-4. Assign priority using these strict definitions:
-   - Urgent: Immediate threat to life/safety — fire, flood, structural collapse, complete power failure, stuck lift with person inside.
-   - High: Risk of damage, injury, or major service disruption — any leakage/water damage, electrical faults, broken locks, lift malfunction, sewage issues, AC failure in server room.
-   - Medium: Affects comfort or routine operations — AC not cooling, lighting issues, minor plumbing (dripping tap without damage risk), cleaning requests, furniture issues.
-   - Low: Purely cosmetic, no service impact — paint scuff, minor stain, aesthetic complaints.
-   When in doubt between two levels, always choose the HIGHER priority.
-5. Flag safety risks explicitly (e.g., "Fire risk", "Slip hazard", "Water damage risk").
-6. Provide a concise one-line reasoning.
-
-Respond ONLY in valid JSON format matching the requested schema.`;
-}
-
-function buildUserPrompt(ticketText: string, scores: Record<string, number>, dbPriority?: string): string {
-  const buckets = Object.keys(scores).filter(k => scores[k] > 0);
-  if (buckets.length === 0) buckets.push('technical', 'plumbing', 'vendor', 'soft_services');
-
-  const priorityExamples = `
-Priority Examples (use these as reference):
-- Urgent: "lift stuck with person inside", "fire alarm triggered", "electrical spark near server room", "flooding on floor"
-- High: "urinal tap leakage", "water pipe leaking", "AC not working in server room", "exposed wiring", "broken door lock", "sewage smell", "ceiling water seepage"
-- Medium: "AC not cooling properly", "light flickering", "wifi slow", "chair broken", "tap dripping slightly", "washroom cleaning needed", "dustbin not cleared"
-- Low: "paint scuff on wall", "minor stain on carpet", "desk slightly misaligned", "fingerprints on glass"`;
-
-  const hint = dbPriority ? `\nBaseline Priority: ${dbPriority} — only assign HIGHER if the text clearly warrants it.` : '';
-
-  return `Target Categories: ${JSON.stringify(buckets)}
-
-Ticket Description:
-"${ticketText}"
-
-Rule Engine Context:
-Scores: ${JSON.stringify(scores)}
-${priorityExamples}${hint}
-
-Analyze the situation and return structured JSON with: primary_category, secondary_category (or null), priority (Low/Medium/High/Urgent), risk_flag (or null), reasoning.`;
-}
+/* ─── Backend API Classification ────────────────────────────────────────────── */
 
 export async function classifyWithGroq(
   ticketText: string,
@@ -238,9 +190,9 @@ export async function classifyWithGroq(
   dbPriority?: string,
 ): Promise<{ priority: string; risk_flag: string | null; reasoning: string; secondary_category_code: string | null; primary_category: string | null } | null> {
 
-  const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
-  if (!apiKey) {
-    console.warn('[MobileGroq] GROQ_API_KEY missing, using rule fallback');
+  const apiUrl = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL;
+  if (!apiUrl) {
+    console.warn('[MobileAPI] EXPO_PUBLIC_MOBILE_SERVER_URL missing, using rule fallback');
     return null;
   }
 
@@ -248,19 +200,10 @@ export async function classifyWithGroq(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 
-    const res = await fetch(GROQ_API_URL, {
+    const res = await fetch(`${apiUrl}/api/ai/classify-ticket`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          { role: 'system', content: buildSystemPrompt() },
-          { role: 'user', content: buildUserPrompt(ticketText, scores, dbPriority) },
-        ],
-        temperature: 0.1,
-        max_tokens: 200,
-        response_format: { type: 'json_object' },
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketText, scores, dbPriority }),
       signal: controller.signal,
     });
 
@@ -268,22 +211,11 @@ export async function classifyWithGroq(
     if (!res.ok) return null;
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
+    if (data.error) return null;
 
-    const parsed = JSON.parse(content);
-    const pMap: Record<string, string> = { low: 'low', medium: 'medium', high: 'high', urgent: 'urgent' };
-    const priority = pMap[parsed.priority?.toLowerCase()] || 'medium';
-
-    return {
-      priority,
-      primary_category: parsed.primary_category?.toLowerCase() || null,
-      risk_flag: parsed.risk_flag || null,
-      reasoning: parsed.reasoning || null,
-      secondary_category_code: parsed.secondary_category || null,
-    };
+    return data;
   } catch (err) {
-    console.warn('[MobileGroq] LLM classification failed, using rule fallback:', err);
+    console.warn('[MobileAPI] Backend classification failed, using rule fallback:', err);
     return null;
   }
 }

@@ -6,8 +6,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { requestAudioPermissionWithSettings } from '@/utils/permissions';
 
-const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
-const GROQ_WHISPER_MODEL = 'whisper-large-v3';
+/* Variables for Groq removed, now using backend API */
 
 let currentRecording: Audio.Recording | null = null;
 
@@ -59,9 +58,9 @@ export function cancelRecording(): void {
 }
 
 export async function transcribeAudio(audioUri: string): Promise<string | null> {
-  const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
-  if (!apiKey) {
-    console.warn('[VoiceTranscription] GROQ_API_KEY missing');
+  const apiUrl = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL;
+  if (!apiUrl) {
+    console.warn('[VoiceTranscription] EXPO_PUBLIC_MOBILE_SERVER_URL missing');
     return null;
   }
 
@@ -78,18 +77,12 @@ export async function transcribeAudio(audioUri: string): Promise<string | null> 
       name: fileName,
       type: mimeType,
     } as any);
-    formData.append('model', GROQ_WHISPER_MODEL);
-    formData.append('language', 'en');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const res = await fetch(GROQ_TRANSCRIBE_URL, {
+    const res = await fetch(`${apiUrl}/api/ai/transcribe-voice`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'multipart/form-data',
-      },
       body: formData,
       signal: controller.signal,
     });

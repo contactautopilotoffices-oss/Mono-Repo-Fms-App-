@@ -7,9 +7,10 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
 // ─── Environment detection ─────────────────────────────────────────────────
 
-// Browser: has window + localStorage
-const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-const isServerRender = Platform.OS === 'web' && !isBrowser;
+// Browser: only true if we are actually on the web platform
+const isWeb = Platform.OS === 'web';
+const isBrowser = isWeb && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+const isServerRender = isWeb && !isBrowser;
 
 // React Native: check at runtime. We import AsyncStorage statically
 // to avoid dynamic import failures in production APK builds.
