@@ -25,7 +25,7 @@ export const getCurrentUserId = _getCurrentUserId;
 // ---------------------------------------------------------------------
 // Mobile API base URL
 // ---------------------------------------------------------------------
-export const MOBILE_API_BASE = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.0.224:3000';
+export const MOBILE_API_BASE = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.31.236:3000';
 // ---------------------------------------------------------------------
 // Typed API Response shapes
 // ---------------------------------------------------------------------

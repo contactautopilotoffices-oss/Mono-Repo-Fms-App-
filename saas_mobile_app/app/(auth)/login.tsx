@@ -343,10 +343,9 @@ export default function LoginScreen() {
     try {
       const res = await authService.signInWithGoogle();
       if (res.error) throw new Error(res.error as any);
-      // After successful OAuth, fetch the current user
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error('Google sign-in failed');
-      await resolveAndRedirect(authUser.id);
+      // We don't fetch getUser() or resolveAndRedirect here.
+      // The WebBrowser will close and the deep link (autopilot://callback) 
+      // will be handled by app/callback/index.tsx which sets the session and redirects.
     } catch (err: any) {
       const msg = (err.message || '').toLowerCase();
       if (msg.includes('network')) {

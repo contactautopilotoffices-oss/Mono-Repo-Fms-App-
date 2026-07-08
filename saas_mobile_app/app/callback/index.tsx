@@ -7,10 +7,11 @@
  * On mobile, this deep link is caught by Expo Router and this component runs.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, BackHandler } from 'react-native';
 import { useRouter, useLocalSearchParams, useRootNavigationState } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { createClient } from '@/utils/supabase/client';
 import { serverApi } from '@/lib/serverApi';
 
@@ -22,8 +23,11 @@ export default function OAuthCallback() {
   const params = useLocalSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('Processing authentication...');
+  const hasAttempted = useRef(false);
 
   useEffect(() => {
+    if (hasAttempted.current) return;
+    hasAttempted.current = true;
     let isMounted = true;
 
     async function handleCallback() {
@@ -44,11 +48,42 @@ export default function OAuthCallback() {
           return;
         }
 
-        // Check for auth code
-        const code = params.code as string;
-        if (!code) {
-          console.error('[OAuth Callback] No code in params');
-          console.log('[OAuth Callback] Params:', JSON.stringify(params));
+        // 1. Try to get code/token from Expo Router params
+        let code = params.code as string;
+        let accessToken = params.access_token as string;
+        let refreshToken = params.refresh_token as string;
+
+        // 2. If missing, manually parse the raw URL (Expo Router sometimes misses deep link params)
+        if (!code && !accessToken) {
+          const initialUrl = await Linking.getInitialURL();
+          if (initialUrl) {
+            console.log('[OAuth Callback] Manually parsing URL:', initialUrl);
+            const parsed = Linking.parse(initialUrl);
+            
+            // Check query params (PKCE flow)
+            if (parsed.queryParams?.code) code = parsed.queryParams.code as string;
+            
+            // Check hash fragment (Implicit flow fallback)
+            // Linking.parse might put hash params into queryParams depending on format
+            if (parsed.queryParams?.access_token) accessToken = parsed.queryParams.access_token as string;
+            if (parsed.queryParams?.refresh_token) refreshToken = parsed.queryParams.refresh_token as string;
+            
+            // Sometimes the entire URL fragment is in parsed.fragment
+            if (parsed.queryParams && typeof parsed.queryParams === 'object') {
+              // Extract from raw URL if needed
+              const urlObj = new URL(initialUrl);
+              const hash = urlObj.hash.substring(1);
+              const hashParams = new URLSearchParams(hash);
+              if (hashParams.get('access_token')) accessToken = hashParams.get('access_token') as string;
+              if (hashParams.get('refresh_token')) refreshToken = hashParams.get('refresh_token') as string;
+            }
+          }
+        }
+
+        // 3. Check for auth code or access token
+        if (!code && !accessToken) {
+          console.error('[OAuth Callback] No code or access_token found');
+          console.log('[OAuth Callback] Router Params:', JSON.stringify(params));
           if (isMounted) {
             setError('Authentication failed - no authorization code received');
             setStatus('Please try again...');
@@ -57,24 +92,43 @@ export default function OAuthCallback() {
           return;
         }
 
-        console.log('[OAuth Callback] Exchanging code for session...');
+        console.log('[OAuth Callback] Exchanging code or setting session...');
         if (isMounted) setStatus('Completing sign in...');
 
-        // Exchange the code for a session
-        const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+        let sessionUser = null;
 
-        if (sessionError) {
-          console.error('[OAuth Callback] Session error:', sessionError);
-          if (isMounted) {
-            setError(sessionError.message);
-            setStatus('Session error. Redirecting...');
+        if (code) {
+          // Exchange the code for a session (PKCE Flow)
+          const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+          if (sessionError) {
+            console.error('[OAuth Callback] Session error:', sessionError);
+            if (isMounted) {
+              setError(sessionError.message);
+              setStatus('Session error. Redirecting...');
+            }
+            setTimeout(() => router.replace('/(auth)/login'), 3000);
+            return;
           }
-          setTimeout(() => router.replace('/(auth)/login'), 3000);
-          return;
+          sessionUser = data?.user;
+        } else if (accessToken && refreshToken) {
+          // Manually set session (Implicit Flow)
+          const { data, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (sessionError) {
+            console.error('[OAuth Callback] Session error (implicit):', sessionError);
+            if (isMounted) {
+              setError(sessionError.message);
+              setStatus('Session error. Redirecting...');
+            }
+            setTimeout(() => router.replace('/(auth)/login'), 3000);
+            return;
+          }
+          sessionUser = data?.user;
         }
 
-        const user = data?.user;
-        if (!user) {
+        if (!sessionUser) {
           console.error('[OAuth Callback] No user after OAuth');
           if (isMounted) {
             setError('Authentication failed - no user found');
@@ -84,7 +138,7 @@ export default function OAuthCallback() {
           return;
         }
 
-        console.log('[OAuth Callback] Success! User:', user.id);
+        console.log('[OAuth Callback] Success! User:', sessionUser.id);
 
         if (isMounted) setStatus('Setting up your account...');
 
@@ -93,12 +147,12 @@ export default function OAuthCallback() {
           table: 'users',
           action: 'upsert',
           values: {
-            id: user.id,
-            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-            email: user.email || '',
-            phone: user.phone || user.user_metadata?.phone || null,
-            user_photo_url: user.user_metadata?.avatar_url || null,
-            metadata: user.user_metadata,
+            id: sessionUser.id,
+            full_name: sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0] || 'User',
+            email: sessionUser.email || '',
+            phone: sessionUser.phone || sessionUser.user_metadata?.phone || null,
+            user_photo_url: sessionUser.user_metadata?.avatar_url || null,
+            metadata: sessionUser.user_metadata,
           },
           mutationOptions: { onConflict: 'id' },
         });
@@ -113,7 +167,7 @@ export default function OAuthCallback() {
           table: 'users',
           action: 'select',
           select: '*',
-          filters: [{ op: 'eq', column: 'id', value: user.id }],
+          filters: [{ op: 'eq', column: 'id', value: sessionUser.id }],
           single: true,
         });
 
@@ -123,7 +177,7 @@ export default function OAuthCallback() {
           action: 'select',
           select: 'organization_id, role',
           filters: [
-            { op: 'eq', column: 'user_id', value: user.id },
+            { op: 'eq', column: 'user_id', value: sessionUser.id },
             { op: 'eq', column: 'is_active', value: true },
           ],
         });
@@ -134,13 +188,14 @@ export default function OAuthCallback() {
           action: 'select',
           select: 'property_id, organization_id, role',
           filters: [
-            { op: 'eq', column: 'user_id', value: user.id },
+            { op: 'eq', column: 'user_id', value: sessionUser.id },
             { op: 'eq', column: 'is_active', value: true },
           ],
         });
 
         const hasOrgAccess = (orgMems || []).length > 0;
         const hasPropertyAccess = (propMems || []).length > 0;
+        const onboardingCompleted = sessionUser.user_metadata?.onboarding_completed === true;
 
         console.log('[OAuth Callback] Org memberships:', orgMems?.length, 'Property memberships:', propMems?.length);
 
@@ -203,8 +258,14 @@ export default function OAuthCallback() {
           return;
         }
 
-        // New user - go to onboarding
-        router.replace('/(auth)/onboarding');
+        // Fallback for users with no access
+        if (!onboardingCompleted) {
+          console.log('[OAuth Callback] User has no memberships and has not completed onboarding. Redirecting to onboarding...');
+          router.replace('/(auth)/onboarding');
+        } else {
+          // If they have completed onboarding but have no access, show them the "no properties assigned" screen
+          router.replace('/');
+        }
 
       } catch (err: any) {
         console.error('[OAuth Callback] Error:', err);

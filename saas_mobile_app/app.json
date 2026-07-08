@@ -8,7 +8,7 @@
       "translucent": true,
       "barStyle": "light-content"
     },
-    "icon": "./assets/images/autopilot-logo-new.png",
+    "icon": "./assets/images/notification-icon.png",
     "scheme": "autopilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -22,8 +22,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/autopilot-logo-adaptive.png",
-        "backgroundColor": "#FFFFFF"
+        "foregroundImage": "./assets/images/notification-icon.png",
+        "backgroundColor": "#000000"
       },
       "package": "com.autopilot.app",
       "googleServicesFile": "./google-services.json",

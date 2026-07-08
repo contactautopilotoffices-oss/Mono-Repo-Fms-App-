@@ -12,7 +12,7 @@ import { fetchWithRetry } from '@/utils/api/fetchWithRetry';
 // Configuration
 // ---------------------------------------------------------------------------
 
-const MOBILE_SERVER_URL = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.0.224:3000';
+const MOBILE_SERVER_URL = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.31.236:3000';
 console.log('[serverApi] Initialized with MOBILE_SERVER_URL:', MOBILE_SERVER_URL);
 
 // ---------------------------------------------------------------------------

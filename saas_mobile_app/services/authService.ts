@@ -44,10 +44,10 @@ export interface UpdatePasswordData {
   password: string;
 }
 
-// Create the OAuth redirect URL for mobile
 function getRedirectUrl(): string {
-  // For mobile, we use a custom scheme URL that will be caught by expo-router
-  return 'autopilot://callback';
+  // Automatically generates `exp://.../--/callback` in Expo Go
+  // and `autopilot://callback` in production/preview builds
+  return Linking.createURL('callback');
 }
 
 export const authService = {
@@ -181,20 +181,10 @@ export const authService = {
           { showInRecents: true }
         );
 
-        // Handle the result
-        if (result.type === 'success' && result.url) {
-          // Parse the URL to extract the code
-          const url = new URL(result.url);
-          const code = url.searchParams.get('code');
-
-          if (code) {
-            // Exchange the code for a session
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-            if (exchangeError) throw exchangeError;
-          }
-        } else if (result.type === 'cancel') {
+        if (result.type === 'cancel') {
           throw new Error('Authentication was cancelled');
         }
+        // Success case is handled by app/callback/index.tsx which receives the deep link
       }
 
       return { data: undefined, error: null, status: 200 };
@@ -226,14 +216,8 @@ export const authService = {
           { showInRecents: true }
         );
 
-        if (result.type === 'success' && result.url) {
-          const url = new URL(result.url);
-          const code = url.searchParams.get('code');
-
-          if (code) {
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-            if (exchangeError) throw exchangeError;
-          }
+        if (result.type === 'cancel') {
+          throw new Error('Authentication was cancelled');
         }
       }
 
@@ -266,14 +250,8 @@ export const authService = {
           { showInRecents: true }
         );
 
-        if (result.type === 'success' && result.url) {
-          const url = new URL(result.url);
-          const code = url.searchParams.get('code');
-
-          if (code) {
-            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-            if (exchangeError) throw exchangeError;
-          }
+        if (result.type === 'cancel') {
+          throw new Error('Authentication was cancelled');
         }
       }
 
