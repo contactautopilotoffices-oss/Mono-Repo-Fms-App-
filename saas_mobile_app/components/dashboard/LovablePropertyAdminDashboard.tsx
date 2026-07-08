@@ -59,7 +59,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
   // ─── NEW: Unified React Query Data (Source of Truth) ───
   // Renders immediately from cache, refetches in background
-  const { data, isLoading, isFetching, forceRefresh } = useDashboardQuery(propertyId, {
+  const { data, isLoading, isFetching, forceRefresh, error } = useDashboardQuery(propertyId, {
     initialLoadingOnMount: false, // Instant render from cache
   });
 
@@ -360,7 +360,21 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.6)" />}
         contentContainerStyle={{ paddingBottom: insets.bottom + 140 }}
       >
-        {!isDataReady ? (
+        {error ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100, paddingHorizontal: 20 }}>
+            <Ionicons name="warning-outline" size={48} color="#EF4444" />
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 }}>Dashboard Error</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 24 }}>
+              {error.message || 'Failed to fetch dashboard data.'}
+            </Text>
+            <TouchableOpacity 
+              onPress={forceRefresh}
+              style={{ backgroundColor: '#3B82F6', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Retry Connection</Text>
+            </TouchableOpacity>
+          </View>
+        ) : !isDataReady ? (
           <ContentSkeletonLoader />
         ) : (
           <>
