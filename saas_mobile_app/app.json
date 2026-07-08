@@ -14,7 +14,9 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/autopilot-logo-new.png",
-      "backgroundColor": "#FFFFFF"
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF",
+      "imageWidth": 280
     },
     "ios": {
       "supportsTablet": true,
@@ -50,7 +52,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/autopilot-logo-new.png",
-          "backgroundColor": "#FFFFFF"
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF",
+          "imageWidth": 280
         }
       ],
       [
