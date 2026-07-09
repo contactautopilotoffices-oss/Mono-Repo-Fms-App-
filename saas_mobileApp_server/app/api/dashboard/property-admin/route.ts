@@ -65,7 +65,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: null, source: "db" });
     }
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    // 6 AM Operational Shift Boundary: If before 6 AM, logically count it as yesterday
+    const shiftNow = new Date();
+    if (shiftNow.getHours() < 6) {
+      shiftNow.setDate(shiftNow.getDate() - 1);
+    }
+    const todayStr = shiftNow.toISOString().split("T")[0];
 
     // Build the bulk parallel queries
     const bulkQueries = Promise.all([
@@ -76,32 +81,33 @@ export async function GET(request: NextRequest) {
         
       // Recent Tickets
       admin.from('tickets')
-        .select('id, title, status, priority, created_at, is_internal, photo_before_url')
+        .select('id, title, status, priority, created_at, is_internal, photo_before_url, sla_hours, raised_by')
         .in('property_id', propIds)
         .order('created_at', { ascending: false })
         .limit(100),
         
       // Active SOP Templates
       admin.from('sop_templates')
-        .select('id', { count: 'exact', head: true })
+        .select('id, title, start_time, end_time')
         .in('property_id', propIds)
         .eq('is_active', true),
         
       // SOP Completions Today
       admin.from('sop_completions')
-        .select('status', { count: 'exact' })
+        .select('template_id, status')
         .in('property_id', propIds)
         .eq('completion_date', todayStr)
         .eq('status', 'completed'),
         
       // Visitor Logs
       admin.from('visitor_logs')
-        .select('status, created_at')
-        .in('property_id', propIds),
+        .select('status, created_at, name, whom_to_meet')
+        .in('property_id', propIds)
+        .order('created_at', { ascending: false }),
         
       // Vendor Daily Revenue
       admin.from('vendor_daily_revenue')
-        .select('revenue_amount, vendor_id')
+        .select('revenue_amount, vendor_id, revenue_date')
         .in('property_id', propIds),
         
       // Total Tickets Count (All)
@@ -127,6 +133,12 @@ export async function GET(request: NextRequest) {
 
       // Tenant Users
       admin.from('property_memberships').select('user_id').in('property_id', propIds).in('role', ['tenant', 'super_tenant']),
+
+      // Tickets — last 14 days (for trend chart + AI insights, independent of the 100-row recent-tickets cap)
+      admin.from('tickets')
+        .select('created_at, resolved_at, status, priority, sla_breached')
+        .in('property_id', propIds)
+        .gte('created_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()),
     ]);
 
     // Build the per-property parallel queries
@@ -140,14 +152,13 @@ export async function GET(request: NextRequest) {
           .order('reading_date', { ascending: false })
           .limit(1)
           .maybeSingle(),
-        // All readings for main meter (to calculate today, month, all-time)
+        // All readings for electricity (main & dg)
         admin.from('electricity_readings')
           .select('computed_units, final_units, reading_date, electricity_meters!inner(meter_type)')
           .eq('property_id', pid)
-          .eq('electricity_meters.meter_type', 'main')
           .order('reading_date', { ascending: false }),
         admin.from('diesel_readings')
-          .select('closing_diesel_level, computed_consumed_litres, reading_date')
+          .select('closing_diesel_level, computed_consumed_litres, reading_date, generator_id, generators(name, tank_capacity_litres)')
           .eq('property_id', pid)
           .order('reading_date', { ascending: false }),
         // Water readings
@@ -179,8 +190,9 @@ export async function GET(request: NextRequest) {
         countTotalAllRes, countOpenAllRes, countClosedAllRes,
         countTotalMonthRes, countOpenMonthRes, countClosedMonthRes,
         countTotalTodayRes, countOpenTodayRes, countClosedTodayRes,
-        tenantUsersRes
-      ], 
+        tenantUsersRes,
+        ticketsTrendRes
+      ],
       perPropResults
     ] = await Promise.all([bulkQueries, perPropQueries]);
 
@@ -193,7 +205,6 @@ export async function GET(request: NextRequest) {
       all: { total: 0, in: 0, out: 0 }
     };
     if (vmsRes?.data) {
-      const todayStr = new Date().toISOString().split('T')[0];
       const mStartStr = monthStart.split('T')[0];
       
       vmsRes.data.forEach((v: any) => {
@@ -220,10 +231,30 @@ export async function GET(request: NextRequest) {
     }
 
     // Vendor Stats
-    let vendorStats = { revenue: 0, commission: 0 };
+    let vendorStats = { 
+      today: { revenue: 0, commission: 0 },
+      month: { revenue: 0, commission: 0 },
+      all: { revenue: 0, commission: 0 }
+    };
     if (revRes?.data) {
-      const totalRev = revRes.data.reduce((acc: number, row: any) => acc + (row.revenue_amount || 0), 0);
-      vendorStats = { revenue: totalRev, commission: totalRev * 0.1 };
+      const monthStartStr = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+      revRes.data.forEach((row: any) => {
+        const rev = row.revenue_amount || 0;
+        const comm = rev * 0.1;
+        vendorStats.all.revenue += rev;
+        vendorStats.all.commission += comm;
+        
+        if (row.revenue_date) {
+          if (row.revenue_date === todayStr) {
+            vendorStats.today.revenue += rev;
+            vendorStats.today.commission += comm;
+          }
+          if (row.revenue_date >= monthStartStr) {
+            vendorStats.month.revenue += rev;
+            vendorStats.month.commission += comm;
+          }
+        }
+      });
     }
 
     // Per Property Aggregation
@@ -241,6 +272,14 @@ export async function GET(request: NextRequest) {
     let funnelCounts: Record<string, number> = {};
     let pTotal = 0, pDone = 0, pPending = 0, pOverdue = 0, pPostponed = 0;
 
+    const energyLast7Days = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().split('T')[0];
+    });
+    let energyHistoryArr = [0, 0, 0, 0, 0, 0, 0];
+    let dieselHistoryArr = [0, 0, 0, 0, 0, 0, 0];
+
     perPropResults.forEach(res => {
       // Last reading (for current/trend)
       if (res.elec.data) {
@@ -251,21 +290,31 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      let elecToday = 0;
-      let elecMonth = 0;
-      let elecAll = 0;
+      let elecToday = 0, elecMonth = 0, elecAll = 0;
+      let dgElecToday = 0, dgElecMonth = 0, dgElecAll = 0;
 
-      // Readings for main meter (for consumption stats)
+      // Readings for electricity meters
       if (res.elecMonthly?.data && Array.isArray(res.elecMonthly.data)) {
         const allReadings = res.elecMonthly.data as any[];
-        const todayStr = new Date().toISOString().split('T')[0];
         const mStartStr = monthStart.split('T')[0];
         
         allReadings.forEach(r => {
           const units = r.final_units ?? r.computed_units ?? 0;
-          elecAll += units;
-          if (r.reading_date >= mStartStr) elecMonth += units;
-          if (r.reading_date === todayStr) elecToday += units;
+          const mType = (r.electricity_meters?.meter_type || '').toLowerCase();
+          if (mType === 'dg') {
+            dgElecAll += units;
+            if (r.reading_date >= mStartStr) dgElecMonth += units;
+            if (r.reading_date === todayStr) dgElecToday += units;
+          } else if (mType === 'main') {
+            elecAll += units;
+            if (r.reading_date >= mStartStr) elecMonth += units;
+            if (r.reading_date === todayStr) elecToday += units;
+            
+            const idx = energyLast7Days.indexOf(r.reading_date);
+            if (idx !== -1) {
+              energyHistoryArr[idx] += units;
+            }
+          }
         });
         
         monthlyElecSum += elecMonth; // keep old behavior
@@ -274,26 +323,60 @@ export async function GET(request: NextRequest) {
       
       // Store in per-property results so we can aggregate if needed
       (res as any).elecStats = { today: elecToday, month: elecMonth, all: elecAll };
+      (res as any).dgElecStats = { today: dgElecToday, month: dgElecMonth, all: dgElecAll };
 
       let dieselToday = 0, dieselMonth = 0, dieselAll = 0;
       let dieselLevel = 0;
+      let dieselCapacity = 0;
+      let genMap: Record<string, { id: string, name: string, level: number, capacity: number, levelPct: number, consumption: number }> = {};
+
       if (res.diesel.data && Array.isArray(res.diesel.data)) {
         const dReadings = res.diesel.data as any[];
         if (dReadings.length > 0) {
-          dieselLevel = dReadings[0].closing_diesel_level || 0;
-          totalDieselLevel += dieselLevel;
-          dieselCount++;
+          // No need to set dieselLevel here, it's aggregated per generator
         }
-        const todayStr = new Date().toISOString().split('T')[0];
+        
         const mStartStr = monthStart.split('T')[0];
         dReadings.forEach(r => {
           const c = r.computed_consumed_litres || 0;
           dieselAll += c;
           if (r.reading_date >= mStartStr) dieselMonth += c;
           if (r.reading_date === todayStr) dieselToday += c;
+
+          const idx = energyLast7Days.indexOf(r.reading_date);
+          if (idx !== -1) {
+            dieselHistoryArr[idx] += c;
+          }
+
+          // Accumulate per generator for today/latest
+          const gid = r.generator_id;
+          if (gid) {
+            if (!genMap[gid]) {
+              const capacity = r.generators?.tank_capacity_litres || 1000;
+              const lvl = r.closing_diesel_level || 0;
+              genMap[gid] = {
+                id: gid,
+                name: r.generators?.name || 'Generator',
+                level: lvl, // raw liters
+                capacity: capacity,
+                levelPct: capacity > 0 ? Math.round((lvl / capacity) * 100) : 0,
+                consumption: 0
+              };
+              dieselLevel += lvl;
+              dieselCapacity += capacity;
+            }
+            if (r.reading_date === todayStr) {
+              genMap[gid].consumption += c;
+            }
+          }
         });
       }
-      (res as any).dieselStats = { today: dieselToday, month: dieselMonth, all: dieselAll };
+      (res as any).dieselStats = { 
+        today: dieselToday, month: dieselMonth, all: dieselAll,
+        level: dieselLevel,
+        capacity: dieselCapacity,
+        generators: Object.values(genMap)
+      };
 
       let waterTodayQty = 0, waterMonthQty = 0, waterAllQty = 0;
       let waterTodayCost = 0, waterMonthCost = 0, waterAllCost = 0;
@@ -309,7 +392,7 @@ export async function GET(request: NextRequest) {
       
       if (res.water.data && Array.isArray(res.water.data)) {
         const wReadings = res.water.data as any[];
-        const todayStr = new Date().toISOString().split('T')[0];
+        
         const mStartStr = monthStart.split('T')[0];
         wReadings.forEach(r => {
           const q = r.quantity || 0;
@@ -368,8 +451,20 @@ export async function GET(request: NextRequest) {
       acc.today += (res as any).dieselStats?.today || 0;
       acc.month += (res as any).dieselStats?.month || 0;
       acc.all += (res as any).dieselStats?.all || 0;
+      acc.level += (res as any).dieselStats?.level || 0;
+      acc.capacity += (res as any).dieselStats?.capacity || 0;
+      
+      acc.dg_kwh_today += (res as any).dgElecStats?.today || 0;
+      acc.dg_kwh_month += (res as any).dgElecStats?.month || 0;
+      acc.dg_kwh_all += (res as any).dgElecStats?.all || 0;
+      
+      const gens = (res as any).dieselStats?.generators;
+      if (gens && Array.isArray(gens)) {
+        gens.forEach(g => acc.generators.push(g));
+      }
+
       return acc;
-    }, { today: 0, month: 0, all: 0 });
+    }, { today: 0, month: 0, all: 0, level: 0, capacity: 0, dg_kwh_today: 0, dg_kwh_month: 0, dg_kwh_all: 0, generators: [] as any[] });
 
     const aggWaterStats = perPropResults.reduce((acc, res) => {
       acc.qty.today += (res as any).waterStats?.qty?.today || 0;
@@ -411,6 +506,136 @@ export async function GET(request: NextRequest) {
     const tenantData = tenantUsersRes?.data || [];
     const tenantUserIds = tenantData.map((t: any) => t.user_id).filter(Boolean);
 
+    // --- TICKET TREND (real dates + counts, last 7 days) & AI INSIGHTS ---
+    const OPEN_STATUSES = ['open', 'assigned', 'in_progress', 'client_raised', 'waitlist', 'blocked'];
+    const trendTickets = (ticketsTrendRes?.data ?? []) as {
+      created_at: string; resolved_at: string | null; status: string; priority: string; sla_breached: boolean | null;
+    }[];
+
+    const dayKey = (iso: string) => iso.split('T')[0];
+    const now = new Date();
+    const last7TicketDays: string[] = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().split('T')[0];
+    });
+
+    const createdByDay: Record<string, number> = {};
+    const resolvedByDay: Record<string, number> = {};
+    let thisWeekCreated = 0;
+    let lastWeekCreated = 0;
+    let resolvedCount = 0;
+    let resolutionHoursSum = 0;
+    let slaBreachCount = 0;
+    const openPriorityCounts: Record<string, number> = { urgent: 0, high: 0, medium: 0, low: 0 };
+
+    const fourteenDaysAgo = new Date(now);
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    trendTickets.forEach((t) => {
+      const createdDate = new Date(t.created_at);
+      const createdDay = dayKey(t.created_at);
+
+      if (createdDate >= sevenDaysAgo) thisWeekCreated++;
+      else if (createdDate >= fourteenDaysAgo) lastWeekCreated++;
+
+      if (last7TicketDays.includes(createdDay)) {
+        createdByDay[createdDay] = (createdByDay[createdDay] || 0) + 1;
+      }
+
+      if (t.resolved_at) {
+        const resolvedDay = dayKey(t.resolved_at);
+        if (last7TicketDays.includes(resolvedDay)) {
+          resolvedByDay[resolvedDay] = (resolvedByDay[resolvedDay] || 0) + 1;
+        }
+        if (new Date(t.resolved_at) >= sevenDaysAgo) {
+          resolvedCount++;
+          resolutionHoursSum += (new Date(t.resolved_at).getTime() - createdDate.getTime()) / (1000 * 60 * 60);
+        }
+      }
+
+      if (t.sla_breached && createdDate >= sevenDaysAgo) slaBreachCount++;
+
+      if (OPEN_STATUSES.includes(t.status)) {
+        const p = (t.priority || 'medium').toLowerCase();
+        if (p === 'critical') openPriorityCounts.urgent++;
+        else if (openPriorityCounts[p] !== undefined) openPriorityCounts[p]++;
+      }
+    });
+
+    const ticketTrend = last7TicketDays.map((dateStr) => {
+      const d = new Date(dateStr + 'T00:00:00Z');
+      return {
+        date: dateStr,
+        label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+        created: createdByDay[dateStr] || 0,
+        resolved: resolvedByDay[dateStr] || 0,
+      };
+    });
+
+    const busiestDay = ticketTrend.reduce((max, day) => (day.created > max.created ? day : max), ticketTrend[0]);
+    const weekOverWeekChangePct = lastWeekCreated > 0
+      ? Math.round(((thisWeekCreated - lastWeekCreated) / lastWeekCreated) * 100)
+      : (thisWeekCreated > 0 ? 100 : 0);
+
+    const ticketInsights = {
+      thisWeekCreated,
+      lastWeekCreated,
+      weekOverWeekChangePct,
+      avgResolutionHours: resolvedCount > 0 ? Math.round((resolutionHoursSum / resolvedCount) * 10) / 10 : null,
+      slaBreachCount,
+      busiestDay: busiestDay?.created > 0 ? busiestDay.label : null,
+      openPriorityCounts,
+    };
+
+    const completedTemplateIds = new Set((sopCompletionsRes.data || []).map((c: any) => c.template_id));
+    
+    let dayTotal = 0;
+    let dayCompleted = 0;
+    let nightTotal = 0;
+    let nightCompleted = 0;
+    
+    const sopItems = (sopTemplatesRes.data || []).map((t: any) => {
+      let isNight = false;
+      if (t.start_time) {
+        // e.g. "18:00:00" or "22:00:00"
+        const sh = parseInt(t.start_time.split(':')[0], 10);
+        if (sh >= 18 || (t.end_time && t.start_time > t.end_time)) {
+          isNight = true;
+        }
+      }
+      const isCompleted = completedTemplateIds.has(t.id);
+      
+      if (isNight) {
+        nightTotal++;
+        if (isCompleted) nightCompleted++;
+      } else {
+        dayTotal++;
+        if (isCompleted) dayCompleted++;
+      }
+      
+      return {
+        id: t.id,
+        title: t.title,
+        completed: isCompleted,
+        shift: isNight ? 'night' : 'day'
+      };
+    });
+    
+    const sopStats = {
+      day: { total: dayTotal, completed: dayCompleted },
+      night: { total: nightTotal, completed: nightCompleted }
+    };
+
+    const visitorItems = (vmsRes.data || []).slice(0, 50).map((v: any) => ({
+      name: v.name,
+      purpose: v.whom_to_meet,
+      status: v.status,
+      time: v.created_at
+    }));
+
     // --- RETURN PAYLOAD ---
     const dashboardData = {
       propertyId,
@@ -422,14 +647,20 @@ export async function GET(request: NextRequest) {
         month: { total: countTotalMonthRes?.count ?? 0, open: countOpenMonthRes?.count ?? 0, closed: countClosedMonthRes?.count ?? 0 },
         today: { total: countTotalTodayRes?.count ?? 0, open: countOpenTodayRes?.count ?? 0, closed: countClosedTodayRes?.count ?? 0 },
       },
-      sopTotal: sopTemplatesRes.count ?? 0,
-      sopCount: sopCompletionsRes.count ?? 0,
+      ticketTrend,
+      ticketInsights,
+      sopTotal: dayTotal + nightTotal,
+      sopCount: dayCompleted + nightCompleted,
+      sopStats,
+      sopItems,
+      visitorItems,
       energyKwh: Math.round(aggElecStats.month),
       energyStats: {
         today: Math.round(aggElecStats.today),
         month: Math.round(aggElecStats.month),
         all: Math.round(aggElecStats.all)
       },
+      energyHistory: energyHistoryArr.map(val => Math.round(val)),
       energyTrend: elecTrendCount > 0 ? Math.round(elecTrendSum / elecTrendCount) : 0,
       healthScore,
       attentionItems: sortedAttention,
@@ -437,13 +668,20 @@ export async function GET(request: NextRequest) {
       vmsStats,
       vendorStats,
       dieselStats: {
-        level: dieselCount > 0 ? Math.round(totalDieselLevel / dieselCount) : 0,
+        level: aggDieselStats.capacity > 0 ? Math.round((aggDieselStats.level / aggDieselStats.capacity) * 100) : 0,
         consumption: {
           today: Math.round(aggDieselStats.today),
           month: Math.round(aggDieselStats.month),
-          all: Math.round(aggDieselStats.all)
-        }
+          all: Math.round(aggDieselStats.all),
+        },
+        dg_kwh: {
+          today: Math.round(aggDieselStats.dg_kwh_today),
+          month: Math.round(aggDieselStats.dg_kwh_month),
+          all: Math.round(aggDieselStats.dg_kwh_all),
+        },
+        generators: aggDieselStats.generators
       },
+      dieselHistory: dieselHistoryArr.map(val => Math.round(val)),
       waterStats: {
         quantity: {
           today: Math.round(aggWaterStats.qty.today),
