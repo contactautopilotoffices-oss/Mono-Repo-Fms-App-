@@ -141,7 +141,9 @@ export async function GET(request: Request) {
                 });
             }
 
-            return NextResponse.redirect(`${redirectTo}#access_token=${access_token}&refresh_token=${refresh_token}`);
+            // Redirect back to mobile app with tokens in query parameters!
+            // Expo Router strips hash fragments (#), so query params (?) are required here.
+            return NextResponse.redirect(`${redirectTo}?access_token=${access_token}&refresh_token=${refresh_token}`);
 
         } catch (err: any) {
             console.error('[ZOHO MOBILE] callback error:', err);
