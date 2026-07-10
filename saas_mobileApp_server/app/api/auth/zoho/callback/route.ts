@@ -101,13 +101,16 @@ export async function GET(request: Request) {
             }
         });
 
-        if (linkError || !linkData?.properties?.action_link) {
+        // Support both old and new Supabase client formats
+        const actionLink = (linkData as any)?.properties?.action_link || (linkData as any)?.action_link;
+
+        if (linkError || !actionLink) {
             console.error('[ZOHO MOBILE] generateLink failed:', linkError?.message);
             return NextResponse.redirect(`${redirectTo}?error=auth_failed`);
         }
 
         // 5. GET the action_link server-side with redirect:manual
-        const actionRes = await fetch(linkData.properties.action_link, {
+        const actionRes = await fetch(actionLink, {
             redirect: 'manual',
         });
 
