@@ -81,10 +81,15 @@ export async function GET(request: Request) {
                     },
                 });
                 if (createError) {
-                    console.error('[ZOHO MOBILE] create user failed:', createError.message);
-                    return NextResponse.redirect(`${redirectTo}?error=create_user_failed_${encodeURIComponent(createError.message)}`);
+                    // If they already exist, listUsers just missed them due to pagination!
+                    // We can safely proceed without the user object (we just skip the upsert).
+                    if (!createError.message.includes('already been registered')) {
+                        console.error('[ZOHO MOBILE] create user failed:', createError.message);
+                        return NextResponse.redirect(`${redirectTo}?error=create_user_failed_${encodeURIComponent(createError.message)}`);
+                    }
+                } else {
+                    user = newUser.user;
                 }
-                user = newUser.user;
             }
 
             // 4. Generate magic link (admin, no PKCE — returns raw token in action_link)
@@ -126,13 +131,15 @@ export async function GET(request: Request) {
                 return NextResponse.redirect(`${redirectTo}?error=missing_tokens_in_redirect`);
             }
 
-            // Upsert user profile
-            await supabaseAdmin.from('users').upsert({
-                id: user!.id,
-                full_name: user!.user_metadata?.full_name || fullName,
-                email: email,
-                metadata: user!.user_metadata,
-            });
+            // Upsert user profile only if we successfully created them or found them
+            if (user) {
+                await supabaseAdmin.from('users').upsert({
+                    id: user.id,
+                    full_name: user.user_metadata?.full_name || fullName,
+                    email: email,
+                    metadata: user.user_metadata,
+                });
+            }
 
             return NextResponse.redirect(`${redirectTo}#access_token=${access_token}&refresh_token=${refresh_token}`);
 
