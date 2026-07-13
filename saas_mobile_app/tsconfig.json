@@ -10,7 +10,8 @@
         "./*"
       ]
     },
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "moduleResolution": "bundler"
   },
   "include": [
     "**/*.ts",

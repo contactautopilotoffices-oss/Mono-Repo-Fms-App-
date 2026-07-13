@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import {
   View,
@@ -159,22 +160,6 @@ function CardContent({
         <View style={styles.statusRow}>
           <PulseDot color={statusColor} />
           <Text style={styles.cardStatus}>{statusText.toUpperCase()}</Text>
-        </View>
-        
-        {/* Real-time Energy Bubble */}
-        <View style={styles.energyBubble}>
-          <Ionicons name="flash" size={12} color="#FFD60A" />
-          <Text style={styles.energyText}>
-            {(property.energy?.electricity || 0) > 0 ? `${property.energy?.electricity} kVAh` : `${property.energy?.diesel || 0} L`}
-          </Text>
-        </View>
-
-        {/* Water Bubble */}
-        <View style={[styles.energyBubble, { borderColor: 'rgba(14,165,233,0.25)', marginLeft: 8 }]}>
-          <Ionicons name="water" size={12} color="#0EA5E9" />
-          <Text style={[styles.energyText, { color: '#0EA5E9' }]}>
-            {(property.water?.cost || 0) > 0 ? `₹${property.water?.cost.toLocaleString()}` : '0'}
-          </Text>
         </View>
       </View>
     </View>

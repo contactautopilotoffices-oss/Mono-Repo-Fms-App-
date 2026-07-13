@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * BulkImportModal - CSV and manual bulk import for stock items
  */

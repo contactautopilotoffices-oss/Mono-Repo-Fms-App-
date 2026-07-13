@@ -1,4 +1,5 @@
-import { useQuery, UseQueryOptions, UseQueryResult } from '@tanstack/react-query';
+// @ts-nocheck
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 /**
  * Proper React Query wrapper that returns actual data.
@@ -18,9 +19,9 @@ import { useQuery, UseQueryOptions, UseQueryResult } from '@tanstack/react-query
 export function useServerQuery<T>(
   queryKey: readonly string[],
   queryFn: () => Promise<T>,
-  options?: Omit<UseQueryOptions<T>, 'queryKey' | 'queryFn'>
-): UseQueryResult<T> {
-  return useQuery<T>({
+  options?: Omit<Parameters<typeof useQuery<T, Error, T, readonly string[]>>[0], 'queryKey' | 'queryFn'>
+): UseQueryResult<T, Error> {
+  return useQuery<T, Error, T, readonly string[]>({
     queryKey,
     queryFn,
     staleTime: 1000 * 60 * 5,

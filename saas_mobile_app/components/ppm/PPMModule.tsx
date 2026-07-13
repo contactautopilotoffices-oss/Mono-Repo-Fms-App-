@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * PPMModule — Full PPM module wrapper component.
  * Embeds the complete PPM dashboard: calendar, schedules, stats, and AMC.

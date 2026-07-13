@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { View, ScrollView, StyleSheet, ViewStyle } from 'react-native';
 

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { getValidToken } from '@/services/cassandra/cassandraAuthService';
 import { getWebSocketUrl } from '@/services/cassandra/cassandraAuthService';
-import { AuthSession } from '@/context/AuthContext';
+import { useAuth } from '@/hooks/useAuth';
 import { requestAudioPermissionWithSettings } from '@/utils/permissions';
 import { toast } from '@/lib/toast';
 

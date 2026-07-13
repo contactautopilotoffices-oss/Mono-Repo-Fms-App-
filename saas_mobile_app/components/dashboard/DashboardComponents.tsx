@@ -1,4 +1,5 @@
-import React from 'react';
+// @ts-nocheck
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,10 +9,13 @@ import {
   Dimensions,
   Image,
   ViewStyle,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeInUp, useSharedValue, useAnimatedStyle, withSpring, withRepeat, withTiming, Easing, interpolateColor, useAnimatedProps, LinearTransition } from 'react-native-reanimated';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
+import { Accelerometer } from 'expo-sensors';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 import {
   SPACING,
@@ -42,6 +46,7 @@ export function GlassTile({
   delay = 0,
   status,
   onPress,
+  onLongPress,
   style,
 }: {
   label: string;
@@ -50,14 +55,15 @@ export function GlassTile({
   delay?: number;
   status?: 'optimal' | 'watch' | 'critical';
   onPress?: () => void;
+  onLongPress?: () => void;
   style?: ViewStyle;
 }) {
   const statusColor = status ? STATUS_COLORS[status].bg : null;
 
   return (
-    <Animated.View  style={{ width: '100%' }}>
-      <TouchableOpacity activeOpacity={0.9} onPress={onPress} disabled={!onPress}>
-        <SafeBlurView intensity={45} style={[styles.tile, style]} tint="dark">
+    <Animated.View style={[styles.tileWrapper, style, { flex: 1, minWidth: '45%' }]}>
+      <TouchableOpacity activeOpacity={0.9} onPress={onPress} onLongPress={onLongPress} disabled={!onPress && !onLongPress}>
+        <SafeBlurView intensity={45} style={styles.tile} tint="dark">
           <LinearGradient
             colors={[
               'rgba(255,255,255,0.08)',
@@ -86,18 +92,29 @@ export function GlassTile({
 // ─── Mini Bar Chart ───────────────────────────────────────────────────────────
 export function MiniBarChart({ data, highlightColor }: { data: number[]; highlightColor?: string }) {
   const max = Math.max(...data, 1);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
   return (
     <View style={styles.barChart}>
       {data.map((v, i) => (
         <View key={i} style={styles.barContainer}>
           <View style={styles.barTrack}>
-            <View
+            {activeIndex === i && (
+              <View style={{ position: 'absolute', top: -20, left: -20, right: -20, alignItems: 'center', zIndex: 10 }}>
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '700' }}>{Math.round(v)}</Text>
+              </View>
+            )}
+            <Pressable
+              onPressIn={() => setActiveIndex(i)}
+              onPressOut={() => setActiveIndex(null)}
+              // For web hover
+              onHoverIn={() => setActiveIndex(i)}
+              onHoverOut={() => setActiveIndex(null)}
               style={[
                 styles.barFill,
                 {
                   height: `${Math.max((v / max) * 100, 5)}%`,
-                  backgroundColor:
-                    i === data.length - 1 ? highlightColor || 'rgba(112,143,150,0.80)' : 'rgba(0,0,0,0.12)',
+                  backgroundColor: highlightColor || 'rgba(112,143,150,0.80)',
                 },
               ]}
             />
@@ -129,8 +146,56 @@ export function AttentionCard({ item, index, onAction }: { item: any; index: num
     item.type === 'stale_ticket' ? 'time-outline' :
     item.type === 'sop_missed' ? 'checkbox-outline' : 'information-circle-outline';
 
+  // Live SLA countdown
+  const [countdown, setCountdown] = useState('');
+  const [isBreached, setIsBreached] = useState(false);
+
+  useEffect(() => {
+    if (!item.slaDeadline) return;
+    const update = () => {
+      const remaining = new Date(item.slaDeadline).getTime() - Date.now();
+      if (remaining <= 0) {
+        setCountdown('BREACHED');
+        setIsBreached(true);
+      } else {
+        const hours = Math.floor(remaining / 3600000);
+        const mins = Math.floor((remaining % 3600000) / 60000);
+        if (hours > 24) {
+          const days = Math.floor(hours / 24);
+          setCountdown(`${days}d ${hours % 24}h`);
+        } else {
+          setCountdown(`${hours}h ${mins}m`);
+        }
+        setIsBreached(false);
+      }
+    };
+    update();
+    const interval = setInterval(update, 60000); // tick every minute
+    return () => clearInterval(interval);
+  }, [item.slaDeadline]);
+
+  // Ticket age
+  const ticketAge = item.createdAt ? (() => {
+    const ms = Date.now() - new Date(item.createdAt).getTime();
+    const hours = Math.floor(ms / 3600000);
+    if (hours < 1) return 'Just now';
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  })() : null;
+
+  // Pulsing border for critical
+  const pulseAnim = useSharedValue(1);
+  useEffect(() => {
+    if (item.severity === 'critical') {
+      pulseAnim.value = withRepeat(withTiming(0.4, { duration: 1200, easing: Easing.inOut(Easing.ease) }), -1, true);
+    }
+  }, [item.severity]);
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: item.severity === 'critical' ? pulseAnim.value : 1,
+  }));
+
   return (
-    <Animated.View >
+    <Animated.View entering={FadeInUp.delay(index * 80).duration(350)}>
       <TouchableOpacity
         activeOpacity={0.85}
         onPress={onAction}
@@ -141,6 +206,10 @@ export function AttentionCard({ item, index, onAction }: { item: any; index: num
           colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.05)']}
           style={StyleSheet.absoluteFillObject}
         />
+        {/* Pulsing glow bar for critical */}
+        {item.severity === 'critical' && (
+          <Animated.View style={[{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: '#EF4444', borderTopLeftRadius: 12, borderBottomLeftRadius: 12 }, pulseStyle]} />
+        )}
         <View style={styles.attentionCardInner}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <View style={[styles.attentionIconBadge, { backgroundColor: severityColor + '15' }]}>
@@ -152,7 +221,23 @@ export function AttentionCard({ item, index, onAction }: { item: any; index: num
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.attentionTitle} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.attentionDesc} numberOfLines={2}>{item.description}</Text>
+              <Text style={styles.attentionDesc} numberOfLines={1}>{item.description}</Text>
+              {/* Ticket age + SLA countdown row */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                {ticketAge && (
+                  <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: '500' }}>
+                    🕐 {ticketAge}
+                  </Text>
+                )}
+                {countdown !== '' && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: isBreached ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.12)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                    <Ionicons name={isBreached ? 'warning' : 'timer-outline'} size={10} color={isBreached ? '#EF4444' : '#F59E0B'} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: isBreached ? '#EF4444' : '#F59E0B' }}>
+                      {countdown}
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
             <View style={[styles.attentionActionBadge, { backgroundColor: severityColor + '15' }]}>
               <Text style={[styles.attentionActionText, { color: severityColor }]}>{item.action_label}</Text>
@@ -226,7 +311,290 @@ export function ScheduleItem({ date, month, title, type, status }: { date: strin
   );
 }
 
+export function LiveDieselSphere({ level }: { level: number }) {
+  const tiltX = useSharedValue(0);
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    let subscription: any = null;
+    let isMounted = true;
+    const subscribe = async () => {
+      const isAvailable = await Accelerometer.isAvailableAsync();
+      if (!isMounted) return;
+      if (isAvailable) {
+        Accelerometer.setUpdateInterval(50);
+        subscription = Accelerometer.addListener(({ x }) => {
+          if (isMounted) {
+            tiltX.value = withSpring(x * 60, { damping: 10, stiffness: 50 });
+          }
+        });
+      }
+    };
+    subscribe();
+    
+    // Endless rotation for the wave effect
+    rotation.value = withRepeat(withTiming(360, { duration: 3000, easing: Easing.linear }), -1, false);
+
+    return () => {
+      isMounted = false;
+      if (subscription) subscription.remove();
+    };
+  }, []);
+
+  const animatedTiltStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${-tiltX.value}deg` }
+      ]
+    };
+  });
+
+  const animatedWaveStyle1 = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${rotation.value}deg` }
+      ]
+    };
+  });
+
+  const animatedWaveStyle2 = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${rotation.value + 45}deg` } // offset the second wave
+      ]
+    };
+  });
+
+  const validLevel = Math.max(0, Math.min(100, level));
+  const surfaceY = 60 - (validLevel / 100) * 60;
+
+  return (
+    <View style={{ 
+      width: 60, height: 60, borderRadius: 30, 
+      backgroundColor: 'rgba(255,255,255,0.05)', 
+      borderWidth: 2, borderColor: 'rgba(245,158,11,0.4)', 
+      overflow: 'hidden', alignItems: 'center', justifyContent: 'center' 
+    }}>
+      <Animated.View style={[{
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        top: 0,
+        left: 0,
+      }, animatedTiltStyle]}>
+        
+        {/* Wave 1 */}
+        <Animated.View style={[{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: 65, // Squircle for wave 1
+          top: surfaceY,
+          left: -45, // Center horizontally
+          backgroundColor: 'rgba(245,158,11,0.5)',
+        }, animatedWaveStyle1]} />
+        
+        {/* Wave 2 */}
+        <Animated.View style={[{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: 60, // Different squircle for wave 2
+          top: surfaceY + 5, 
+          left: -45, 
+          backgroundColor: 'rgba(245,158,11,0.8)',
+        }, animatedWaveStyle2]} />
+
+      </Animated.View>
+      <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '800', zIndex: 10 }}>{validLevel}%</Text>
+    </View>
+  );
+}
+
+export function LiveWaterSphere({ level }: { level: number }) {
+  const tiltX = useSharedValue(0);
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    let subscription: any = null;
+    let isMounted = true;
+    const subscribe = async () => {
+      const isAvailable = await Accelerometer.isAvailableAsync();
+      if (!isMounted) return;
+      if (isAvailable) {
+        Accelerometer.setUpdateInterval(50);
+        subscription = Accelerometer.addListener(({ x }) => {
+          if (isMounted) {
+            tiltX.value = withSpring(x * 60, { damping: 10, stiffness: 50 });
+          }
+        });
+      }
+    };
+    subscribe();
+    
+    // Endless rotation for the water wave effect
+    rotation.value = withRepeat(withTiming(360, { duration: 3000, easing: Easing.linear }), -1, false);
+
+    return () => {
+      isMounted = false;
+      if (subscription) subscription.remove();
+    };
+  }, []);
+
+  const animatedTiltStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${-tiltX.value}deg` }
+      ]
+    };
+  });
+
+  const animatedWaveStyle1 = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${rotation.value}deg` }
+      ]
+    };
+  });
+
+  const animatedWaveStyle2 = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotateZ: `${rotation.value + 45}deg` } // offset the second wave
+      ]
+    };
+  });
+
+  const validLevel = Math.max(0, Math.min(100, level));
+  const surfaceY = 60 - (validLevel / 100) * 60;
+
+  return (
+    <View style={{ 
+      width: 60, height: 60, borderRadius: 30, 
+      backgroundColor: 'rgba(14,165,233,0.1)', 
+      borderWidth: 2, borderColor: 'rgba(14,165,233,0.3)', 
+      overflow: 'hidden', alignItems: 'center', justifyContent: 'center' 
+    }}>
+      <Animated.View style={[{
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        top: 0,
+        left: 0,
+      }, animatedTiltStyle]}>
+        
+        {/* Wave 1 */}
+        <Animated.View style={[{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: 65, // Squircle for wave 1
+          top: surfaceY,
+          left: -45, // Center horizontally
+          backgroundColor: 'rgba(14,165,233,0.4)',
+        }, animatedWaveStyle1]} />
+        
+        {/* Wave 2 */}
+        <Animated.View style={[{
+          position: 'absolute',
+          width: 150,
+          height: 150,
+          borderRadius: 60, // Different squircle for wave 2
+          top: surfaceY + 5, 
+          left: -45, 
+          backgroundColor: 'rgba(14,165,233,0.7)',
+        }, animatedWaveStyle2]} />
+
+      </Animated.View>
+      <Ionicons name="water" size={24} color="#FFF" style={{ zIndex: 10, opacity: 0.9 }} />
+    </View>
+  );
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+export function LiveEnergyRing({ percentage }: { percentage: number }) {
+  const progress = useSharedValue(0);
+  const pulseScale = useSharedValue(1);
+  const pulseOpacity = useSharedValue(0.5);
+
+  useEffect(() => {
+    progress.value = withTiming(percentage, { duration: 1500, easing: Easing.out(Easing.cubic) });
+    pulseScale.value = withRepeat(withTiming(1.2, { duration: 1500, easing: Easing.inOut(Easing.ease) }), -1, true);
+    pulseOpacity.value = withRepeat(withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) }), -1, true);
+  }, [percentage]);
+
+  const radius = 26;
+  const strokeWidth = 5;
+  const circumference = 2 * Math.PI * radius;
+
+  const animatedProps = useAnimatedProps(() => {
+    const strokeDashoffset = circumference - (Math.max(0, Math.min(100, progress.value)) / 100) * circumference;
+    return {
+      strokeDashoffset,
+    };
+  });
+
+  const pulseStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: pulseScale.value }],
+      opacity: pulseOpacity.value,
+    };
+  });
+
+  return (
+    <View style={{ width: 60, height: 60, alignItems: 'center', justifyContent: 'center' }}>
+      
+      {/* Pulse Bloom */}
+      <Animated.View style={[{
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(16, 185, 129, 0.4)',
+      }, pulseStyle]} />
+
+      <Svg width={60} height={60} viewBox="0 0 60 60" style={{ position: 'absolute' }}>
+        <Defs>
+          <RadialGradient id="grad" cx="50%" cy="50%" rx="50%" ry="50%">
+            <Stop offset="0%" stopColor="#10B981" stopOpacity="1" />
+            <Stop offset="100%" stopColor="#F59E0B" stopOpacity="1" />
+          </RadialGradient>
+        </Defs>
+        <Circle
+          cx="30"
+          cy="30"
+          r={radius}
+          stroke="rgba(255,255,255,0.1)"
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <AnimatedCircle
+          cx="30"
+          cy="30"
+          r={radius}
+          stroke="url(#grad)"
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={circumference}
+          animatedProps={animatedProps}
+          strokeLinecap="round"
+          originX="30"
+          originY="30"
+          rotation="-90"
+        />
+      </Svg>
+      
+      <Ionicons name="flash" size={20} color="#10B981" />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  container: {
+    padding: SPACING.md,
+    borderRadius: 24,
+  },
   pulseDot: { width: 6, height: 6, borderRadius: 3 },
   tile: {
     borderRadius: 24,

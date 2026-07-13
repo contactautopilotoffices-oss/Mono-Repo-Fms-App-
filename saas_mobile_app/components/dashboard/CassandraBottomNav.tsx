@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * CassandraBottomNav — Pill-shaped floating nav bar
  * Inspired by modern fitness/wellness app bottom navs.

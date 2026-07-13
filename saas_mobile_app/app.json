@@ -9,15 +9,14 @@
       "barStyle": "light-content",
       "backgroundColor": "#FFFFFF"
     },
-    "icon": "./assets/images/notification-icon.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "autopilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/autopilot-logo-new.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF",
-      "imageWidth": 280
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
@@ -25,8 +24,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/notification-icon.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/autopilot-logo-adaptive.png",
+        "backgroundColor": "#0B1527"
       },
       "package": "com.autopilot.app",
       "googleServicesFile": "./google-services.json",
@@ -54,8 +53,7 @@
         {
           "image": "./assets/images/autopilot-logo-new.png",
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF",
-          "imageWidth": 280
+          "backgroundColor": "#FFFFFF"
         }
       ],
       [

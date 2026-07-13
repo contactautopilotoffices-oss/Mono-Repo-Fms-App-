@@ -75,6 +75,8 @@ const MST_ROLES = ['mst', 'master_admin', 'super_admin'];
 export async function getPropertyAccess(userId: string, propertyId: string) {
   const admin = createAdminClient();
 
+  console.log(`[getPropertyAccess] START userId: ${userId}, propertyId: ${propertyId}`);
+
   // 1. Master admin bypass
   const { data: userProfile } = await admin
     .from("users")
@@ -83,24 +85,30 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .maybeSingle();
 
   if (userProfile?.is_master_admin) {
+    console.log(`[getPropertyAccess] Master admin bypass`);
     return { authorized: true, role: "master_admin" };
   }
 
   // 2. Get property's organization
-  const { data: property } = await admin
+  const { data: property, error: pError } = await admin
     .from("properties")
     .select("organization_id")
     .eq("id", propertyId)
     .maybeSingle();
 
+  if (pError) console.error(`[getPropertyAccess] Property error:`, pError);
+
   // 3. Check property-level membership FIRST (MST may store role here)
-  const { data: propertyMembership } = await admin
+  const { data: propertyMembership, error: pmError } = await admin
     .from("property_memberships")
     .select("role")
     .eq("user_id", userId)
     .eq("property_id", propertyId)
     .or("is_active.eq.true,is_active.is.null")
     .maybeSingle();
+
+  if (pmError) console.error(`[getPropertyAccess] Property membership error:`, pmError);
+  console.log(`[getPropertyAccess] propertyMembership:`, propertyMembership);
 
   if (propertyMembership) {
     // MST users from property_memberships get access
@@ -113,13 +121,16 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
 
   // 4. If no property membership, check org-level membership
   if (property?.organization_id) {
-    const { data: orgMembership } = await admin
+    const { data: orgMembership, error: omError } = await admin
       .from("organization_memberships")
       .select("role")
       .eq("user_id", userId)
       .eq("organization_id", property.organization_id)
       .or("is_active.eq.true,is_active.is.null")
       .maybeSingle();
+
+    if (omError) console.error(`[getPropertyAccess] Org membership error:`, omError);
+    console.log(`[getPropertyAccess] orgMembership:`, orgMembership);
 
     if (orgMembership) {
       // MST users get access to ALL properties in the org
@@ -152,5 +163,6 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     }
   }
 
+  console.log(`[getPropertyAccess] FAILED. Returning authorized: false`);
   return { authorized: false as const };
 }

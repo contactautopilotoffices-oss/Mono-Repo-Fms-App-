@@ -28,19 +28,20 @@ export const AutopilotLogo: React.FC<AutopilotLogoProps> = ({
   return (
     <View style={[styles.container, style]}>
       <Image
-        source={require('../../assets/autopilot-logo-new.png')}
+        source={require('../../assets/images/autopilot-logo-new.png')}
         style={{ width: height * 5, height: height, resizeMode: 'contain', tintColor: color }}
       />
     </View>
   );
 };
 
-export const AutopilotIcon: React.FC<{ size?: number; variant?: 'light' | 'dark'; style?: ViewStyle }> = ({
+export const AutopilotIcon: React.FC<{ size?: number; variant?: 'light' | 'dark'; style?: ViewStyle; color?: string }> = ({
   size = 32,
   variant = 'dark',
   style,
+  color: customColor,
 }) => {
-  const color = variant === 'dark' ? '#000000' : '#FFFFFF';
+  const color = customColor || (variant === 'dark' ? '#000000' : '#FFFFFF');
 
   return (
     <View style={style}>

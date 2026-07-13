@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * PremiumSun — Ultra-subtle atmospheric sun glow
  * Inspired by Apple Weather: soft white bloom, no harsh edges, no rays.

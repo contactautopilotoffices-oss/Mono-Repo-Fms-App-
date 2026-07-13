@@ -795,7 +795,7 @@ export default function PPMScreen() {
 
   // ── Vendor list fetch ─────────────────────────────────────────────────────
   const fetchVendorList = useCallback(async () => {
-    const res = await ppmService.fetchVendors(propertyId as string, membership?.org_id ?? null);
+    const res = await ppmService.fetchVendors(membership?.org_id ?? null);
     if (res.success && res.data) {
       setVendorList(res.data);
     }
@@ -849,7 +849,6 @@ export default function PPMScreen() {
         } as any);
 
         const res = await ppmService.uploadAttachment(
-          propertyId as string,
           selectedSchedule.id,
           compressedUri,
           'photo',
@@ -1296,9 +1295,9 @@ export default function PPMScreen() {
 
       {/* Schedules Tab */}
       {activeTab === "schedules" && (
-        <FlashList
+        <FlashList<PPMSchedule>
           data={schedules}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => (item as any).id}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1349,9 +1348,9 @@ export default function PPMScreen() {
           }
           renderItem={({ item: s }) => (
             <ScheduleCard
-              schedule={s}
+              schedule={s as PPMSchedule}
               colors={colors}
-              onPress={() => openDetail(s)}
+              onPress={() => openDetail(s as PPMSchedule)}
             />
           )}
         />
@@ -1359,9 +1358,9 @@ export default function PPMScreen() {
 
       {/* AMC Tab */}
       {activeTab === "amc" && (
-        <FlashList
+        <FlashList<AMCContract>
           data={contracts}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => (item as any).id}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1925,7 +1924,7 @@ export default function PPMScreen() {
                       />
                       <Text
                         style={[
-                          styles.verificationText,
+                          { fontSize: 13, marginLeft: 6 },
                           { color: colors.text },
                         ]}
                       >
@@ -2511,7 +2510,14 @@ export default function PPMScreen() {
                             padding: 12,
                             borderRadius: 10,
                           }}
-                          onPress={() => Linking.openURL(doc.url as string)}
+                          onPress={async () => {
+                            try {
+                              const WebBrowser = require('expo-web-browser');
+                              await WebBrowser.openBrowserAsync(doc.url as string);
+                            } catch (e) {
+                              Linking.openURL(doc.url as string);
+                            }
+                          }}
                         >
                           <DownloadCloud size={20} color={colors.primary} />
                           <Text

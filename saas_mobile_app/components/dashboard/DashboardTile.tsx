@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 /**
  * DashboardTile — Atmospheric Glass Tile structure

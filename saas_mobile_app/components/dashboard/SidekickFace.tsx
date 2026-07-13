@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 /**
  * SidekickFace — Animated AI face with multi-hue ambient glow

@@ -445,14 +445,31 @@ export function MeetingRoomCard({ room, slots: apiSlots, selectedDate, onBook }:
                       <>
                         <Text style={styles.modalDesc}>Only part of this slot is available.</Text>
                         <Text style={styles.modalTime}>{formatTimeForDisplay(partialConfirm.start)} - {formatTimeForDisplay(partialConfirm.end)}</Text>
+                        <TextInput
+                          style={[styles.commentInput, { marginBottom: 20 }]}
+                          placeholder="Add comment (optional)"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          value={partialConfirm.comment}
+                          onChangeText={(text) => setPartialConfirm({ ...partialConfirm, comment: text })}
+                          multiline
+                          numberOfLines={2}
+                          maxLength={200}
+                        />
                       </>
                   ) : pendingBooking ? (
                       <>
                         <Text style={styles.modalDesc}>{room.name} on {selectedDate}</Text>
                         <Text style={styles.modalTime}>{formatTimeForDisplay(pendingBooking.start)} - {formatTimeForDisplay(pendingBooking.end)}</Text>
-                        {pendingBooking.comment ? (
-                          <Text style={styles.modalComment} numberOfLines={2}>Comment: {pendingBooking.comment}</Text>
-                        ) : null}
+                        <TextInput
+                          style={[styles.commentInput, { marginBottom: 20 }]}
+                          placeholder="Add comment (optional)"
+                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          value={pendingBooking.comment}
+                          onChangeText={(text) => setPendingBooking({ ...pendingBooking, comment: text })}
+                          multiline
+                          numberOfLines={2}
+                          maxLength={200}
+                        />
                       </>
                   ) : null}
 

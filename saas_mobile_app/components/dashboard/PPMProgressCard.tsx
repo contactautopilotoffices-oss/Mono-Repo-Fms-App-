@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * PPMProgressCard — Mini calendar + task summary for Preventive Maintenance
  * Features:

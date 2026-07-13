@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Redirect } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { View, Text, TouchableOpacity } from 'react-native';

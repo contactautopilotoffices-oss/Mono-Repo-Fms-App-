@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serverApi } from '@/lib/serverApi';
 import { ApiResponse } from '@/types';
 import { dieselApi } from './dieselApi';

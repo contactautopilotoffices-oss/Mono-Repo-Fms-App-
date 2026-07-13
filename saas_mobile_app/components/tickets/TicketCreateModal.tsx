@@ -770,8 +770,7 @@ const styles = StyleSheet.create({
   textArea: {
     fontSize: 15,
     color: '#FFFFFF',
-    minHeight: 90,
-    maxHeight: 180,
+    height: 150,
     fontWeight: '400',
     lineHeight: 22,
   },

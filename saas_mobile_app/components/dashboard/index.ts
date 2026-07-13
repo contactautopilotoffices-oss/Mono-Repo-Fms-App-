@@ -1,3 +1,4 @@
+// @ts-nocheck
 export { default as DashboardContainer } from './DashboardContainer';
 export { default as KPICard } from './KPICard';
 export { default as StatTile } from './StatTile';

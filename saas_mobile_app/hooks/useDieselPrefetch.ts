@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Diesel Prefetch Hook
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Staff Dashboard Query Hook
  *

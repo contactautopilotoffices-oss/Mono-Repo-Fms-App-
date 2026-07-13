@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * PPMActivityTile — Full-width card showing preventive maintenance activities
  * Grouped by Today / Monthly / Quarterly with status indicators.

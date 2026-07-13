@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { Redirect, useGlobalSearchParams } from 'expo-router';

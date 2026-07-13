@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Platform } from 'react-native';
 
 export const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';

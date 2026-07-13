@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Unauthorized access to org properties" }, { status: 403 });
       }
     } else {
-      const access = await getPropertyAccess(userId, propertyId);
+      const access = await getPropertyAccess(userId, propertyId);\n      console.log([property-admin] getPropertyAccess userId: , propertyId: , access:, access);
       if (!access.authorized) {
         return NextResponse.json({ error: "Access Denied to this Property" }, { status: 403 });
       }

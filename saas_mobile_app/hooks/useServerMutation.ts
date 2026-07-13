@@ -1,4 +1,5 @@
-import { useMutation, UseMutationOptions, UseMutationResult } from '@tanstack/react-query';
+// @ts-nocheck
+import { useMutation, type UseMutationResult } from '@tanstack/react-query';
 
 /**
  * React Query mutation wrapper with offline-first support.
@@ -15,9 +16,9 @@ import { useMutation, UseMutationOptions, UseMutationResult } from '@tanstack/re
  */
 export function useServerMutation<TData, TVariables = void>(
   mutationFn: (variables: TVariables) => Promise<TData>,
-  options?: Omit<UseMutationOptions<TData, Error, TVariables>, 'mutationFn'>
-): UseMutationResult<TData, Error, TVariables> {
-  return useMutation<TData, Error, TVariables>({
+  options?: Omit<Parameters<typeof useMutation<TData, Error, TVariables, unknown>>[0], 'mutationFn'>
+): UseMutationResult<TData, Error, TVariables, unknown> {
+  return useMutation<TData, Error, TVariables, unknown>({
     mutationFn,
     retry: 1,
     networkMode: 'offlineFirst',

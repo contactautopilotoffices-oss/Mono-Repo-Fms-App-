@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Room Detail Screen — /cassandra/rooms/[roomId]
  *

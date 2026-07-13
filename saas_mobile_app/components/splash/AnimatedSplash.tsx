@@ -10,10 +10,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, StyleSheet, Dimensions, Image } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import * as SplashScreen from 'expo-splash-screen';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
@@ -21,13 +23,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStore } from '@/stores/dashboardStore';
 import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
 
-const MIN_DISPLAY_MS = 100; // Minimum time logo is visible
-const ENTRANCE_DURATION = 100; // Almost instant entrance
-const EXIT_DURATION = 300;      // Snappy fade-out duration
-const SCALE_INITIAL = 1.0;     // Match native splash size exactly
-const SCALE_FINAL = 1.0;        // Stay at native size
-const EXIT_SCALE = 1.2;         // Subtle grow while fading out
-const EXIT_TRANSLATE_Y = 0;     // Keep centered while zooming out
+const MIN_DISPLAY_MS = 600; // Total minimum time before exiting
+const HOLD_DURATION = 150;  // Initial hold time to ensure perfect handoff
+const EXIT_DURATION = 350;  // Snappy fade-out duration
+const SCALE_INITIAL = 1.0;
+const GROW_SCALE = 1.12;    // Scale to grow to during the subtle phase
+const EXIT_SCALE = 1.25;    // Scale out when finishing
+const EXIT_TRANSLATE_Y = 0; // Keep centered
 
 interface AnimatedSplashProps {
   onAnimationComplete: () => void;
@@ -37,23 +39,57 @@ interface AnimatedSplashProps {
 export function AnimatedSplash({ onAnimationComplete, startupComplete }: AnimatedSplashProps) {
   const { user, isLoading: isAuthLoading, membership, isMembershipLoading } = useAuth();
 
-  const [phase, setPhase] = useState<'entering' | 'holding' | 'prefetching' | 'exiting' | 'done'>('entering');
+  const [phase, setPhase] = useState<'mounting' | 'holding' | 'animating' | 'prefetching' | 'exiting' | 'done'>('mounting');
   const splashStartTime = useRef(Date.now());
   const hasCompletedRef = useRef(false);
   const hasPrefetchedRef = useRef(false);
-  const hasHapticTriggered = useRef(false);
 
   // Animation values
   const scale = useSharedValue(SCALE_INITIAL);
   const opacity = useSharedValue(1);
   const translateY = useSharedValue(0);
 
+  // Sync handoff: Hide native splash precisely when we render our first frame
+  const onLayout = useCallback(() => {
+    if (phase !== 'mounting') return;
+    
+    // requestAnimationFrame ensures we wait until the UI thread actually paints
+    requestAnimationFrame(() => {
+      SplashScreen.hideAsync().catch(() => {});
+      setPhase('holding');
+    });
+  }, [phase]);
+
+  // Stage 1 -> Stage 2: Hold then begin subtle premium scale/fade
+  useEffect(() => {
+    if (phase === 'holding') {
+      const timer = setTimeout(() => {
+        setPhase('animating');
+        
+        // Stage 2: Smooth spring scale
+        scale.value = withSpring(GROW_SCALE, {
+          damping: 20,
+          stiffness: 90,
+          mass: 1,
+        });
+
+        // Stage 3: Very subtle opacity drop
+        opacity.value = withTiming(0.98, { duration: 800 });
+
+      }, HOLD_DURATION);
+      return () => clearTimeout(timer);
+    }
+  }, [phase, scale, opacity]);
+
   const runExitAnimation = useCallback(() => {
     if (hasCompletedRef.current) return;
     hasCompletedRef.current = true;
     setPhase('exiting');
+    
+    // Haptic feedback as we exit to dashboard
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    // Zoom the logo out completely + fade away
+    // Stage 4: Zoom out and crossfade
     scale.value = withTiming(EXIT_SCALE, {
       duration: EXIT_DURATION,
       easing: Easing.in(Easing.ease),
@@ -74,39 +110,16 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     });
   }, [onAnimationComplete, opacity, scale, translateY]);
 
-  // Entrance animation: camera zooms into the logo (small -> fills screen)
-  useEffect(() => {
-    if (phase !== 'entering') return;
-
-    // Subtle hardware vibration as the zoom begins
-    if (!hasHapticTriggered.current) {
-      hasHapticTriggered.current = true;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    }
-
-    scale.value = withTiming(SCALE_FINAL, {
-      duration: ENTRANCE_DURATION,
-      easing: Easing.out(Easing.cubic),
-    }, (finished) => {
-      if (finished) {
-        runOnJS(setPhase)('holding');
-      }
-    });
-  }, [phase, scale]);
-
-  // Background prefetch while the splash is visible
+  // Background prefetch
   useEffect(() => {
     if (hasPrefetchedRef.current) return;
     if (isAuthLoading || isMembershipLoading) return;
     if (!user || !membership?.properties?.length) return;
 
     hasPrefetchedRef.current = true;
-    setPhase('prefetching');
-
     const propertyId = useDashboardStore.getState().selectedPropertyId || membership.properties[0].id;
     if (!propertyId) return;
 
-    // Start prefetch in parallel; don't block the exit animation
     Promise.allSettled([
       prefetchDashboard(propertyId),
       prefetchImportantOnLogin(propertyId),
@@ -115,29 +128,24 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     });
   }, [isAuthLoading, isMembershipLoading, user, membership]);
 
-  // Trigger exit once startup is complete and minimum display time has passed
+  // Trigger exit
   useEffect(() => {
-    if (phase === 'exiting' || phase === 'done' || phase === 'entering') return;
+    if (phase === 'exiting' || phase === 'done' || phase === 'mounting' || phase === 'holding') return;
 
-    const checkReady = () => {
-      if (!startupComplete) return;
-      if (isAuthLoading || isMembershipLoading) return;
+    if (!startupComplete) return;
+    if (isAuthLoading || isMembershipLoading) return;
 
-      const elapsed = Date.now() - splashStartTime.current;
-      const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
+    const elapsed = Date.now() - splashStartTime.current;
+    const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
 
-      const timer = setTimeout(() => {
-        runExitAnimation();
-      }, remaining);
+    const timer = setTimeout(() => {
+      runExitAnimation();
+    }, remaining);
 
-      return () => clearTimeout(timer);
-    };
-
-    const cleanup = checkReady();
-    return cleanup;
+    return () => clearTimeout(timer);
   }, [startupComplete, isAuthLoading, isMembershipLoading, phase, runExitAnimation]);
 
-  // Safety: force exit after a max duration so the splash never traps the user
+  // Safety fallback
   useEffect(() => {
     const maxTimer = setTimeout(() => {
       if (!hasCompletedRef.current) {
@@ -158,21 +166,17 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
   }));
 
   return (
-    <Animated.View style={[styles.container, containerStyle]} pointerEvents="none">
-      <View style={styles.content}>
-        <Animated.View style={[styles.logoContainer, logoStyle]}>
-          <Image
-            source={require('../../assets/images/autopilot-logo-new.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </Animated.View>
-      </View>
+    <Animated.View style={[styles.container, containerStyle]} pointerEvents="none" onLayout={onLayout}>
+      <Animated.View style={[styles.logoContainer, logoStyle]}>
+        <Image
+          source={require('../../assets/images/autopilot-logo-new.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </Animated.View>
     </Animated.View>
   );
 }
-
-const { width } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
   container: {
@@ -182,20 +186,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 9999,
   },
-  content: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   logoContainer: {
-    width: 280,
-    height: 280,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
   },
   logo: {
+    flex: 1,
     width: '100%',
     height: '100%',
-    tintColor: '#000000',
   },
 });
 

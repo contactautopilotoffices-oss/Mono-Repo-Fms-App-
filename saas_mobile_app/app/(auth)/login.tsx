@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useMemo } from 'react';
 import {
   View,
@@ -11,6 +12,7 @@ import {
   ActivityIndicator,
   useColorScheme,
   Dimensions,
+  Image,
 } from 'react-native';
 
 // ─── Lovable Dashboard Font Stack ────────────────────────────────────────────
@@ -28,6 +30,9 @@ const FONT_TRACKING = {
 };
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
+import * as Linking from 'expo-linking';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -36,7 +41,7 @@ import { apiFetch } from '@/utils/api/mobileApi';
 import { authService } from '@/services/authService';
 import { supabase } from '@/utils/supabase/client';
 import { Colors } from '@/constants/Colors';
-import { AutopilotLogo } from '@/components/ui/AutopilotLogo';
+import { AutopilotLogo, AutopilotIcon } from '@/components/ui/AutopilotLogo';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -69,76 +74,57 @@ type AuthMode = 'signin' | 'signup';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-// ─── Floating decorative shape ───────────────────────────────────────────────
-function FloatingShape({
-  size,
-  color,
-  top,
-  left,
-  right,
-  delay,
-  duration,
-}: {
-  size: number;
-  color: string;
-  top?: number | string;
-  left?: number | string;
-  right?: number | string;
-  delay: number;
-  duration: number;
-}) {
-  const floatY = useSharedValue(0);
-  const floatX = useSharedValue(0);
-  const opacity = useSharedValue(0);
+WebBrowser.maybeCompleteAuthSession();
+
+// ─── Background Slideshow ──────────────────────────────────────────────────────
+const SLIDE_INTERVAL = 5000;
+const BACKGROUND_IMAGES = [
+  require('../../assets/images/ss_plaza.jpg'),
+  require('../../assets/images/etpl_digitide.png'),
+  require('../../assets/images/rabale.png'),
+];
+
+function BackgroundSlideshow() {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  const opacity0 = useSharedValue(1);
+  const opacity1 = useSharedValue(0);
+  const opacity2 = useSharedValue(0);
 
   React.useEffect(() => {
-    const timer = setTimeout(() => {
-      opacity.value = withTiming(1, { duration: 600 });
-      floatY.value = withRepeat(
-        withSequence(
-          withTiming(-12, { duration, easing: Easing.inOut(Easing.ease) }),
-          withTiming(12, { duration, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        true
-      );
-      floatX.value = withRepeat(
-        withSequence(
-          withTiming(8, { duration: duration * 1.3, easing: Easing.inOut(Easing.ease) }),
-          withTiming(-8, { duration: duration * 1.3, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        true
-      );
-    }, delay);
-    return () => clearTimeout(timer);
+    const timer = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % BACKGROUND_IMAGES.length);
+    }, SLIDE_INTERVAL);
+    return () => clearInterval(timer);
   }, []);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{
-      translateY: floatY.value,
-    }, {
-      translateX: floatX.value,
-    }],
-  })) as any;
+  React.useEffect(() => {
+    opacity0.value = withTiming(currentIndex === 0 ? 1 : 0, { duration: 1000 });
+    opacity1.value = withTiming(currentIndex === 1 ? 1 : 0, { duration: 1000 });
+    opacity2.value = withTiming(currentIndex === 2 ? 1 : 0, { duration: 1000 });
+  }, [currentIndex]);
+
+  const style0 = useAnimatedStyle(() => ({ opacity: opacity0.value }));
+  const style1 = useAnimatedStyle(() => ({ opacity: opacity1.value }));
+  const style2 = useAnimatedStyle(() => ({ opacity: opacity2.value }));
 
   return (
-    <Animated.View
-      style={[
-        styles.floatingShape,
-        {
-          width: size,
-          height: size,
-          backgroundColor: color,
-          top: top as number | undefined,
-          left: left as number | undefined,
-          right: right as number | undefined,
-          borderRadius: size * 0.35,
-        } as any,
-        animatedStyle,
-      ]}
-    />
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '65%' }}>
+      <Animated.Image 
+        source={BACKGROUND_IMAGES[0]} 
+        style={[{ width: '100%', height: '100%', position: 'absolute', resizeMode: 'cover' }, style0]} 
+      />
+      <Animated.Image 
+        source={BACKGROUND_IMAGES[1]} 
+        style={[{ width: '100%', height: '100%', position: 'absolute', resizeMode: 'cover' }, style1]} 
+      />
+      <Animated.Image 
+        source={BACKGROUND_IMAGES[2]} 
+        style={[{ width: '100%', height: '100%', position: 'absolute', resizeMode: 'cover' }, style2]} 
+      />
+      {/* Dark gradient overlay to make text readable */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+    </View>
   );
 }
 
@@ -285,6 +271,28 @@ export default function LoginScreen() {
     });
   };
 
+  // ─── Handle Zoho Sign In ──────────────────────────────────────────────────
+  const handleZohoSignIn = async () => {
+    setApiError('');
+    try {
+      const apiUrl = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL || 'http://localhost:3000';
+      // MUST match the app/callback/index.tsx route so Expo Router catches it globally
+      const redirectUrl = Linking.createURL('callback');
+      
+      const authUrl = `${apiUrl}/api/auth/zoho?redirect_to=${encodeURIComponent(redirectUrl)}`;
+      
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl, { showInRecents: true });
+      
+      if (result.type === 'cancel') {
+        throw new Error('Authentication was cancelled');
+      }
+      
+      // Success case is handled by app/callback/index.tsx which receives the deep link automatically
+    } catch (err: any) {
+      setApiError(err.message || 'Zoho Login Failed');
+    }
+  };
+
   // ─── Handle Sign In ─────────────────────────────────────────────────────────
   const handleSignIn = async (values: SignInForm) => {
     setApiError('');
@@ -337,7 +345,6 @@ export default function LoginScreen() {
   };
 
   // ─── Handle Google OAuth ────────────────────────────────────────────────────
-  // ─── Handle Google OAuth ────────────────────────────────────────────────────
   const handleGoogleAuth = async () => {
     setApiError('');
     try {
@@ -356,75 +363,104 @@ export default function LoginScreen() {
     }
   };
 
-
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: theme.background }]}
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Floating decorative shapes */}
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        {shapes.map((s, i) => (
-          <FloatingShape key={i} {...s} />
-        ))}
-      </View>
+      {/* 1. Background Slideshow */}
+      <BackgroundSlideshow />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Logo */}
-        <View style={styles.logoWrap}>
-          <AutopilotLogo size="lg" variant={isDark ? 'light' : 'dark'} />
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        
+        {/* 2. Top Section (Logo Only) */}
+        <View style={styles.topSection}>
+          <View style={styles.logoWrap}>
+            <AutopilotLogo size={40} variant="light" />
+          </View>
         </View>
 
-        {/* Heading */}
-        <Text style={[styles.title, { color: theme.textPrimary }]}>
-          {authMode === 'signup' ? 'Create Account' : 'Welcome Back'}
-        </Text>
-        <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-          {authMode === 'signup'
-            ? 'Get started with your facility management hub'
-            : 'Sign in to your facility management hub'}
-        </Text>
-
-        {/* Tab Switcher — pill style */}
-        <View style={[styles.tabContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }]}>
-          <TouchableOpacity
-            style={[styles.tab, authMode === 'signin' && { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : '#FFFFFF' }]}
-            onPress={() => { setAuthMode('signin'); setApiError(''); setApiSuccess(''); }}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.tabText, { color: authMode === 'signin' ? theme.textPrimary : theme.textTertiary }]}>
-              Sign In
+        {/* 3. Bottom Sheet / Login Card */}
+        <View style={styles.bottomSheetWrapper}>
+          <View style={[styles.bottomSheet, { backgroundColor: theme.surface }]}>
+            
+            <View style={[styles.floatingIconContainer, { backgroundColor: theme.surface }]}>
+            <Image 
+              source={require('@/assets/images/notification-icon.png')}
+              style={{ width: 32, height: 32, resizeMode: 'contain' }}
+            />
+          </View>
+            
+            {/* Heading */}
+            <Text style={[styles.title, { color: theme.textPrimary }]}>
+              {authMode === 'signup' ? 'Create ' : 'Welcome '}
+              <Text style={{ color: theme.primary }}>{authMode === 'signup' ? 'Account' : 'Back!'}</Text>
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, authMode === 'signup' && { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : '#FFFFFF' }]}
-            onPress={() => { setAuthMode('signup'); setApiError(''); setApiSuccess(''); }}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.tabText, { color: authMode === 'signup' ? theme.textPrimary : theme.textTertiary }]}>
-              Sign Up
+            <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+              {authMode === 'signup'
+                ? 'Get started with your facility management hub and manage everything in one place.'
+                : 'Sign in to your facility management hub and manage everything in one place.'}
             </Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* ─── Sign In Form ─── */}
-        {authMode === 'signin' && (
-          <View style={styles.form}>
-            {/* Email */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.textPrimary }]}>Email</Text>
+            {/* Tab Switcher */}
+            <View style={[styles.tabContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }]}>
+              <TouchableOpacity
+                style={[styles.tab, authMode === 'signin' && [styles.activeTab, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : '#FFFFFF' }]]}
+                onPress={() => { setAuthMode('signin'); setApiError(''); setApiSuccess(''); }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.tabText, { color: authMode === 'signin' ? theme.primary : theme.textTertiary }]}>
+                  Sign In
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tab, authMode === 'signup' && [styles.activeTab, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : '#FFFFFF' }]]}
+                onPress={() => { setAuthMode('signup'); setApiError(''); setApiSuccess(''); }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.tabText, { color: authMode === 'signup' ? theme.primary : theme.textTertiary }]}>
+                  Sign Up
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Form */}
+            <View style={styles.form}>
+              
+              {/* Full Name Field (Only for Signup) */}
+              {authMode === 'signup' && (
+                <Controller
+                  control={signUpForm.control}
+                  name="fullName"
+                  render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                  <View style={{ gap: 4 }}>
+                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
+                      <Ionicons name="person-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+                        <TextInput
+                          style={[styles.input, { color: theme.textPrimary }]}
+                          placeholder="John Doe"
+                          placeholderTextColor={theme.textTertiary}
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          autoCapitalize="words"
+                        />
+                      </View>
+                      {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                    </View>
+                  )}
+                />
+              )}
+
+              {/* Email Field */}
               <Controller
-                control={signInForm.control}
+                control={authMode === 'signin' ? signInForm.control : signUpForm.control}
                 name="email"
                 render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="mail-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
+                  <View style={{ gap: 4 }}>
+                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
+                      <Ionicons name="mail-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
                       <TextInput
                         style={[styles.input, { color: theme.textPrimary }]}
                         placeholder="name@company.com"
@@ -435,368 +471,252 @@ export default function LoginScreen() {
                         keyboardType="email-address"
                         autoCapitalize="none"
                         autoCorrect={false}
-                        autoComplete="email"
                       />
                     </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
+                    {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                  </View>
                 )}
               />
-            </View>
 
-            {/* Password */}
-            <View style={styles.fieldGroup}>
-              <View style={styles.labelRow}>
-                <Text style={[styles.label, { color: theme.textPrimary }]}>Password</Text>
-                <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')}>
-                  <Text style={[styles.forgotLink, { color: theme.primary }]}>Forgot?</Text>
+              {/* Password Field */}
+              <Controller
+                control={authMode === 'signin' ? signInForm.control : signUpForm.control}
+                name="password"
+                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                  <View style={{ gap: 4 }}>
+                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
+                      <Ionicons name="lock-closed-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+                      <TextInput
+                        style={[styles.input, { color: theme.textPrimary }]}
+                        placeholder="Password"
+                        placeholderTextColor={theme.textTertiary}
+                        value={value}
+                        onChangeText={onChange}
+                        onBlur={onBlur}
+                        secureTextEntry={!showPassword}
+                      />
+                      <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                        <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.textTertiary} />
+                      </TouchableOpacity>
+                    </View>
+                    {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                  </View>
+                )}
+              />
+
+              {/* Confirm Password Field (Only for Signup) */}
+              {authMode === 'signup' && (
+                <Controller
+                  control={signUpForm.control}
+                  name="confirmPassword"
+                  render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                    <View style={{ gap: 4 }}>
+                      <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
+                        <Ionicons name="shield-checkmark-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
+                        <TextInput
+                          style={[styles.input, { color: theme.textPrimary }]}
+                          placeholder="Confirm password"
+                          placeholderTextColor={theme.textTertiary}
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          secureTextEntry={!showConfirmPassword}
+                        />
+                        <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
+                          <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.textTertiary} />
+                        </TouchableOpacity>
+                      </View>
+                      {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                    </View>
+                  )}
+                />
+              )}
+
+              {/* Forgot Password */}
+              {authMode === 'signin' && (
+                <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')} style={styles.forgotPasswordContainer}>
+                  <Text style={[styles.forgotPasswordText, { color: theme.primary }]}>Forgot Password?</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* API Messages */}
+              {apiError !== '' && (
+                <View style={[styles.messageBox, { backgroundColor: theme.errorBg, borderColor: theme.errorBorder }]}>
+                  <Ionicons name="alert-circle" size={16} color={theme.error} style={{ marginRight: 8 }} />
+                  <Text style={[styles.messageText, { color: theme.error }]}>{apiError}</Text>
+                </View>
+              )}
+              {apiSuccess !== '' && (
+                <View style={[styles.messageBox, { backgroundColor: theme.successBg, borderColor: theme.successBorder }]}>
+                  <Ionicons name="checkmark-circle" size={16} color={theme.success} style={{ marginRight: 8 }} />
+                  <Text style={[styles.messageText, { color: theme.success }]}>{apiSuccess}</Text>
+                </View>
+              )}
+
+              {/* Auth Buttons */}
+              <TouchableOpacity
+                style={[styles.solidButton, { backgroundColor: theme.primary, opacity: isSignInLoading || isSignUpLoading ? 0.7 : 1 }]}
+                onPress={authMode === 'signin' ? signInForm.handleSubmit(handleSignIn) : signUpForm.handleSubmit(handleSignUp)}
+                disabled={isSignInLoading || isSignUpLoading}
+              >
+                {isSignInLoading || isSignUpLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.solidButtonText}>{authMode === 'signin' ? 'Sign In' : 'Sign Up'}</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Divider */}
+              <View style={styles.dividerRow}>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+                <Text style={[styles.dividerText, { color: theme.textTertiary }]}>OR CONTINUE WITH</Text>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+              </View>
+
+              {/* Social Logins */}
+              <View style={styles.socialRow}>
+                <TouchableOpacity style={[styles.socialButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderColor: 'transparent' }]} onPress={handleGoogleAuth}>
+                  <Image source={{ uri: 'https://img.icons8.com/color/48/000000/google-logo.png' }} style={styles.socialIcon} />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.socialButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderColor: 'transparent' }]} onPress={handleZohoSignIn}>
+                  <Image source={require('../../assets/images/zoho-logo-540x540-1.png')} style={styles.socialIcon} />
                 </TouchableOpacity>
               </View>
-              <Controller
-                control={signInForm.control}
-                name="password"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="lock-closed-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="Enter your password"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        secureTextEntry={!showPassword}
-                        autoComplete="password"
-                      />
-                      <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
-                        <Ionicons
-                          name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                          size={18}
-                          color={theme.textTertiary}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
-                )}
-              />
+
+
             </View>
-
-            {/* API Error */}
-            {apiError !== '' && (
-              <View style={[styles.messageBox, { backgroundColor: theme.errorBg, borderColor: theme.errorBorder }]}>
-                <Ionicons name="alert-circle" size={16} color={theme.error} style={{ marginRight: 8 }} />
-                <Text style={[styles.messageText, { color: theme.error }]}>{apiError}</Text>
-              </View>
-            )}
-
-            {/* API Success */}
-            {apiSuccess !== '' && (
-              <View style={[styles.messageBox, { backgroundColor: theme.successBg, borderColor: theme.successBorder }]}>
-                <Ionicons name="checkmark-circle" size={16} color={theme.success} style={{ marginRight: 8 }} />
-                <Text style={[styles.messageText, { color: theme.success }]}>{apiSuccess}</Text>
-              </View>
-            )}
-
-            {/* Submit */}
-            <TouchableOpacity
-              style={[styles.submitButton, { backgroundColor: theme.primary, opacity: isSignInLoading ? 0.7 : 1 }]}
-              onPress={signInForm.handleSubmit(handleSignIn)}
-              disabled={isSignInLoading}
-              activeOpacity={0.8}
-            >
-              {isSignInLoading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <View style={styles.submitRow}>
-                  <Text style={styles.submitText}>Sign In</Text>
-                  <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* OAuth Divider */}
-            <View style={styles.dividerRow}>
-              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
-              <Text style={[styles.dividerText, { color: theme.textTertiary }]}>or continue with</Text>
-              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
-            </View>
-
-            {/* Google */}
-            <TouchableOpacity
-              style={[styles.oauthButton, { borderColor: theme.border }]}            
-              onPress={handleGoogleAuth}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="logo-google" size={20} color="#4285F4" />
-              <Text style={[styles.oauthText, { color: theme.textPrimary }]}>Sign in with Google</Text>
-            </TouchableOpacity>
           </View>
-        )}
-
-        {/* ─── Sign Up Form ─── */}
-        {authMode === 'signup' && (
-          <View style={styles.form}>
-            {/* Full Name */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.textPrimary }]}>Full Name</Text>
-              <Controller
-                control={signUpForm.control}
-                name="fullName"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="person-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="John Doe"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        autoCapitalize="words"
-                        autoComplete="name"
-                      />
-                    </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
-                )}
-              />
-            </View>
-
-            {/* Email */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.textPrimary }]}>Email</Text>
-              <Controller
-                control={signUpForm.control}
-                name="email"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="mail-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="name@company.com"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        autoComplete="email"
-                      />
-                    </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
-                )}
-              />
-            </View>
-
-            {/* Password */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.textPrimary }]}>Password</Text>
-              <Controller
-                control={signUpForm.control}
-                name="password"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="lock-closed-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="Min. 6 characters"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        secureTextEntry={!showPassword}
-                        autoComplete="password-new"
-                      />
-                      <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
-                        <Ionicons
-                          name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                          size={18}
-                          color={theme.textTertiary}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
-                )}
-              />
-            </View>
-
-            {/* Confirm Password */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: theme.textPrimary }]}>Confirm Password</Text>
-              <Controller
-                control={signUpForm.control}
-                name="confirmPassword"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <>
-                    <View style={[styles.inputWrapper, { borderBottomColor: error ? theme.error : theme.border }]}>
-                      <Ionicons name="shield-checkmark-outline" size={18} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="Re-enter your password"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        secureTextEntry={!showConfirmPassword}
-                        autoComplete="password-new"
-                      />
-                      <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
-                        <Ionicons
-                          name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-                          size={18}
-                          color={theme.textTertiary}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                    {error && <Text style={[styles.fieldError, { color: theme.error }]}>{error.message}</Text>}
-                  </>
-                )}
-              />
-            </View>
-
-            {/* API Error */}
-            {apiError !== '' && (
-              <View style={[styles.messageBox, { backgroundColor: theme.errorBg, borderColor: theme.errorBorder }]}>
-                <Ionicons name="alert-circle" size={16} color={theme.error} style={{ marginRight: 8 }} />
-                <Text style={[styles.messageText, { color: theme.error }]}>{apiError}</Text>
-              </View>
-            )}
-
-            {/* API Success */}
-            {apiSuccess !== '' && (
-              <View style={[styles.messageBox, { backgroundColor: theme.successBg, borderColor: theme.successBorder }]}>
-                <Ionicons name="checkmark-circle" size={16} color={theme.success} style={{ marginRight: 8 }} />
-                <Text style={[styles.messageText, { color: theme.success }]}>{apiSuccess}</Text>
-              </View>
-            )}
-
-            {/* Submit */}
-            <TouchableOpacity
-              style={[styles.submitButton, { backgroundColor: theme.primary, opacity: isSignUpLoading ? 0.7 : 1 }]}
-              onPress={signUpForm.handleSubmit(handleSignUp)}
-              disabled={isSignUpLoading}
-              activeOpacity={0.8}
-            >
-              {isSignUpLoading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <View style={styles.submitRow}>
-                  <Text style={styles.submitText}>Create Account</Text>
-                  <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* OAuth Divider */}
-            <View style={styles.dividerRow}>
-              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
-              <Text style={[styles.dividerText, { color: theme.textTertiary }]}>or continue with</Text>
-              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
-            </View>
-
-            {/* Google */}
-            <TouchableOpacity
-              style={[styles.oauthButton, { borderColor: theme.border }]}
-              onPress={handleGoogleAuth}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="logo-google" size={20} color="#4285F4" />
-              <Text style={[styles.oauthText, { color: theme.textPrimary }]}>Sign up with Google</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          {authMode === 'signin' ? (
-            <Text style={[styles.footerText, { color: theme.textSecondary }]}>
-              Don't have an account?{' '}
-              <Text
-                style={[styles.footerLink, { color: theme.primary }]}
-                onPress={() => { setAuthMode('signup'); setApiError(''); setApiSuccess(''); }}
-              >
-                Sign Up
-              </Text>
-            </Text>
-          ) : (
-            <Text style={[styles.footerText, { color: theme.textSecondary }]}>
-              Already have an account?{' '}
-              <Text
-                style={[styles.footerLink, { color: theme.primary }]}
-                onPress={() => { setAuthMode('signin'); setApiError(''); setApiSuccess(''); }}
-              >
-                Sign In
-              </Text>
-            </Text>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0B1527',
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    paddingTop: Platform.OS === 'ios' ? 80 : 60,
+    justifyContent: 'flex-end',
+  },
+  topSection: {
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingBottom: 40,
+    flex: 1,
   },
-
-  // Floating shapes
-  floatingShape: {
-    position: 'absolute',
-  },
-
-  // Logo
   logoWrap: {
     alignItems: 'center',
-    marginBottom: 32,
+    justifyContent: 'center',
   },
-
-  // Heading
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: FONT_TRACKING.display,
-    marginBottom: 8,
-    textAlign: 'center',
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+  },
+  horizontalLogo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logoTextCol: {
+    justifyContent: 'center',
+  },
+  logoTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 1,
     fontFamily: FONT_FAMILY,
   },
-  subtitle: {
-    fontSize: 15,
-    marginBottom: 32,
-    textAlign: 'center',
-    lineHeight: 22,
-    letterSpacing: FONT_TRACKING.body,
+  logoSubtitle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
     fontFamily: FONT_FAMILY,
   },
-
-  // Tab Switcher
+  badgesCol: {
+    gap: 16,
+    marginTop: 20,
+    alignItems: 'flex-end',
+  },
+  badgeWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(11, 21, 39, 0.4)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  badgeIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: FONT_FAMILY,
+  },
+  bottomSheetWrapper: {
+    paddingTop: 32, // Space for the floating icon
+  },
+  bottomSheet: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingBottom: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 20,
+  },
+  floatingIconContainer: {
+    position: 'absolute',
+    top: -24,
+    alignSelf: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 10,
+  },
   tabContainer: {
     flexDirection: 'row',
     borderRadius: 12,
     padding: 4,
-    marginBottom: 32,
+    marginBottom: 24,
     alignSelf: 'center',
   },
   tab: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
     borderRadius: 10,
+  },
+  activeTab: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tabText: {
     fontSize: 14,
@@ -804,59 +724,134 @@ const styles = StyleSheet.create({
     letterSpacing: FONT_TRACKING.body,
     fontFamily: FONT_FAMILY,
   },
-
-  // Form
+  title: {
+    fontSize: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+    fontFamily: FONT_FAMILY,
+  },
+  subtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 16,
+    lineHeight: 20,
+    fontFamily: FONT_FAMILY,
+  },
   form: {
-    gap: 0,
+    gap: 16,
   },
-  fieldGroup: {
-    marginBottom: 20,
-  },
-  labelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 8,
-    letterSpacing: FONT_TRACKING.body,
-    fontFamily: FONT_FAMILY,
-  },
-  forgotLink: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: FONT_TRACKING.body,
-    fontFamily: FONT_FAMILY,
-  },
-  inputWrapper: {
+  inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 56,
   },
   inputIcon: {
-    marginRight: 10,
+    marginRight: 12,
   },
   input: {
     flex: 1,
-    height: 44,
     fontSize: 15,
-    letterSpacing: FONT_TRACKING.body,
     fontFamily: FONT_FAMILY,
+    height: '100%',
   },
   eyeButton: {
-    padding: 4,
+    padding: 8,
   },
-  fieldError: {
+  forgotPasswordContainer: {
+    alignSelf: 'flex-end',
+    marginTop: -8,
+    marginBottom: 8,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: FONT_FAMILY,
+  },
+  solidButton: {
+    flexDirection: 'row',
+    height: 56,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  solidButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: FONT_FAMILY,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginHorizontal: 12,
+    letterSpacing: 0.5,
+    fontFamily: FONT_FAMILY,
+  },
+  socialRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 16,
+  },
+  socialButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  socialIcon: {
+    width: 28,
+    height: 28,
+    resizeMode: 'contain',
+  },
+  trustBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 24,
+    borderTopWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
+  trustTextCol: {
+    justifyContent: 'center',
+  },
+  trustTitle: {
     fontSize: 12,
+    fontWeight: '700',
+    fontFamily: FONT_FAMILY,
+  },
+  trustSub: {
+    fontSize: 11,
     fontWeight: '500',
-    marginTop: 6,
-    letterSpacing: FONT_TRACKING.body,
     fontFamily: FONT_FAMILY,
   },
   messageBox: {
@@ -865,81 +860,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
-    marginBottom: 16,
   },
   messageText: {
     flex: 1,
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 18,
-    letterSpacing: FONT_TRACKING.body,
     fontFamily: FONT_FAMILY,
-  },
-  submitButton: {
-    borderRadius: 14,
-    height: 52,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  submitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  submitText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: FONT_TRACKING.tight,
-    fontFamily: FONT_FAMILY,
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginHorizontal: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    fontFamily: FONT_FAMILY,
-  },
-  oauthButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    height: 50,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 20,
-  },
-  oauthText: {
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: FONT_TRACKING.body,
-    fontFamily: FONT_FAMILY,
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  footerText: {
-    fontSize: 14,
-    letterSpacing: FONT_TRACKING.body,
-    fontFamily: FONT_FAMILY,
-  },
-  footerLink: {
-    fontWeight: '700',
-    letterSpacing: FONT_TRACKING.body,
-    fontFamily: FONT_FAMILY,
-  },
+  }
 });

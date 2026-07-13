@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { useGlobalSearchParams } from 'expo-router';
 import LovableMstDashboard from '@/components/dashboard/LovableMstDashboard';

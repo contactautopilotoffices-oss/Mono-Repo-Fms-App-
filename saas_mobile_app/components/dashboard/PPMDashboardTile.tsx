@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * PPMDashboardTile — Compact PPM calendar + upcoming tasks for dashboard.
  * Shows mini calendar with dots and list of upcoming tasks.

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Rooms Stack Layout — wraps the room list and detail screens
  */

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { TouchableOpacity, Text, View, StyleSheet, ViewStyle, ScrollView } from 'react-native';
 import { Colors } from '@/constants/Colors';

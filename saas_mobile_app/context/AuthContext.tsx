@@ -507,12 +507,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const resetPassword = useCallback(
     async (email: string) => {
       const resetUrl = Linking.createURL('/reset-password');
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const response = await serverApi.post<{ success: boolean; message: string }>('/api/users/reset-password', {
+        email,
         redirectTo: resetUrl,
       });
-      if (error) throw new Error(error.message);
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Failed to send reset email');
+      }
     },
-    [supabase]
+    []
   );
 
   // ---------------------------------------------------------------------------

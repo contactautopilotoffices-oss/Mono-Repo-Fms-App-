@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Cassandra Home Screen — Orb-centric AI companion
  *

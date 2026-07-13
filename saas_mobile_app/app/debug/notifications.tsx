@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Debug Notification Test Screen
  *

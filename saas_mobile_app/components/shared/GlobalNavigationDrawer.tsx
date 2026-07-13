@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   ScrollView,
   Image,
   Modal,
+  Dimensions,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -16,6 +18,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import SignOutModal from '../ui/SignOutModal';
 import AnimatedLogo from '@/components/shared/AnimatedLogo';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+  Easing,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+
+const DRAWER_WIDTH = 288;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface GlobalNavigationDrawerProps {
   visible: boolean;
@@ -43,6 +56,57 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
   const { signOut, membership } = useAuth();
   const [showSignOut, setShowSignOut] = useState(false);
 
+  // Animation
+  const translateX = useSharedValue(-DRAWER_WIDTH);
+  const backdropOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      translateX.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
+      backdropOpacity.value = withTiming(0.5, { duration: 280 });
+    } else {
+      translateX.value = withTiming(-DRAWER_WIDTH, { duration: 220, easing: Easing.in(Easing.cubic) });
+      backdropOpacity.value = withTiming(0, { duration: 220 });
+    }
+  }, [visible]);
+
+  const closeDrawer = () => {
+    translateX.value = withTiming(-DRAWER_WIDTH, { duration: 220, easing: Easing.in(Easing.cubic) });
+    backdropOpacity.value = withTiming(0, { duration: 220 });
+    setTimeout(onClose, 230);
+  };
+
+  // Swipe gesture to close
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .onUpdate((e) => {
+      // Only allow swiping left (negative translationX)
+      if (e.translationX < 0) {
+        translateX.value = Math.max(e.translationX, -DRAWER_WIDTH);
+        backdropOpacity.value = Math.max(0, 0.5 * (1 + e.translationX / DRAWER_WIDTH));
+      }
+    })
+    .onEnd((e) => {
+      // Close if swiped more than 1/3 or velocity is fast enough
+      if (e.translationX < -DRAWER_WIDTH / 3 || e.velocityX < -500) {
+        translateX.value = withTiming(-DRAWER_WIDTH, { duration: 180 });
+        backdropOpacity.value = withTiming(0, { duration: 180 });
+        runOnJS(onClose)();
+      } else {
+        // Snap back open
+        translateX.value = withTiming(0, { duration: 180 });
+        backdropOpacity.value = withTiming(0.5, { duration: 180 });
+      }
+    });
+
+  const drawerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+
   // Get user role from membership
   const userRole = useMemo(() => {
     const role = membership?.properties?.[0]?.role || membership?.org_role || 'tenant';
@@ -50,8 +114,8 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
   }, [membership]);
 
   const navigateTo = (route: string) => {
-    onClose();
-    router.push(`/property/${propertyId}/${route}` as any);
+    closeDrawer();
+    setTimeout(() => router.push(`/property/${propertyId}/${route}` as any), 250);
   };
 
   // Define menu sections based on role - matching web app
@@ -245,72 +309,84 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
     ];
   }, [userRole]);
 
+  if (!visible) return null;
+
   return (
     <>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-        <View style={styles.container}>
-          <View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }]}>
-            {/* Header */}
-            <View style={styles.drawerHeader}>
-              <View style={styles.drawerLogoContainer}>
-                <AnimatedLogo size="lg" />
-              </View>
-              <TouchableOpacity onPress={onClose} style={styles.drawerCloseBtn}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
+      <Modal visible={visible} transparent animationType="none" onRequestClose={closeDrawer} statusBarTranslucent>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={styles.container}>
+            {/* Backdrop - tap to close */}
+            <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }, backdropStyle]}>
+              <Pressable style={StyleSheet.absoluteFillObject} onPress={closeDrawer} />
+            </Animated.View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {menuSections.map((section, sectionIndex) => (
-                <View key={section.title} style={sectionIndex > 0 ? styles.sectionContainer : undefined}>
-                  {/* Section Header */}
-                  <View style={styles.sectionHeader}>
-                    {section.badge && (
-                      <View style={[styles.roleBadge, { backgroundColor: section.badge.color + '20' }]}>
-                        <Text style={[styles.roleBadgeText, { color: section.badge.color }]}>
-                          {section.badge.text}
-                        </Text>
-                      </View>
-                    )}
-                    <Text style={[styles.sectionTitle, section.color && { color: section.color }]}>
-                      {section.title}
-                    </Text>
+            {/* Drawer Panel with swipe gesture */}
+            <GestureDetector gesture={panGesture}>
+              <Animated.View style={[styles.drawerPanel, { paddingTop: insets.top + 16 }, drawerStyle]}>
+                {/* Header */}
+                <View style={styles.drawerHeader}>
+                  <View style={styles.drawerLogoContainer}>
+                    <AnimatedLogo size="lg" />
                   </View>
+                  <TouchableOpacity onPress={closeDrawer} style={styles.drawerCloseBtn}>
+                    <Ionicons name="close" size={24} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
 
-                  {/* Section Items */}
-                  {section.items.map((item) => (
-                    <TouchableOpacity
-                      key={item.route + item.label}
-                      style={styles.menuItem}
-                      onPress={() => navigateTo(item.route)}
-                    >
-                      <View style={styles.menuItemContent}>
-                        <Ionicons
-                          name={item.icon as any}
-                          size={20}
-                          color={item.color || 'rgba(255,255,255,0.6)'}
-                        />
-                        <Text style={[styles.menuItemLabel, item.color && { color: item.color }]}>
-                          {item.label}
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  {menuSections.map((section, sectionIndex) => (
+                    <View key={section.title} style={sectionIndex > 0 ? styles.sectionContainer : undefined}>
+                      {/* Section Header */}
+                      <View style={styles.sectionHeader}>
+                        {section.badge && (
+                          <View style={[styles.roleBadge, { backgroundColor: section.badge.color + '20' }]}>
+                            <Text style={[styles.roleBadgeText, { color: section.badge.color }]}>
+                              {section.badge.text}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={[styles.sectionTitle, section.color && { color: section.color }]}>
+                          {section.title}
                         </Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ))}
 
-              {/* Sign Out */}
-              <TouchableOpacity
-                style={styles.signOutBtn}
-                onPress={() => setShowSignOut(true)}
-              >
-                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-                <Text style={styles.signOutText}>Sign Out</Text>
-              </TouchableOpacity>
-            </ScrollView>
+                      {/* Section Items */}
+                      {section.items.map((item) => (
+                        <TouchableOpacity
+                          key={item.route + item.label}
+                          style={styles.menuItem}
+                          onPress={() => navigateTo(item.route)}
+                        >
+                          <View style={styles.menuItemContent}>
+                            <Ionicons
+                              name={item.icon as any}
+                              size={20}
+                              color={item.color || 'rgba(255,255,255,0.6)'}
+                            />
+                            <Text style={[styles.menuItemLabel, item.color && { color: item.color }]}>
+                              {item.label}
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ))}
+
+                  {/* Sign Out */}
+                  <TouchableOpacity
+                    style={styles.signOutBtn}
+                    onPress={() => setShowSignOut(true)}
+                  >
+                    <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                    <Text style={styles.signOutText}>Sign Out</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </Animated.View>
+            </GestureDetector>
           </View>
-        </View>
+        </GestureHandlerRootView>
       </Modal>
 
       <SignOutModal
@@ -329,7 +405,7 @@ export default function GlobalNavigationDrawer({ visible, onClose, propertyId }:
 const styles = StyleSheet.create({
   container: { flex: 1, flexDirection: 'row' },
   drawerPanel: {
-    width: 288,
+    width: DRAWER_WIDTH,
     height: '100%',
     backgroundColor: '#0B0B0F',
     borderRightWidth: 1,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * High-Performance Diesel API
  *

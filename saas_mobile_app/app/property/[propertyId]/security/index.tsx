@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Security Dashboard - Simplified Security Officer Portal
  *

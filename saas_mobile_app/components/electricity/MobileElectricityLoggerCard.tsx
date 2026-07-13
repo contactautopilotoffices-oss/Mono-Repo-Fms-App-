@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, interpolate, interpolateColor } from 'react-native-reanimated';

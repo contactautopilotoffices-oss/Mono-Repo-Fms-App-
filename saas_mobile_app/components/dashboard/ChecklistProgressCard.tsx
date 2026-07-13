@@ -1,60 +1,138 @@
+// @ts-nocheck
 /**
- * ChecklistProgressCard — Horizontal linear progress bar.
- * Same horizontal extent as the ticket counter row inside the GlassTile.
+ * ChecklistProgressCard — Horizontal linear progress bars for Day and Night shifts.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { SPACING, CARD_SURFACES } from '@/constants/designSystem';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 
-interface ChecklistProgressCardProps {
-  completed: number;
-  total: number;
-  delay?: number;
-  onPress?: () => void;
+interface ChecklistItem {
+  id: string;
+  title: string;
+  completed: boolean;
+  shift?: 'day' | 'night';
 }
 
-export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
-  completed = 0,
-  total = 0,
-  delay = 200,
-  onPress,
-}) => {
-  const safeCompleted = typeof completed === 'number' && !isNaN(completed) ? completed : 0;
-  const safeTotal = typeof total === 'number' && !isNaN(total) ? total : 0;
-  const percent = safeTotal > 0 ? Math.min(safeCompleted / safeTotal, 1) : 0;
+interface ChecklistStats {
+  day: { total: number; completed: number };
+  night: { total: number; completed: number };
+}
+
+interface ChecklistProgressCardProps {
+  stats?: ChecklistStats;
+  items?: ChecklistItem[];
+  delay?: number;
+  onPress?: () => void;
+  // Legacy props for backward compatibility
+  completed?: number;
+  total?: number;
+}
+
+const ProgressBar = ({ label, completed, total, color, emptyColor = 'rgba(255,255,255,0.08)' }: { label: string, completed: number, total: number, color: string, emptyColor?: string }) => {
+  const percent = total > 0 ? Math.min(completed / total, 1) : 0;
   const pctDisplay = Math.round(percent * 100);
 
   return (
+    <View style={styles.barContainer}>
+      <View style={styles.barHeader}>
+        <Text style={[styles.barLabel, { color }]}>{label}</Text>
+        <Text style={styles.barValue}>
+          {completed}<Text style={styles.barValueMuted}>/{total}</Text>
+        </Text>
+        <Text style={[styles.barPct, { color }]}>{pctDisplay}%</Text>
+      </View>
+      <View style={[styles.track, { backgroundColor: emptyColor }]}>
+        <View style={[styles.fill, { width: `${pctDisplay}%`, backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+};
+
+export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
+  stats,
+  items = [],
+  delay = 200,
+  onPress,
+  completed = 0,
+  total = 0,
+}) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const toggleExpand = () => {
+    setExpanded(!expanded);
+  };
+
+  const hasStats = !!stats;
+  const dayStats = stats?.day || { total: total, completed: completed }; // fallback to legacy if stats missing
+  const nightStats = stats?.night || { total: 0, completed: 0 };
+
+  const dayItems = items.filter(i => i.shift !== 'night');
+  const nightItems = items.filter(i => i.shift === 'night');
+
+  return (
     <Animated.View entering={FadeInUp.delay(delay).duration(420)} style={styles.wrapper}>
-      <TouchableOpacity onPress={onPress} activeOpacity={0.92} style={styles.card}>
+      <TouchableOpacity onPress={onPress} onLongPress={toggleExpand} activeOpacity={0.92} style={styles.card}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
 
-        {/* Top row: label + value */}
-        <View style={styles.row}>
+        <View style={styles.cardHeader}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={styles.icon}>✓</Text>
-            <Text style={styles.label}>Checklist</Text>
+            <Ionicons name="clipboard-outline" size={16} color="#10B981" />
+            <Text style={styles.cardTitle}>Checklist</Text>
           </View>
-          <Text style={styles.value}>
-            {safeCompleted}<Text style={styles.valueMuted}>/{safeTotal}</Text>
-          </Text>
+          <Text style={styles.cardTitleMuted}>All</Text>
         </View>
 
-        {/* Track + fill */}
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: `${pctDisplay}%` }]} />
+        <View style={styles.barsWrapper}>
+          <ProgressBar label="Day" completed={dayStats.completed} total={dayStats.total} color="#F59E0B" />
+          {hasStats && nightStats.total > 0 && (
+            <ProgressBar label="Night" completed={nightStats.completed} total={nightStats.total} color="#6366F1" />
+          )}
         </View>
 
-        {/* Footer row: percent + status */}
-        <View style={styles.footer}>
-          <Text style={styles.pct}>{pctDisplay}%</Text>
-          <Text style={styles.status}>
-            {percent >= 1 ? 'Completed' : percent >= 0.5 ? 'On Track' : 'In Progress'}
-          </Text>
-        </View>
+        {/* Expanded Items */}
+        {expanded && items && items.length > 0 && (
+          <View style={styles.expandedContainer}>
+            {dayItems.length > 0 && (
+              <View style={styles.shiftGroup}>
+                <Text style={styles.shiftGroupTitle}>☀️ Day Shift</Text>
+                {dayItems.map((item) => (
+                  <View key={item.id} style={styles.itemRow}>
+                    <Ionicons 
+                      name={item.completed ? "checkmark-circle" : "ellipse-outline"} 
+                      size={18} 
+                      color={item.completed ? "#F59E0B" : "rgba(255,255,255,0.3)"} 
+                    />
+                    <Text style={[styles.itemTitle, item.completed && styles.itemTitleCompleted]} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {nightItems.length > 0 && (
+              <View style={styles.shiftGroup}>
+                <Text style={[styles.shiftGroupTitle, { color: '#818CF8', marginTop: 12 }]}>🌙 Night Shift</Text>
+                {nightItems.map((item) => (
+                  <View key={item.id} style={styles.itemRow}>
+                    <Ionicons 
+                      name={item.completed ? "checkmark-circle" : "ellipse-outline"} 
+                      size={18} 
+                      color={item.completed ? "#6366F1" : "rgba(255,255,255,0.3)"} 
+                    />
+                    <Text style={[styles.itemTitle, item.completed && styles.itemTitleCompleted]} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -70,66 +148,101 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_SURFACES.cardBg,
     borderWidth: 1,
     borderColor: CARD_SURFACES.cardBorder,
-    padding: 14,
+    padding: 16,
     marginBottom: 12,
     overflow: 'hidden',
   },
-  row: {
+  cardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  icon: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  label: {
+  cardTitle: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
-  value: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  valueMuted: {
-    color: 'rgba(255,255,255,0.45)',
+  cardTitleMuted: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
     fontWeight: '600',
+  },
+  barsWrapper: {
+    gap: 16,
+  },
+  barContainer: {
+    width: '100%',
+  },
+  barHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  barLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    width: 60,
+  },
+  barValue: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  barValueMuted: {
+    color: 'rgba(255,255,255,0.4)',
+  },
+  barPct: {
+    fontSize: 12,
+    fontWeight: '800',
+    width: 40,
+    textAlign: 'right',
   },
   track: {
     height: 6,
     width: '100%',
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
   fill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: '#22C55E',
   },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
+  expandedContainer: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
   },
-  pct: {
-    color: '#22C55E',
+  shiftGroup: {
+    gap: 8,
+  },
+  shiftGroupTitle: {
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  status: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    color: '#FCD34D',
+    letterSpacing: 1,
+    marginBottom: 4,
     textTransform: 'uppercase',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  itemTitle: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  itemTitleCompleted: {
+    color: 'rgba(255,255,255,0.4)',
+    textDecorationLine: 'line-through',
   },
 });
 

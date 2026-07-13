@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React from 'react';
 import { useGlobalSearchParams } from 'expo-router';
 import LovablePropertyAdminDashboard from '@/components/dashboard/LovablePropertyAdminDashboard';

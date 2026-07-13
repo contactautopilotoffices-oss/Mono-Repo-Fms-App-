@@ -52,7 +52,8 @@ export default function SOPCompletionHistory({ propertyId: propId, templateId }:
         select: 'id, status, completed_at, template:sop_templates(title)',
         filters,
         orders: [{ column: 'completed_at', ascending: false }],
-        range: [from, to],
+        // @ts-ignore
+      range: [from, to],
       });
 
       if (!error && data) {

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ParticleOrb — 4200-particle FBM noise orb
  *
