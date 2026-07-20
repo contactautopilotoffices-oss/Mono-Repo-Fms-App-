@@ -47,7 +47,7 @@ interface SkillGroupRow {
 
 const AVAILABLE_ROLES = [
   { id: 'property_admin', label: 'Property Admin', desc: 'Manage property ops & staff', icon: 'business', emoji: '🏢' },
-  { id: 'staff', label: 'Soft Services', desc: 'Cleaning, hygiene & support', icon: 'construct', emoji: '👷' },
+  { id: 'staff', label: 'General Staff', desc: 'General property staff & services', icon: 'people', emoji: '👥' },
   { id: 'mst', label: 'Maintenance', desc: 'Technical repairs & maintenance', icon: 'build', emoji: '🔧' },
   { id: 'security', label: 'Security', desc: 'Property security & access', icon: 'shield-checkmark', emoji: '🛡️' },
   { id: 'tenant', label: 'Client', desc: 'Raise requests & view updates', icon: 'home', emoji: '🏠' },
@@ -58,11 +58,23 @@ const SKILL_OPTIONS: Record<string, { code: string; label: string }[]> = {
   mst: [
     { code: 'technical', label: 'Technical' },
     { code: 'plumbing', label: 'Plumbing' },
-    { code: 'vendor_coord', label: 'Vendor Coordination' },
+    { code: 'vendor', label: 'Vendor Coordination' },
   ],
   staff: [
+    { code: 'technical', label: 'Technical' },
     { code: 'soft_services', label: 'Soft Services' },
-    { code: 'soft_service_manager', label: 'Soft Service Manager' },
+  ],
+  soft_service_staff: [
+    { code: 'soft_services', label: 'Soft Services' },
+    { code: 'housekeeping', label: 'Housekeeping' },
+  ],
+  soft_service_supervisor: [
+    { code: 'soft_services', label: 'Soft Services' },
+    { code: 'housekeeping', label: 'Housekeeping' },
+  ],
+  soft_service_manager: [
+    { code: 'soft_services', label: 'Soft Services' },
+    { code: 'housekeeping', label: 'Housekeeping' },
   ],
 };
 
@@ -279,7 +291,7 @@ export default function OnboardingScreen() {
       } else if (showVoiceStep) {
         animateToStep(4); // role → voice enrollment → complete
       } else if (selectedRole === 'mst' || selectedRole === 'staff') {
-        handleComplete();
+        animateToStep(5); // Skills step
       } else {
         handleComplete();
       }

@@ -712,7 +712,7 @@ export default function TicketDetailScreen() {
       Toast.show({
         type: 'error',
         text1: 'Update Failed',
-        text2: 'Reverted status change due to network error.',
+        text2: err instanceof Error ? err.message : 'Status update failed.',
       });
     });
   };
@@ -984,7 +984,7 @@ export default function TicketDetailScreen() {
   // returned directly from the tickets table.
   // authUser comes from AuthContext and is the definitive source of truth for the
   // current session on both web and Expo Go.
-  const isMSTUser = currentUserRole === 'mst' || currentUserRole === 'property_mst' || currentUserRole === 'property_admin';
+  const isMSTUser = currentUserRole === 'mst' || currentUserRole === 'property_mst' || currentUserRole === 'property_admin' || currentUserRole === 'staff' || currentUserRole === 'soft_service_manager';
 
   const canSeePrices = canUserSeePrices(
     authUser?.id ?? null,

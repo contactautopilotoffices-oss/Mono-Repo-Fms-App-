@@ -48,6 +48,7 @@ export function GlassTile({
   onPress,
   onLongPress,
   style,
+  updatedAt,
 }: {
   label: string;
   icon: any;
@@ -57,11 +58,12 @@ export function GlassTile({
   onPress?: () => void;
   onLongPress?: () => void;
   style?: ViewStyle;
+  updatedAt?: number;
 }) {
   const statusColor = status ? STATUS_COLORS[status].bg : null;
 
   return (
-    <Animated.View style={[styles.tileWrapper, style, { flex: 1, minWidth: '45%' }]}>
+    <Animated.View style={[styles.tileWrapper, { flex: 1, minWidth: '45%' }, style]}>
       <TouchableOpacity activeOpacity={0.9} onPress={onPress} onLongPress={onLongPress} disabled={!onPress && !onLongPress}>
         <SafeBlurView intensity={45} style={styles.tile} tint="dark">
           <LinearGradient
@@ -82,6 +84,11 @@ export function GlassTile({
               <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.3)" />
             </View>
             <View style={styles.tileBody}>{children}</View>
+            {updatedAt ? (
+              <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 8, textAlign: 'right', fontWeight: '500' }}>
+                Updated {new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            ) : null}
           </View>
         </SafeBlurView>
       </TouchableOpacity>
@@ -596,10 +603,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   pulseDot: { width: 6, height: 6, borderRadius: 3 },
-  tile: {
-    borderRadius: 24,
+  tileWrapper: {
     marginHorizontal: SPACING.xl,
     marginBottom: 12,
+  },
+  tile: {
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: CARD_SURFACES.cardBorder,
     overflow: 'hidden',

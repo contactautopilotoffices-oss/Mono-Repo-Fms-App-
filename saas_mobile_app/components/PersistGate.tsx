@@ -44,64 +44,17 @@ export function PersistGate({ children, onReady }: PersistGateProps) {
           },
         },
       }}
+      onSuccess={() => setIsRestored(true)}
     >
       {/* Wait for cache restoration before rendering children */}
-      {isRestored ? (
-        children
-      ) : (
-        <CacheRestorationWaiter onRestored={() => setIsRestored(true)} />
-      )}
+      {isRestored ? children : null}
     </PersistQueryClientProvider>
   );
 }
 
 import SkeletonLoader from '@/components/dashboard/lovable/SkeletonLoader';
 
-// Component that waits for cache to be restored
-function CacheRestorationWaiter({ onRestored }: { onRestored: () => void }) {
-  const [attempts, setAttempts] = useState(0);
 
-  useEffect(() => {
-    let mounted = true;
-    let timeout: NodeJS.Timeout;
-
-    const checkCache = () => {
-      // Check if query client has any cached data
-      const queries = queryClient.getQueryCache().getAll();
-      const hasCachedData = queries.some(
-        (q) => q.state.status === 'success' && q.state.data !== undefined
-      );
-
-      if (hasCachedData && mounted) {
-        console.log('[CacheRestorationWaiter] Found cached data');
-        onRestored();
-        return;
-      }
-
-      // Retry after delay
-      setAttempts((a) => a + 1);
-      if (attempts < 50 && mounted) {
-        // 50 attempts * 100ms = 5 seconds max wait
-        timeout = setTimeout(checkCache, 100);
-      } else if (mounted) {
-        // Timeout - proceed anyway
-        console.log('[CacheRestorationWaiter] Timeout - proceeding without cache');
-        onRestored();
-      }
-    };
-
-    // Start checking after a brief delay (let persistence initialize)
-    timeout = setTimeout(checkCache, 500);
-
-    return () => {
-      mounted = false;
-      clearTimeout(timeout);
-    };
-  }, [attempts, onRestored]);
-
-  // Render null so the Native Splash Screen stays visible until the app is fully ready.
-  return null;
-}
 
 // ────────────────────────────────────────────────────────────────
 // Loading Screen (if needed)

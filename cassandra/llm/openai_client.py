@@ -197,7 +197,6 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "Include role and permissions",
                     },
                 },
-                "properties": {},
             },
         },
     },
@@ -452,9 +451,17 @@ FUNCTION CALLING — EXACT RULES:
    - Example flow: "water leak in bathroom" → classify_ticket → returns priority=urgent → create_ticket with priority="urgent"
    - Do NOT hardcode priority. ALWAYS classify first.
 
-4. "aggregation / group by / who has most..." → sql_query with GROUP BY
+4. "aggregation / group by / who has most / average / fastest / slowest..." → sql_query with
+   GROUP BY, AVG(), MIN(), or MAX() as needed — these are all computed correctly.
+   Example: SELECT priority, AVG(resolution_sla_hours) FROM tickets WHERE organization_id='<org_id>'
+   AND resolved_at IS NOT NULL GROUP BY priority
 
 5. "my properties/org/role" → fetch_context
+
+6. NEVER use OR in a WHERE clause — the query engine does not evaluate OR. Rewrite any
+   "X = 'a' OR X = 'b'" as "X IN ('a','b')" instead. If the OR spans different columns
+   (e.g. "priority = 'urgent' OR sla_breached = true"), run two separate sql_query calls
+   and combine the counts yourself in the final answer — do not rely on a single query.
 
 PROPERTY NAME RESOLUTION (CRITICAL):
 The context above contains a "properties_in_org" list mapping every property name to its UUID.
@@ -490,10 +497,18 @@ NEVER use these WRONG column names:
 - ❌ users.avatar → use users.user_photo_url
 - ❌ tickets.category → use tickets.category_id (UUID, not text)
 
-If you need to get data from two tables (e.g., tickets with property names):
-1. First query the primary table (tickets)
-2. Then query the related table (properties) if needed
-3. The system will JOIN them in Python — you don't need to write SQL JOINs
+If you need data from two or more tables (e.g., tickets with property names, or tickets with
+property names AND category names), write ONE sql_query call with real SQL JOIN syntax —
+do NOT query each table separately and expect them to be combined for you; nothing merges
+separate tool calls back together, so two separate queries stay two separate, uncorrelated
+result sets and you will not be able to answer correctly.
+Example: SELECT tickets.title, properties.name, issue_categories.name FROM tickets
+JOIN properties ON tickets.property_id = properties.id
+JOIN issue_categories ON tickets.category_id = issue_categories.id
+WHERE tickets.organization_id = '<org_id>'
+The engine executes real multi-table JOINs (2 or more tables) via FK-aware Python-side
+merging — use as many JOINs as the question needs, always with the exact FK columns listed
+below.
 
 ─── PHASE: OBSERVE ────────────────────────────────────────────────────────────
 OBSERVE TOOL RESULTS — before responding, read the data critically:

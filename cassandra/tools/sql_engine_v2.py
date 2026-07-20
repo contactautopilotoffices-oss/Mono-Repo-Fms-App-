@@ -38,6 +38,7 @@ import httpx
 from cassandra.orchestrator import Tool, ToolResult, OrchestratorContext
 from cassandra.tools.fk_graph import FKGraph, get_fk_graph
 from cassandra.tools.fms_schema import TABLES, VALID_STATUS
+from cassandra.tools.sql_guard import SENSITIVE_COLUMNS
 
 logger = logging.getLogger("cassandra.tools.sql_engine_v2")
 
@@ -189,6 +190,9 @@ class SQLEngineV2:
             "limit": None,
             "is_count": False,
             "is_sum": False,
+            "is_avg": False,
+            "is_min": False,
+            "is_max": False,
             "is_distinct": False,
             "group_by": "",
             "is_aggregate": False,
@@ -219,7 +223,14 @@ class SQLEngineV2:
         if re.search(r'\bSUM\s*\(', sql, re.IGNORECASE):
             result["is_sum"] = True
             result["is_aggregate"] = True
-        if re.search(r'\bAVG\s*\(|MIN\s*\(|\bMAX\s*\(', sql, re.IGNORECASE):
+        if re.search(r'\bAVG\s*\(', sql, re.IGNORECASE):
+            result["is_avg"] = True
+            result["is_aggregate"] = True
+        if re.search(r'\bMIN\s*\(', sql, re.IGNORECASE):
+            result["is_min"] = True
+            result["is_aggregate"] = True
+        if re.search(r'\bMAX\s*\(', sql, re.IGNORECASE):
+            result["is_max"] = True
             result["is_aggregate"] = True
 
         # Extract WHERE
@@ -875,17 +886,36 @@ class SQLEngineV2:
             resp.raise_for_status()
             data = resp.json()
 
+            # Rows fetched hit the cap exactly → aggregation below may be computed
+            # over a truncated slice, not the full matching set. Flag it rather
+            # than silently returning a number that looks exact but isn't.
+            possibly_truncated = is_aggregate and len(data) >= row_limit
+
             # Post-processing: aggregations
             if parsed.get("is_sum"):
                 data = self._compute_sum(data, query)
+            elif parsed.get("is_avg"):
+                data = self._compute_avg(data, query)
+            elif parsed.get("is_min"):
+                data = self._compute_min_max(data, query, "min")
+            elif parsed.get("is_max"):
+                data = self._compute_min_max(data, query, "max")
             elif is_distinct:
                 data = self._compute_distinct(data, query)
             elif parsed.get("group_by"):
                 data = self._compute_count(data, query)
 
+            if possibly_truncated and isinstance(data, list):
+                for row in data:
+                    if isinstance(row, dict):
+                        row["_warning"] = (
+                            f"Computed over the first {row_limit} matching rows only — "
+                            "there may be more. Narrow the date range or scope for an exact figure."
+                        )
+
             logger.info(
                 f"[SQL_ENGINE_V2] fetch: {table} → {len(data)} rows "
-                f"(limit={row_limit}, aggregate={is_aggregate})"
+                f"(limit={row_limit}, aggregate={is_aggregate}, truncated={possibly_truncated})"
             )
             return ToolResult(
                 call_id=f"v2_single_{time.time():.0f}",
@@ -915,6 +945,68 @@ class SQLEngineV2:
     # Multi-Table JOIN Execution
     # ========================================================================
 
+    async def _fetch_table_for_join(
+        self,
+        table: str,
+        context: dict[str, Any],
+        where: str,
+        where_lower: str,
+        explicit_property_id: Optional[str],
+        headers: dict[str, str],
+    ) -> list[dict]:
+        """Fetch one table's rows for a JOIN, with org/property/WHERE scoping applied."""
+        org_id = context.get("org_id", "")
+        property_id = context.get("property_id", "")
+
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        params: dict[str, str] = {"select": "*", "limit": str(JOIN_ROW_LIMIT)}
+
+        cols = TABLES.get(table, {}).get("columns", [])
+        if "organization_id" in cols and org_id:
+            params["organization_id"] = f"eq.{org_id}"
+
+        if "property_id" in cols:
+            is_org_wide = any(kw in where_lower for kw in (
+                "all properties", "org-wide", "orgwide", "across properties"
+            ))
+            if not is_org_wide:
+                if explicit_property_id:
+                    params["property_id"] = f"eq.{explicit_property_id}"
+                elif property_id:
+                    params["property_id"] = f"eq.{property_id}"
+
+        where_params = self._parse_where_to_params(where, context)
+        where_params.pop("__explicit_property_id", None)
+        where_params.pop("__explicit_org_id", None)
+        where_params.pop("organization_id", None)
+        if "property_id" in params:
+            where_params.pop("property_id", None)
+        params.update(where_params)
+
+        resp = await self._http_client.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _project_columns(self, rows: list[dict], columns: list[str]) -> list[dict]:
+        """Apply a requested SELECT column list to already-joined rows.
+
+        Joined rows may have colliding column names suffixed with '_right'
+        (see _python_join) — try the bare name first, then the suffixed one,
+        so an explicit SELECT list doesn't silently return nothing for a
+        right-table column that collided with a left-table one.
+        """
+        projected = []
+        for row in rows:
+            new_row: dict[str, Any] = {}
+            for col in columns:
+                key = col.split(".")[-1] if "." in col else col
+                if key in row:
+                    new_row[key] = row[key]
+                elif f"{key}_right" in row:
+                    new_row[key] = row[f"{key}_right"]
+            projected.append(new_row)
+        return projected
+
     async def _execute_with_join(
         self,
         query: str,
@@ -922,57 +1014,24 @@ class SQLEngineV2:
         tables: list[str],
     ) -> ToolResult:
         """
-        Execute multi-table query via Python-side JOIN with improved filtering.
+        Execute a multi-table query via Python-side JOIN with improved filtering.
 
-        1. Find JOIN relationship from FK graph
-        2. Fetch each table with org_id + property_id filters when possible
-        3. Join in Python using dict lookup
+        1. Fetch every table referenced in the query (org_id + property_id
+           filters applied where the table has those columns).
+        2. Chain-join them: start from tables[0], then fold in each remaining
+           table via whichever FK link connects it to ANY table already in
+           the chain (not just its immediate neighbor). This is what lets a
+           3+ table JOIN actually include every table — the previous
+           implementation only ever joined the first FK-linked pair it found
+           and silently dropped the rest.
         """
         if not self._http_client:
             self._http_client = httpx.AsyncClient(timeout=60.0)
 
-        org_id = context.get("org_id", "")
-        property_id = context.get("property_id", "")
-
-        # Find the JOIN column from FK graph
-        join_hint = None
-        for i, t1 in enumerate(tables):
-            for t2 in tables[i + 1 :]:
-                hint = self.fk_graph.get_join_hint(t1, t2)
-                if hint:
-                    join_hint = hint
-                    break
-            if join_hint:
-                break
-
-        if not join_hint:
-            return ToolResult(
-                call_id=f"v2_nofk_{time.time():.0f}",
-                tool_name="sql_query",
-                success=False,
-                error=f"No FK relationship found between tables: {tables}. Cannot JOIN.",
-            )
-
-        # Parse join hint: "Use table1.col1 = table2.col2"
-        match = re.search(r"Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)", join_hint)
-        if not match:
-            return ToolResult(
-                call_id=f"v2_parse_err_{time.time():.0f}",
-                tool_name="sql_query",
-                success=False,
-                error=f"Could not parse join hint: {join_hint}",
-            )
-
-        left_table, left_col, right_table, right_col = match.groups()
-
-        logger.info(
-            f"[SQL_ENGINE_V2] JOIN: {left_table}.{left_col} = {right_table}.{right_col}"
-        )
-
-        # Parse query for filters that apply to each table
         parsed = self._parse_query(query)
         where = parsed.get("where", "")
         where_lower = where.lower()
+        explicit_property_id = self._extract_explicit_value(where, "property_id")
 
         headers = {
             "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -981,63 +1040,60 @@ class SQLEngineV2:
         }
 
         try:
-            # Fetch left table with filters
-            left_url = f"{SUPABASE_URL}/rest/v1/{left_table}"
-            left_params: dict[str, str] = {"select": "*", "limit": str(JOIN_ROW_LIMIT)}
+            fetched: dict[str, list[dict]] = {}
+            for t in tables:
+                fetched[t] = await self._fetch_table_for_join(
+                    t, context, where, where_lower, explicit_property_id, headers
+                )
 
-            left_cols = TABLES.get(left_table, {}).get("columns", [])
-            if "organization_id" in left_cols and org_id:
-                left_params["organization_id"] = f"eq.{org_id}"
+            joined = fetched[tables[0]]
+            joined_so_far = [tables[0]]
+            pending = list(tables[1:])
 
-            # Apply property filter to left table if it has property_id
-            explicit_property_id = self._extract_explicit_value(where, "property_id")
-            if "property_id" in left_cols:
-                is_org_wide = any(kw in where_lower for kw in (
-                    "all properties", "org-wide", "orgwide", "across properties"
-                ))
-                if not is_org_wide:
-                    if explicit_property_id:
-                        left_params["property_id"] = f"eq.{explicit_property_id}"
-                    elif property_id:
-                        left_params["property_id"] = f"eq.{property_id}"
+            # Fold in every remaining table, linking to ANY table already
+            # merged so far — not just the previous one. Iterate until no
+            # more tables can be linked (handles hub/star schemas where
+            # e.g. tickets->properties and tickets->users but not
+            # properties->users).
+            while pending:
+                progressed = False
+                for t in list(pending):
+                    hint = None
+                    for already in joined_so_far:
+                        hint = self.fk_graph.get_join_hint(already, t)
+                        if hint:
+                            break
+                    if not hint:
+                        continue
+                    match = re.search(r"Use\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)", hint)
+                    if not match:
+                        continue
+                    h_left_table, h_left_col, h_right_table, h_right_col = match.groups()
+                    if h_left_table == t:
+                        # Hint direction is t -> already_merged_table; flip so
+                        # the already-merged `joined` list stays the left side.
+                        left_key, right_key = h_right_col, h_left_col
+                    else:
+                        left_key, right_key = h_left_col, h_right_col
+                    logger.info(f"[SQL_ENGINE_V2] JOIN: folding in {t} via {left_key}={right_key}")
+                    joined = self._python_join(joined, fetched[t], left_key, right_key)
+                    joined_so_far.append(t)
+                    pending.remove(t)
+                    progressed = True
+                if not progressed:
+                    logger.warning(
+                        f"[SQL_ENGINE_V2] JOIN: no FK path found to include tables {pending} "
+                        f"— returning partial join of {joined_so_far}"
+                    )
+                    break
 
-            # Apply other WHERE filters that reference left table columns
-            left_where_params = self._parse_where_to_params(where, context)
-            left_where_params.pop("__explicit_property_id", None)
-            left_where_params.pop("__explicit_org_id", None)
-            left_where_params.pop("organization_id", None)
-            if "property_id" in left_params:
-                left_where_params.pop("property_id", None)
-            left_params.update(left_where_params)
-
-            left_resp = await self._http_client.get(left_url, headers=headers, params=left_params)
-            left_resp.raise_for_status()
-            left_data = left_resp.json()
-
-            # Fetch right table with filters
-            right_url = f"{SUPABASE_URL}/rest/v1/{right_table}"
-            right_params: dict[str, str] = {"select": "*", "limit": str(JOIN_ROW_LIMIT)}
-
-            right_cols = TABLES.get(right_table, {}).get("columns", [])
-            if "organization_id" in right_cols and org_id:
-                right_params["organization_id"] = f"eq.{org_id}"
-
-            if "property_id" in right_cols:
-                is_org_wide = any(kw in where_lower for kw in (
-                    "all properties", "org-wide", "orgwide", "across properties"
-                ))
-                if not is_org_wide:
-                    if explicit_property_id:
-                        right_params["property_id"] = f"eq.{explicit_property_id}"
-                    elif property_id:
-                        right_params["property_id"] = f"eq.{property_id}"
-
-            right_resp = await self._http_client.get(right_url, headers=headers, params=right_params)
-            right_resp.raise_for_status()
-            right_data = right_resp.json()
-
-            # Python-side JOIN
-            joined = self._python_join(left_data, right_data, left_col, right_col)
+            if len(joined_so_far) < 2:
+                return ToolResult(
+                    call_id=f"v2_nofk_{time.time():.0f}",
+                    tool_name="sql_query",
+                    success=False,
+                    error=f"No FK relationship found between tables: {tables}. Cannot JOIN.",
+                )
 
             # Apply ORDER BY if present
             if parsed.get("order_col"):
@@ -1050,11 +1106,26 @@ class SQLEngineV2:
                 except Exception:
                     pass  # Sort failed, keep original order
 
+            # Apply the requested SELECT column list, if not SELECT *
+            if parsed.get("columns") and parsed["columns"] != ["*"]:
+                projectable = [c for c in parsed["columns"] if "(" not in c]
+                if projectable:
+                    joined = self._project_columns(joined, projectable)
+
             # Apply LIMIT after join
             if parsed.get("limit"):
                 joined = joined[:parsed["limit"]]
 
-            logger.info(f"[SQL_ENGINE_V2] JOIN result: {len(joined)} rows")
+            dropped = [t for t in tables if t not in joined_so_far]
+            if dropped:
+                for row in joined:
+                    if isinstance(row, dict):
+                        row["_warning"] = (
+                            f"Could not link table(s) {dropped} into this JOIN — no FK path found. "
+                            "Results only include: " + ", ".join(joined_so_far)
+                        )
+
+            logger.info(f"[SQL_ENGINE_V2] JOIN result: {len(joined)} rows across {joined_so_far}")
 
             return ToolResult(
                 call_id=f"v2_join_{time.time():.0f}",
@@ -1182,6 +1253,92 @@ class SQLEngineV2:
                 }
             ]
 
+    def _compute_avg(self, data: list[dict], query: str) -> list[dict]:
+        """Compute AVG(column) from raw data, optionally grouped."""
+        m = re.search(r"AVG\s*\(\s*([\w.]+)\s*\)", query, re.IGNORECASE)
+        if not m:
+            return [{"avg": None, "note": "could not parse AVG column"}]
+        col = m.group(1)
+        if "." in col:
+            col = col.split(".")[-1]
+
+        group_match = re.search(r"GROUP\s+BY\s+([\w.]+)", query, re.IGNORECASE)
+        if group_match:
+            group_col = group_match.group(1)
+            if "." in group_col:
+                group_col = group_col.split(".")[-1]
+            sums: dict[str, float] = {}
+            counts: dict[str, int] = {}
+            for row in data:
+                val = row.get(col)
+                if val is None:
+                    continue
+                try:
+                    fval = float(val)
+                except (TypeError, ValueError):
+                    continue
+                key = str(row.get(group_col, "unknown"))
+                sums[key] = sums.get(key, 0.0) + fval
+                counts[key] = counts.get(key, 0) + 1
+            return [
+                {"group": k, "avg": round(sums[k] / counts[k], 2), "count": counts[k]}
+                for k in sorted(sums, key=lambda k: -(sums[k] / counts[k]))
+            ]
+        else:
+            values: list[float] = []
+            for row in data:
+                val = row.get(col)
+                if val is None:
+                    continue
+                try:
+                    values.append(float(val))
+                except (TypeError, ValueError):
+                    continue
+            if not values:
+                return [{"avg": None, "column": col, "row_count": 0}]
+            return [
+                {
+                    "avg": round(sum(values) / len(values), 2),
+                    "column": col,
+                    "row_count": len(values),
+                }
+            ]
+
+    def _compute_min_max(self, data: list[dict], query: str, func: str) -> list[dict]:
+        """Compute MIN(column) or MAX(column) from raw data, optionally grouped."""
+        m = re.search(rf"{func.upper()}\s*\(\s*([\w.]+)\s*\)", query, re.IGNORECASE)
+        if not m:
+            return [{func: None, "note": f"could not parse {func.upper()} column"}]
+        col = m.group(1)
+        if "." in col:
+            col = col.split(".")[-1]
+        picker = min if func == "min" else max
+
+        def _numeric(v: Any) -> Optional[float]:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        group_match = re.search(r"GROUP\s+BY\s+([\w.]+)", query, re.IGNORECASE)
+        if group_match:
+            group_col = group_match.group(1)
+            if "." in group_col:
+                group_col = group_col.split(".")[-1]
+            buckets: dict[str, list[float]] = {}
+            for row in data:
+                val = _numeric(row.get(col))
+                if val is None:
+                    continue
+                key = str(row.get(group_col, "unknown"))
+                buckets.setdefault(key, []).append(val)
+            return [{"group": k, func: picker(vs)} for k, vs in buckets.items()]
+        else:
+            values = [v for v in (_numeric(row.get(col)) for row in data) if v is not None]
+            if not values:
+                return [{func: None, "column": col, "row_count": 0}]
+            return [{func: picker(values), "column": col, "row_count": len(values)}]
+
     def _compute_distinct(self, data: list[dict], query: str) -> list[dict]:
         """Compute DISTINCT values from raw data."""
         distinct_match = re.search(r"DISTINCT\s+([\w.]+)", query, re.IGNORECASE)
@@ -1302,6 +1459,15 @@ class SQLEngineV2Tool(Tool):
                 tool_name="sql_query",
                 success=False,
                 error="No query provided to sql_query tool.",
+            )
+
+        blocked_cols = [c for c in SENSITIVE_COLUMNS if re.search(rf"\b{re.escape(c)}\b", query, re.IGNORECASE)]
+        if blocked_cols:
+            return ToolResult(
+                call_id=f"v2tool_sensitive_{time.time():.0f}",
+                tool_name="sql_query",
+                success=False,
+                error=f"SENSITIVE_COLUMNS: Cannot query {blocked_cols} — these require explicit role authorization.",
             )
 
         # Build context dict from OrchestratorContext (or mock)

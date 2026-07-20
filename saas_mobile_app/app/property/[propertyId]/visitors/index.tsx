@@ -830,16 +830,7 @@ function CheckInForm({
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
-    >
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+    <View style={{ padding: 16, paddingBottom: 100 }}>
         {/* Visitor Name */}
         <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Visitor Name *</Text>
         <TextInput
@@ -964,8 +955,7 @@ function CheckInForm({
             </>
           )}
         </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1291,183 +1281,47 @@ export default function VisitorsScreen() {
   const filteredAll = visitors;
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 12) + 90 }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-
-      {/* Top Navigation — Scanner REMOVED */}
-      <SafeBlurView
-        intensity={80}
-        tint="dark"
-        style={[styles.topNav, {
-          backgroundColor: 'transparent',
-          borderBottomColor: 'rgba(255,255,255,0.12)',
-          paddingTop: insets.top + 10,
-          paddingBottom: 16
-        }]}
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={{ fontSize: 18, fontFamily: 'Poppins-Bold', color: '#FFFFFF' }} numberOfLines={1} adjustsFontSizeToFit>
-              Visitors
-            </Text>
-            <Text style={{ fontSize: 11, fontFamily: 'Urbanist-Medium', color: '#94A3B8' }}>
-              Visitor Management System
-            </Text>
-          </View>
-          {/* Scanner button removed */}
-          <View style={{ width: 40 }} />
-        </View>
-      </SafeBlurView>
-
-
-      {/* Hero Header */}
-      <SafeBlurView intensity={40} tint="dark" style={[styles.heroHeader, { borderColor: 'rgba(255,255,255,0.15)', borderBottomWidth: 1, overflow: 'hidden' }]}>
-        <LinearGradient colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFillObject} />
-        <View style={styles.heroContent}>
-          <View>
-            <Text style={[styles.heroTitle, { color: colors.text }]}>Visitors</Text>
-            <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
-              {stats.checked_in} currently on premise
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.kioskBtnHero, { backgroundColor: colors.primary }]}
-            onPress={() => setKioskMode(true)}
-            activeOpacity={0.8}
-          >
-            <Monitor size={18} color="#fff" />
-            <Text style={[styles.kioskBtnTextHero, { color: '#fff' }]}>Kiosk Mode</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeBlurView>
-
-
-      {/* Stats Row — Pending replaced with Checked Out */}
-      <View style={styles.statsRow}>
-        <StatCard
-          label="Today's Visitors"
-          value={stats.total}
-          icon={<Users size={20} color={colors.primary} />}
-          color={colors.primary}
-          bgColor={colors.primaryLight}
-        />
-        <StatCard
-          label="Checked In"
-          value={stats.checked_in}
-          icon={<LogIn size={20} color={colors.success} />}
-          color={colors.success}
-          bgColor={colors.successBg}
-          onPress={() => { setStatusFilter('checked_in'); setActiveTab('all'); }}
-        />
-        <StatCard
-          label="Checked Out"
-          value={stats.checked_out}
-          icon={<LogOut size={20} color={colors.textSecondary} />}
-          color={colors.textSecondary}
-          bgColor={'rgba(255,255,255,0.08)'}
-          onPress={() => { setStatusFilter('checked_out'); setActiveTab('all'); }}
-        />
-      </View>
-
-      {/* Tabs */}
-      <SafeBlurView intensity={45} tint="dark" style={[styles.tabBar, { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }]}>
-        <LinearGradient colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFillObject} />
-        {([
-          { key: 'all', label: 'All Visitors', icon: <ClipboardList size={14} /> },
-          { key: 'checkin', label: 'Check In', icon: <LogIn size={14} /> },
-        ] as const).map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            style={[
-              styles.tab,
-              activeTab === tab.key && { backgroundColor: colors.primary },
-            ]}
-            onPress={() => setActiveTab(tab.key)}
-            activeOpacity={0.7}
-          >
-            <View style={{ marginRight: 4 }}>
-              {React.cloneElement(tab.icon, { color: activeTab === tab.key ? '#fff' : colors.textSecondary })}
-            </View>
-            <Text
-              style={[
-                styles.tabText,
-                { color: activeTab === tab.key ? '#fff' : colors.textSecondary },
-              ]}
-            >
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </SafeBlurView>
-
-
-      {/* Content */}
-      {activeTab === 'all' ? (
-        <>
-          {/* Search + Filters Row */}
-          <View style={styles.filterRow}>
-            <SafeBlurView intensity={45} tint="dark" style={[styles.searchWrap, { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }]}>
-              <LinearGradient colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFillObject} />
-              <Search size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
-              <TextInput
-                style={[styles.searchInput, { color: colors.text }]}
-                placeholder="Search by name, phone, host..."
-                placeholderTextColor={colors.textTertiary}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </SafeBlurView>
-            <StatusFilterDropdown value={statusFilter} onChange={setStatusFilter} colors={colors} />
-          </View>
-
-          {/* Date Filter */}
-          <View style={{ paddingHorizontal: 12, marginBottom: 12 }}>
-            <DateFilterDropdown
-              value={dateFilter}
-              onChange={setDateFilter}
-              colors={colors}
-              fromDate={customFromDate}
-              toDate={customToDate}
-              onFromDateChange={setCustomFromDate}
-              onToDateChange={setCustomToDate}
-            />
-          </View>
-
-          {/* Visitor List */}
-          {isLoading ? (
-            <View style={{ flex: 1, paddingHorizontal: 12 }}>
-              <SkeletonLoader type="list" count={5} />
-            </View>
-          ) : filteredAll.length === 0 ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIcon, { backgroundColor: colors.primaryLight }]}>
-                <Users size={32} color={colors.primary} />
+        <FlatList
+          data={activeTab === 'all' ? filteredAll : []}
+          renderItem={renderVisitorItem}
+          keyExtractor={(item) => item.visitor_id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={colors.primary} />
+          }
+          ListEmptyComponent={() => {
+            if (activeTab === 'checkin') {
+              return <CheckInForm propertyId={propertyId!} onSuccess={refetch} />;
+            }
+            if (isLoading) {
+              return (
+                <View style={{ flex: 1, paddingHorizontal: 12, marginTop: 20 }}>
+                  <SkeletonLoader type="list" count={5} />
+                </View>
+              );
+            }
+            return (
+              <View style={[styles.emptyWrap, { marginTop: 40 }]}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.primaryLight }]}>
+                  <Users size={32} color={colors.primary} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No visitors found</Text>
+                <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
+                  {searchQuery ? 'Try a different search term' : `No visitors for ${DATE_FILTER_LABELS[dateFilter].toLowerCase()}`}
+                </Text>
               </View>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No visitors found</Text>
-              <Text style={[styles.emptySub, { color: colors.textSecondary }]}>
-                {searchQuery ? 'Try a different search term' : `No visitors for ${DATE_FILTER_LABELS[dateFilter].toLowerCase()}`}
-              </Text>
-            </View>
-          ) : (
-            <FlatList
-              data={filteredAll}
-              renderItem={renderVisitorItem}
-              keyExtractor={(item) => item.visitor_id}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-              refreshControl={
-                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={colors.primary} />
-              }
-            />
-          )}
-        </>
-      ) : (
-        <CheckInForm propertyId={propertyId!} onSuccess={refetch} />
-      )}
+            );
+          }}
+        />
+      </KeyboardAvoidingView>
 
       {/* Visitor Detail Modal */}
       <Modal

@@ -143,7 +143,7 @@ export interface DashboardData {
   tenantUserIds: string[];
   ppm: PpmStats;
   ppmSchedules: PpmSchedule[];
-  fetchedAt: number;
+  fetchedAt: number; lastUpdated?: Record<string, number | null>;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -163,8 +163,12 @@ export async function fetchDashboardData(propertyId: string): Promise<DashboardD
     }
 
     return result.data;
-  } catch (error) {
-    console.error('[fetchDashboardData] Exception:', error);
+  } catch (error: any) {
+    // We intentionally silence 403 errors here because the prefetch service
+    // handles them gracefully for users who don't have admin access.
+    if (!error?.message?.includes('403') && !error?.message?.includes('Access Denied')) {
+      console.error('[fetchDashboardData] Exception:', error);
+    }
     throw error;
   }
 }
@@ -189,6 +193,7 @@ export interface UseDashboardQueryResult {
   isFetching: boolean;
   isStale: boolean;
   error: Error | null;
+  dataUpdatedAt: number;
   refetch: () => Promise<void>;
   forceRefresh: () => Promise<void>;
 }
@@ -226,6 +231,7 @@ export function useDashboardQuery(
     isFetching: queryResult.isFetching,
     isStale: queryResult.isStale,
     error: queryResult.error,
+    dataUpdatedAt: queryResult.dataUpdatedAt,
     refetch: queryResult.refetch,
     forceRefresh: async () => { await queryResult.refetch(); },
   };

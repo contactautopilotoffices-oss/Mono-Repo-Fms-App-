@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
@@ -18,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useGlobalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { FlashList } from '@shopify/flash-list';
 import { serverApi } from '@/lib/serverApi';
 
 import { useAuth } from '@/hooks/useAuth';
@@ -745,7 +745,8 @@ const onRefresh = () => {
             </TouchableOpacity>
           </View>
         ) : (
-          <FlatList
+          <View style={{ flex: 1, width: '100%' }}>
+          <FlashList
             data={displayedTickets}
             renderItem={renderTicket}
             keyExtractor={(item) => item.id}
@@ -775,7 +776,9 @@ const onRefresh = () => {
                 </TouchableOpacity>
               ) : null
             }
+            estimatedItemSize={120}
           />
+          </View>
         )}
 
 

@@ -666,7 +666,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: Props
         checklistStats: { completed: completedChecklists, total: totalChecklists },
       };
     },
-    { staleTime: 1000 * 60 * 5 }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: false }
   );
 
 
@@ -952,7 +952,7 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: Props
         )}
       </View>
 
-      <ChecklistProgressCard completed={data?.checklistStats?.completed ?? 0} total={data?.checklistStats?.total ?? 0} delay={280} />
+      <ChecklistProgressCard completed={data?.checklistStats?.completed ?? 0} total={data?.checklistStats?.total ?? 0} delay={280} style={{ marginHorizontal: 0 }} />
     </>
   );
 

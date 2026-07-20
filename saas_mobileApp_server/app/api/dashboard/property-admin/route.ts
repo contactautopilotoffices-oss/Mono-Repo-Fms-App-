@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
         
       // Vendor Daily Revenue
       admin.from('vendor_daily_revenue')
-        .select('revenue_amount, vendor_id, revenue_date')
+        .select('revenue_amount, vendor_id, revenue_date, created_at')
         .in('property_id', propIds),
         
       // Total Tickets Count (All)
@@ -159,12 +159,12 @@ export async function GET(request: NextRequest) {
           .eq('property_id', pid)
           .order('reading_date', { ascending: false }),
         admin.from('diesel_readings')
-          .select('closing_diesel_level, computed_consumed_litres, reading_date, generator_id, generators(name, tank_capacity_litres)')
+          .select('closing_diesel_level, computed_consumed_litres, reading_date, generator_id, created_at, generators(name, tank_capacity_litres)')
           .eq('property_id', pid)
           .order('reading_date', { ascending: false }),
         // Water readings
         admin.from('water_readings')
-          .select('quantity, computed_cost, reading_date, source:water_sources!inner(property_id, source_type)')
+          .select('quantity, computed_cost, reading_date, created_at, source:water_sources!inner(property_id, source_type)')
           .eq('water_sources.property_id', pid)
           .order('reading_date', { ascending: false }),
         admin.rpc('get_property_health_score', { p_property_id: pid }),
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
         admin.rpc('get_ticket_funnel', { p_property_id: pid, p_days: 30 }),
         admin.rpc("get_ppm_stats", { prop_id: pid }),
         admin.from('ppm_schedules')
-          .select('id, system_name, detail_name, planned_date, status, frequency')
+          .select('id, system_name, detail_name, planned_date, status, frequency, updated_at')
           .eq('property_id', pid)
           .order('planned_date', { ascending: true })
       ]);
@@ -637,8 +637,36 @@ export async function GET(request: NextRequest) {
       time: v.created_at
     }));
 
+    const maxDate = (arr: any[], field: string) => {
+      if (!arr || arr.length === 0) return null;
+      let max = 0;
+      for (const item of arr) {
+        if (item[field]) {
+          const t = new Date(item[field]).getTime();
+          if (t > max && !isNaN(t)) max = t;
+        }
+      }
+      return max > 0 ? max : null;
+    };
+
+    const elecReadings = perPropResults.flatMap(res => res.elec?.data || []);
+    const dieselReadings = perPropResults.flatMap(res => res.diesel?.data || []);
+    const waterReadings = perPropResults.flatMap(res => res.water?.data || []);
+
+    const lastUpdated = {
+      tickets: maxDate(ticketRes.data || [], 'created_at'), // using created_at as fallback for tickets
+      energy: maxDate(elecReadings, 'created_at'),
+      diesel: maxDate(dieselReadings, 'created_at'),
+      water: maxDate(waterReadings, 'created_at'),
+      vendor: maxDate(revRes.data || [], 'created_at'),
+      vms: maxDate(vmsRes.data || [], 'created_at'),
+      ppm: maxDate(ppmSchedulesArr, 'updated_at'),
+      checklist: maxDate(sopCompletionsRes.data || [], 'completed_at'),
+    };
+
     // --- RETURN PAYLOAD ---
     const dashboardData = {
+      lastUpdated,
       propertyId,
       propertyName: propRes?.data?.name ?? "",
       propertyLogoUrl: propRes?.data?.image_url ?? null,

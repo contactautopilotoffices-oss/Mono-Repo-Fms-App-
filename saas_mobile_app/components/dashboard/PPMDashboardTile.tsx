@@ -56,10 +56,10 @@ interface Props {
   propertyId: string;
   delay?: number;
   schedules: PPMSchedule[];
-  loading?: boolean;
+  loading?: boolean; updatedAt?: number;
 }
 
-export default function PPMDashboardTile({ propertyId, delay = 220, schedules, loading = false }: Props) {
+export default function PPMDashboardTile({ propertyId, delay = 220, schedules, loading = false, updatedAt }: Props) {
   const router = useRouter();
 
   const now = new Date();
@@ -138,6 +138,7 @@ export default function PPMDashboardTile({ propertyId, delay = 220, schedules, l
       icon="calendar-outline"
       delay={delay}
       status={hasOverdue ? 'watch' : 'optimal'}
+      updatedAt={updatedAt}
       onPress={() => router.push(`/property/${propertyId}/ppm`)}
     >
       {/* Stats Row */}

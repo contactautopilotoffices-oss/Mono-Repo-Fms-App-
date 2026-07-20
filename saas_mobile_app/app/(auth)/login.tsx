@@ -45,10 +45,13 @@ import { AutopilotLogo, AutopilotIcon } from '@/components/ui/AutopilotLogo';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedProps,
   withRepeat,
   withTiming,
   withSequence,
   Easing,
+  interpolateColor,
+  interpolate,
 } from 'react-native-reanimated';
 
 // ─── Zod schema ───────────────────────────────────────────────────────────────
@@ -127,6 +130,114 @@ function BackgroundSlideshow() {
     </View>
   );
 }
+
+const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
+
+const AnimatedInput = ({ 
+  iconName, 
+  placeholder, 
+  value, 
+  onChangeText, 
+  onBlur, 
+  secureTextEntry,
+  hasError, 
+  onEyePress, 
+  showEyeIcon,
+  isEyeOff,
+  keyboardType,
+  autoCapitalize,
+  autoCorrect,
+  theme,
+  isDark
+}: any) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const focusAnim = useSharedValue(0);
+
+  React.useEffect(() => {
+    focusAnim.value = withTiming(isFocused ? 1 : 0, { duration: 200, easing: Easing.inOut(Easing.ease) });
+  }, [isFocused]);
+
+  const animatedContainerStyle = useAnimatedStyle(() => {
+    const borderWidth = interpolate(focusAnim.value, [0, 1], [1, 1.5]);
+    
+    return {
+      borderColor: hasError 
+        ? theme.error 
+        : (focusAnim.value > 0.5 ? '#9FC4D0' : 'rgba(255,255,255,0.08)'),
+      borderWidth,
+      backgroundColor: isDark ? '#2A2A2A' : '#F3F4F6'
+    };
+  });
+
+  const animatedIconProps = useAnimatedProps(() => {
+    return { 
+      color: focusAnim.value > 0.5 ? '#9FC4D0' : '#A5A5A5' 
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.inputContainer, animatedContainerStyle]}>
+      <AnimatedIcon name={iconName} size={20} animatedProps={animatedIconProps} style={styles.inputIcon} />
+      <TextInput
+        style={[styles.input, { color: isDark ? '#FFFFFF' : '#111111' }]}
+        placeholder={placeholder}
+        placeholderTextColor={isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)"}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setIsFocused(true)}
+        onBlur={(e) => { setIsFocused(false); if (onBlur) onBlur(e); }}
+        secureTextEntry={secureTextEntry}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+      />
+      {showEyeIcon && (
+        <TouchableOpacity onPress={onEyePress} style={styles.eyeButton}>
+          <Ionicons name={isEyeOff ? 'eye-off-outline' : 'eye-outline'} size={20} color="#A5A5A5" />
+        </TouchableOpacity>
+      )}
+    </Animated.View>
+  );
+};
+
+const AnimatedToggle = ({ authMode, setAuthMode, onToggle, isDark }: any) => {
+  const [containerWidth, setContainerWidth] = useState(0);
+  const positionAnim = useSharedValue(authMode === 'signin' ? 0 : 1);
+
+  React.useEffect(() => {
+    positionAnim.value = withTiming(authMode === 'signin' ? 0 : 1, { duration: 250, easing: Easing.inOut(Easing.ease) });
+  }, [authMode]);
+
+  const animatedBgStyle = useAnimatedStyle(() => {
+    const tabWidth = (containerWidth - 8) / 2;
+    return {
+      width: tabWidth,
+      backgroundColor: isDark ? '#2A2A2A' : '#FFFFFF',
+      borderRadius: 8,
+      transform: [{ translateX: positionAnim.value * tabWidth }]
+    };
+  });
+
+  const signInTextStyle = useAnimatedStyle(() => ({
+    color: positionAnim.value < 0.5 ? (isDark ? '#FFFFFF' : '#111111') : (isDark ? 'rgba(255,255,255,0.5)' : '#888888'),
+  }));
+
+  const signUpTextStyle = useAnimatedStyle(() => ({
+    color: positionAnim.value < 0.5 ? (isDark ? 'rgba(255,255,255,0.5)' : '#888888') : (isDark ? '#FFFFFF' : '#111111'),
+  }));
+
+  return (
+    <View style={styles.tabContainer} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+      {containerWidth > 0 && <Animated.View style={[styles.activeTab, animatedBgStyle, { position: 'absolute', top: 4, bottom: 4, left: 4 }]} />}
+      <TouchableOpacity style={styles.tab} onPress={() => { setAuthMode('signin'); onToggle(); }} activeOpacity={1}>
+        <Animated.Text style={[styles.tabText, signInTextStyle, { fontWeight: authMode === 'signin' ? '700' : '500' }]}>Sign In</Animated.Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.tab} onPress={() => { setAuthMode('signup'); onToggle(); }} activeOpacity={1}>
+        <Animated.Text style={[styles.tabText, signUpTextStyle, { fontWeight: authMode === 'signup' ? '700' : '500' }]}>Sign Up</Animated.Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function LoginScreen() {
@@ -428,108 +539,161 @@ export default function LoginScreen() {
             {/* Form */}
             <View style={styles.form}>
               
-              {/* Full Name Field (Only for Signup) */}
-              {authMode === 'signup' && (
-                <Controller
-                  control={signUpForm.control}
-                  name="fullName"
-                  render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <View style={{ gap: 4 }}>
-                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
-                      <Ionicons name="person-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
-                        <TextInput
-                          style={[styles.input, { color: theme.textPrimary }]}
+              {authMode === 'signin' ? (
+                <>
+                  {/* Sign In Email */}
+                  <Controller
+                    key="signin-email"
+                    control={signInForm.control}
+                    name="email"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="mail-outline"
+                          placeholder="name@company.com"
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
+                        />
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                      </View>
+                    )}
+                  />
+
+                  {/* Sign In Password */}
+                  <Controller
+                    key="signin-password"
+                    control={signInForm.control}
+                    name="password"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="lock-closed-outline"
+                          placeholder="Password"
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          secureTextEntry={!showPassword}
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
+                          showEyeIcon={true}
+                          isEyeOff={showPassword}
+                          onEyePress={() => setShowPassword(!showPassword)}
+                        />
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                      </View>
+                    )}
+                  />
+                </>
+              ) : (
+                <>
+                  {/* Sign Up Full Name */}
+                  <Controller
+                    key="signup-fullname"
+                    control={signUpForm.control}
+                    name="fullName"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="person-outline"
                           placeholder="John Doe"
-                          placeholderTextColor={theme.textTertiary}
                           value={value}
                           onChangeText={onChange}
                           onBlur={onBlur}
                           autoCapitalize="words"
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
                         />
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
                       </View>
-                      {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
-                    </View>
-                  )}
-                />
-              )}
+                    )}
+                  />
 
-              {/* Email Field */}
-              <Controller
-                control={authMode === 'signin' ? signInForm.control : signUpForm.control}
-                name="email"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <View style={{ gap: 4 }}>
-                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
-                      <Ionicons name="mail-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="name@company.com"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                    </View>
-                    {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
-                  </View>
-                )}
-              />
+                  {/* Sign Up Email */}
+                  <Controller
+                    key="signup-email"
+                    control={signUpForm.control}
+                    name="email"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="mail-outline"
+                          placeholder="name@company.com"
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
+                        />
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                      </View>
+                    )}
+                  />
 
-              {/* Password Field */}
-              <Controller
-                control={authMode === 'signin' ? signInForm.control : signUpForm.control}
-                name="password"
-                render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                  <View style={{ gap: 4 }}>
-                    <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
-                      <Ionicons name="lock-closed-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
-                      <TextInput
-                        style={[styles.input, { color: theme.textPrimary }]}
-                        placeholder="Password"
-                        placeholderTextColor={theme.textTertiary}
-                        value={value}
-                        onChangeText={onChange}
-                        onBlur={onBlur}
-                        secureTextEntry={!showPassword}
-                      />
-                      <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
-                        <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.textTertiary} />
-                      </TouchableOpacity>
-                    </View>
-                    {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
-                  </View>
-                )}
-              />
+                  {/* Sign Up Password */}
+                  <Controller
+                    key="signup-password"
+                    control={signUpForm.control}
+                    name="password"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="lock-closed-outline"
+                          placeholder="Password"
+                          value={value}
+                          onChangeText={onChange}
+                          onBlur={onBlur}
+                          secureTextEntry={!showPassword}
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
+                          showEyeIcon={true}
+                          isEyeOff={showPassword}
+                          onEyePress={() => setShowPassword(!showPassword)}
+                        />
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
+                      </View>
+                    )}
+                  />
 
-              {/* Confirm Password Field (Only for Signup) */}
-              {authMode === 'signup' && (
-                <Controller
-                  control={signUpForm.control}
-                  name="confirmPassword"
-                  render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
-                    <View style={{ gap: 4 }}>
-                      <View style={[styles.inputContainer, { borderColor: error ? theme.error : 'transparent', backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }]}>
-                        <Ionicons name="shield-checkmark-outline" size={20} color={theme.textTertiary} style={styles.inputIcon} />
-                        <TextInput
-                          style={[styles.input, { color: theme.textPrimary }]}
+                  {/* Sign Up Confirm Password */}
+                  <Controller
+                    key="signup-confirmpassword"
+                    control={signUpForm.control}
+                    name="confirmPassword"
+                    render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+                      <View style={{ gap: 4 }}>
+                        <AnimatedInput
+                          iconName="shield-checkmark-outline"
                           placeholder="Confirm password"
-                          placeholderTextColor={theme.textTertiary}
                           value={value}
                           onChangeText={onChange}
                           onBlur={onBlur}
                           secureTextEntry={!showConfirmPassword}
+                          hasError={!!error}
+                          theme={theme}
+                          isDark={isDark}
+                          showEyeIcon={true}
+                          isEyeOff={showConfirmPassword}
+                          onEyePress={() => setShowConfirmPassword(!showConfirmPassword)}
                         />
-                        <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeButton}>
-                          <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={theme.textTertiary} />
-                        </TouchableOpacity>
+                        {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
                       </View>
-                      {error && <Text style={{ color: theme.error, fontSize: 12, marginLeft: 8 }}>{error.message}</Text>}
-                    </View>
-                  )}
-                />
+                    )}
+                  />
+                </>
               )}
 
               {/* Forgot Password */}

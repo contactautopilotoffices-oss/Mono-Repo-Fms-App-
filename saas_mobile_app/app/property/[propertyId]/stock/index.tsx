@@ -444,8 +444,211 @@ export default function StockScreen() {
     );
   }
 
+  const renderHeader = () => (
+    <>
+  {/* ── Header ── */}
+        <Animated.View
+          entering={FadeInUp.duration(400)}
+          style={styles.headerWrap}
+        >
+          <View style={styles.headerTop}>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.headerTitle} adjustsFontSizeToFit numberOfLines={1}>Stock</Text>
+              <Text style={[styles.headerTitle, { color: "#34D399", marginTop: -4 }]} adjustsFontSizeToFit numberOfLines={1}>Management</Text>
+              <Text style={styles.headerSubtitle} adjustsFontSizeToFit numberOfLines={1}>Inventory Management</Text>
+            </View>
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              <TouchableOpacity
+                style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.35)", borderColor: "rgba(16,185,129,0.45)" }]}
+                onPress={() => setShowScannerModal(true)}
+                activeOpacity={0.7}
+              >
+                <Scan size={18} color="#34D399" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={() => setShowHistoryModal(true)}
+                activeOpacity={0.7}
+              >
+                <History size={18} color="rgba(255,255,255,0.8)" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={() => setShowBulkImportModal(true)}
+                activeOpacity={0.7}
+              >
+                <Upload size={18} color="rgba(255,255,255,0.8)" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.headerIconBtn,
+                  {
+                    backgroundColor: "rgba(59,130,246,0.35)",
+                    borderColor: "rgba(59,130,246,0.45)",
+                  },
+                ]}
+                onPress={() => setShowAddModal(true)}
+                activeOpacity={0.7}
+              >
+                <Plus size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+  
+        {/* ── KPI Tinted Glass Cards ── */}
+        <Animated.View
+          entering={FadeInUp.delay(100).duration(500)}
+          style={styles.kpiWrap}
+        >
+          <View style={styles.kpiRow}>
+            <TintedGlassCard
+              label="Total Items"
+              value={stats.total}
+              subtitle="All Items"
+              icon={<Package size={16} color="#60A5FA" />}
+              tint="blue"
+              delay={0}
+            />
+            <TintedGlassCard
+              label="Low Stock"
+              value={stats.lowStock}
+              subtitle="Need Attention"
+              icon={<AlertTriangle size={16} color="#FBBF24" />}
+              tint="amber"
+              delay={80}
+            />
+          </View>
+          <View style={styles.kpiRow}>
+            <TintedGlassCard
+              label="Out Of Stock"
+              value={stats.outOfStock}
+              subtitle="Not Available"
+              icon={<TrendingDown size={16} color="#FCA5A5" />}
+              tint="rose"
+              delay={160}
+            />
+            <TintedGlassCard
+              label="Total Value"
+              value={formatCurrency(stats.totalValue).replace("₹", "₹")}
+              subtitle="Inventory Value"
+              icon={<Package size={16} color="#6EE7B7" />}
+              tint="green"
+              isCurrency
+              delay={240}
+            />
+          </View>
+        </Animated.View>
+  
+        {/* ── Search + Filter ── */}
+        <Animated.View
+          entering={FadeInUp.delay(300).duration(500)}
+          style={styles.searchWrap}
+        >
+          <View style={styles.searchRow}>
+            <View style={styles.searchInputWrap}>
+              <Search size={16} color={TOKENS.text.tertiary} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search stock..."
+                placeholderTextColor={TOKENS.text.tertiary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery("")}>
+                  <X size={14} color={TOKENS.text.tertiary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.filterBtn,
+                selectedCategory ? { borderColor: "rgba(59,130,246,0.40)" } : {},
+              ]}
+              onPress={() => setShowCategoryFilter(!showCategoryFilter)}
+            >
+              <Filter
+                size={16}
+                color={selectedCategory ? "#60A5FA" : TOKENS.text.secondary}
+              />
+            </TouchableOpacity>
+          </View>
+  
+          {showCategoryFilter && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipScroll}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.categoryChip,
+                  selectedCategory === "" && styles.categoryChipActive,
+                ]}
+                onPress={() => {
+                  setSelectedCategory("");
+                  setShowCategoryFilter(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    selectedCategory === "" && styles.categoryChipTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </TouchableOpacity>
+              {categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryChip,
+                    selectedCategory === cat && styles.categoryChipActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedCategory(cat);
+                    setShowCategoryFilter(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      selectedCategory === cat && styles.categoryChipTextActive,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+  
+          {selectedCategory ? (
+            <View style={styles.activeFilter}>
+              <Text style={styles.activeFilterText}>{selectedCategory}</Text>
+              <TouchableOpacity onPress={() => setSelectedCategory("")}>
+                <X size={12} color={TOKENS.text.tertiary} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </Animated.View>
+  
+            </>
+  );
+
   return (
-    <View
+    <View style={styles.container}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={[
         styles.container,
         {
@@ -457,204 +660,9 @@ export default function StockScreen() {
     >
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* ── Header ── */}
-      <Animated.View
-        entering={FadeInUp.duration(400)}
-        style={styles.headerWrap}
-      >
-        <View style={styles.headerTop}>
-          <TouchableOpacity
-            style={styles.headerIconBtn}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.headerTitle}>Stock</Text>
-            <Text style={[styles.headerTitle, { color: "#34D399", marginTop: -4 }]}>Management</Text>
-            <Text style={styles.headerSubtitle}>Inventory Management</Text>
-          </View>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <TouchableOpacity
-              style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.35)", borderColor: "rgba(16,185,129,0.45)" }]}
-              onPress={() => setShowScannerModal(true)}
-              activeOpacity={0.7}
-            >
-              <Scan size={18} color="#34D399" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => setShowHistoryModal(true)}
-              activeOpacity={0.7}
-            >
-              <History size={18} color="rgba(255,255,255,0.8)" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => setShowBulkImportModal(true)}
-              activeOpacity={0.7}
-            >
-              <Upload size={18} color="rgba(255,255,255,0.8)" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.headerIconBtn,
-                {
-                  backgroundColor: "rgba(59,130,246,0.35)",
-                  borderColor: "rgba(59,130,246,0.45)",
-                },
-              ]}
-              onPress={() => setShowAddModal(true)}
-              activeOpacity={0.7}
-            >
-              <Plus size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.View>
-
-      {/* ── KPI Tinted Glass Cards ── */}
-      <Animated.View
-        entering={FadeInUp.delay(100).duration(500)}
-        style={styles.kpiWrap}
-      >
-        <View style={styles.kpiRow}>
-          <TintedGlassCard
-            label="Total Items"
-            value={stats.total}
-            subtitle="All Items"
-            icon={<Package size={16} color="#60A5FA" />}
-            tint="blue"
-            delay={0}
-          />
-          <TintedGlassCard
-            label="Low Stock"
-            value={stats.lowStock}
-            subtitle="Need Attention"
-            icon={<AlertTriangle size={16} color="#FBBF24" />}
-            tint="amber"
-            delay={80}
-          />
-        </View>
-        <View style={styles.kpiRow}>
-          <TintedGlassCard
-            label="Out Of Stock"
-            value={stats.outOfStock}
-            subtitle="Not Available"
-            icon={<TrendingDown size={16} color="#FCA5A5" />}
-            tint="rose"
-            delay={160}
-          />
-          <TintedGlassCard
-            label="Total Value"
-            value={formatCurrency(stats.totalValue).replace("₹", "₹")}
-            subtitle="Inventory Value"
-            icon={<Package size={16} color="#6EE7B7" />}
-            tint="green"
-            isCurrency
-            delay={240}
-          />
-        </View>
-      </Animated.View>
-
-      {/* ── Search + Filter ── */}
-      <Animated.View
-        entering={FadeInUp.delay(300).duration(500)}
-        style={styles.searchWrap}
-      >
-        <View style={styles.searchRow}>
-          <View style={styles.searchInputWrap}>
-            <Search size={16} color={TOKENS.text.tertiary} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search stock..."
-              placeholderTextColor={TOKENS.text.tertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery("")}>
-                <X size={14} color={TOKENS.text.tertiary} />
-              </TouchableOpacity>
-            )}
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.filterBtn,
-              selectedCategory ? { borderColor: "rgba(59,130,246,0.40)" } : {},
-            ]}
-            onPress={() => setShowCategoryFilter(!showCategoryFilter)}
-          >
-            <Filter
-              size={16}
-              color={selectedCategory ? "#60A5FA" : TOKENS.text.secondary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {showCategoryFilter && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipScroll}
-          >
-            <TouchableOpacity
-              style={[
-                styles.categoryChip,
-                selectedCategory === "" && styles.categoryChipActive,
-              ]}
-              onPress={() => {
-                setSelectedCategory("");
-                setShowCategoryFilter(false);
-              }}
-            >
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  selectedCategory === "" && styles.categoryChipTextActive,
-                ]}
-              >
-                All
-              </Text>
-            </TouchableOpacity>
-            {categories.map((cat) => (
-              <TouchableOpacity
-                key={cat}
-                style={[
-                  styles.categoryChip,
-                  selectedCategory === cat && styles.categoryChipActive,
-                ]}
-                onPress={() => {
-                  setSelectedCategory(cat);
-                  setShowCategoryFilter(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    selectedCategory === cat && styles.categoryChipTextActive,
-                  ]}
-                >
-                  {cat}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-
-        {selectedCategory ? (
-          <View style={styles.activeFilter}>
-            <Text style={styles.activeFilterText}>{selectedCategory}</Text>
-            <TouchableOpacity onPress={() => setSelectedCategory("")}>
-              <X size={12} color={TOKENS.text.tertiary} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
-      </Animated.View>
-
-      {/* ── Item List ── */}
+{/* ── Item List ── */}
       <FlashList
+        ListHeaderComponent={renderHeader}
         data={filteredItems}
         keyExtractor={(item) => item.id}
         refreshControl={
@@ -682,6 +690,7 @@ export default function StockScreen() {
           <StockItemCard item={item} onPress={() => handleItemPress(item)} />
         )}
       />
+    </KeyboardAvoidingView>
 
       {/* ── Add Item Modal ── */}
       <Modal visible={showAddModal} animationType="slide" transparent>
@@ -1409,8 +1418,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   headerIconBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: TOKENS.radius.btn,
     backgroundColor: TOKENS.glass.bg,
     borderWidth: 1,
@@ -1427,9 +1436,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: TOKENS.glass.border,
     overflow: "hidden",
-    minHeight: 130,
+    minHeight: 106,
   },
-  tintedCardInner: { padding: 14, position: "relative", zIndex: 1, flex: 1 },
+  tintedCardInner: { padding: 12, position: "relative", zIndex: 1, flex: 1 },
   tintedCardHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1461,10 +1470,10 @@ const styles = StyleSheet.create({
   },
   tintedValue: {
     fontFamily: "Poppins-Bold",
-    fontSize: 28,
+    fontSize: 24,
     color: TOKENS.text.primary,
     letterSpacing: -0.5,
-    lineHeight: 34,
+    lineHeight: 28,
   },
   tintedSubtitle: {
     fontFamily: "Urbanist-Medium",

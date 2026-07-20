@@ -668,7 +668,12 @@ export default function PropertyLayout() {
             onClose={() => setTicketModalVisible(false)}
             propertyId={propertyId ?? ''}
             organizationId={membership?.org_id ?? ''}
-            role={membershipRole === 'org_super_admin' ? 'super_admin' : (membershipRole === 'property_admin' ? 'admin' : 'tenant')}
+            role={
+              membershipRole === 'org_super_admin' ? 'super_admin'
+              : membershipRole === 'property_admin' ? 'admin'
+              : (membershipRole === 'tenant' || membershipRole === 'super_tenant' || membershipRole === 'client') ? 'tenant'
+              : 'staff'
+            }
           />
           {showTenantNav ? <TenantBottomNav /> : <GlobalBottomNav />}
         </View>

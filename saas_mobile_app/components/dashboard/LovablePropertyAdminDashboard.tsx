@@ -61,7 +61,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
   // ─── NEW: Unified React Query Data (Source of Truth) ───
   // Renders immediately from cache, refetches in background
-  const { data, isLoading, isFetching, forceRefresh, error } = useDashboardQuery(propertyId, {
+  const { data, isLoading, isFetching, forceRefresh, error, dataUpdatedAt } = useDashboardQuery(propertyId, {
     initialLoadingOnMount: false, // Instant render from cache
   });
 
@@ -487,7 +487,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
 
         <View style={{ marginTop: SPACING.lg }}>
           {/* Global Time Toggle (Ticket card handles the UI, but it applies to all) */}
-          <GlassTile label="Tickets" icon="ticket" delay={80} status={healthStatus} onPress={() => setShowTileDetail(tileDetails.tickets)}>
+          <GlassTile updatedAt={data?.lastUpdated?.tickets || dataUpdatedAt} label="Tickets" icon="ticket" delay={80} status={healthStatus} onPress={() => setShowTileDetail(tileDetails.tickets)}>
             <View style={styles.timeToggleRow}>
               {(['today', 'month', 'all'] as const).map((f) => (
                 <TouchableOpacity key={f} style={[styles.timeToggleBtn, timeFilter === f && styles.timeToggleBtnActive]} onPress={() => setTimeFilter(f)} activeOpacity={0.7}>
@@ -513,52 +513,13 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
             </View>
           </GlassTile>
 
-          {/* Needs Attention */}
-          {needsAttentionItems.length > 0 && (() => {
-            const critCount = needsAttentionItems.filter(i => i.severity === 'critical').length;
-            const highCount = needsAttentionItems.filter(i => i.severity === 'high').length;
-            const medCount = needsAttentionItems.filter(i => !['critical', 'high'].includes(i.severity)).length;
-            return (
-            <>
-              <Animated.View  style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: 6 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.45)', letterSpacing: 2, textTransform: 'uppercase' }}>⚠️ NEEDS ATTENTION</Text>
-                <TouchableOpacity onPress={() => setShowNeedsAttention(true)}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3B82F6' }}>VIEW ALL</Text>
-                </TouchableOpacity>
-              </Animated.View>
-              {/* Severity Summary Bar */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.xl, marginBottom: SPACING.md, gap: 12 }}>
-                {critCount > 0 && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' }} />
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)' }}>{critCount} Critical</Text>
-                  </View>
-                )}
-                {highCount > 0 && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#F59E0B' }} />
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)' }}>{highCount} High</Text>
-                  </View>
-                )}
-                {medCount > 0 && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B82F6' }} />
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.6)' }}>{medCount} Medium</Text>
-                  </View>
-                )}
-              </View>
-              {needsAttentionItems.slice(0, 3).map((item, index) => (
-                <AttentionCard key={item.id} item={item} index={index} onAction={() => item.entity_type === 'ticket' && router.push(`/property/${propertyId}/tickets/${item.entity_id}`)} />
-              ))}
-            </>
-            );
-          })()}
+
 
           {/* Checklist */}
-          <ChecklistProgressCard stats={data?.sopStats} items={data?.sopItems} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
+          <ChecklistProgressCard updatedAt={data?.lastUpdated?.checklist || dataUpdatedAt} stats={data?.sopStats} items={data?.sopItems} delay={200} onPress={() => setShowTileDetail(tileDetails.checklist)} />
 
           {/* PPM Calendar with dots and upcoming tasks */}
-          <PPMDashboardTile
+          <PPMDashboardTile updatedAt={data?.lastUpdated?.ppm || dataUpdatedAt}
             propertyId={propertyId}
             delay={220}
             schedules={ppmSchedules}
@@ -566,7 +527,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           />
 
           {/* Energy */}
-          <GlassTile label="Main Meter" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
+          <GlassTile updatedAt={data?.lastUpdated?.energy || dataUpdatedAt} label="Main Meter" icon="flash" delay={280} status={energyTrend > 10 ? 'watch' : 'optimal'} onPress={() => setShowTileDetail(tileDetails.energy)}>
             <View style={styles.tileTopRow}>
               <View>
                 <Text style={styles.tileMetricMid}><AnimatedNumber value={energyStats[timeFilter] || 0} /> <Text style={styles.tileSuffix}>Units</Text></Text>
@@ -581,7 +542,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Visitors */}
-          <GlassTile label="Visitors" icon="people-outline" delay={320} onPress={() => router.push(`/property/${propertyId}/visitors`)} onLongPress={toggleVisitors}>
+          <GlassTile updatedAt={data?.lastUpdated?.vms || dataUpdatedAt} label="Visitors" icon="people-outline" delay={320} onPress={() => router.push(`/property/${propertyId}/visitors`)} onLongPress={toggleVisitors}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
                 <Text style={styles.tileMetricMid}>{vmsStats?.[timeFilter]?.total || 0}</Text>
@@ -619,7 +580,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Vendor Revenue */}
-          <GlassTile label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/cafeteria`)}>
+          <GlassTile updatedAt={data?.lastUpdated?.vendor || dataUpdatedAt} label="Cafeteria Revenue" icon="fast-food-outline" delay={360} onPress={() => router.push(`/property/${propertyId}/cafeteria`)}>
             <View style={styles.tileTopRow}>
               <View>
                 <Text style={styles.tileMetricMid}>₹{(vendorStats[timeFilter]?.revenue || 0).toLocaleString()}</Text>
@@ -633,7 +594,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Diesel */}
-          <GlassTile label="Diesel Stock" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
+          <GlassTile updatedAt={data?.lastUpdated?.diesel || dataUpdatedAt} label="Diesel Stock" icon="water-outline" delay={400} onPress={() => router.push(`/property/${propertyId}/diesel`)}>
             <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
               <LiveDieselSphere level={dieselStats.level} />
               <View style={{ flex: 1 }}>
@@ -671,7 +632,7 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
           </GlassTile>
 
           {/* Water */}
-          <GlassTile label="Water Usage" icon="water" delay={420} onPress={() => router.push(`/property/${propertyId}/water`)}>
+          <GlassTile updatedAt={data?.lastUpdated?.water || dataUpdatedAt} label="Water Usage" icon="water" delay={420} onPress={() => router.push(`/property/${propertyId}/water`)}>
             <View style={{ flexDirection: 'row', gap: 15, alignItems: 'center' }}>
               <LiveWaterSphere level={50} />
               <View style={{ flex: 1 }}>

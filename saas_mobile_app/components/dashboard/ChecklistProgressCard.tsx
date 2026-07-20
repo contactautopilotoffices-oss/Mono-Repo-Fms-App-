@@ -30,6 +30,8 @@ interface ChecklistProgressCardProps {
   // Legacy props for backward compatibility
   completed?: number;
   total?: number;
+  style?: any;
+  updatedAt?: number;
 }
 
 const ProgressBar = ({ label, completed, total, color, emptyColor = 'rgba(255,255,255,0.08)' }: { label: string, completed: number, total: number, color: string, emptyColor?: string }) => {
@@ -59,6 +61,8 @@ export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
   onPress,
   completed = 0,
   total = 0,
+  style,
+  updatedAt,
 }) => {
   const [expanded, setExpanded] = useState(false);
 
@@ -74,7 +78,7 @@ export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
   const nightItems = items.filter(i => i.shift === 'night');
 
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(420)} style={styles.wrapper}>
+    <Animated.View entering={FadeInUp.delay(delay).duration(420)} style={[styles.wrapper, style]}>
       <TouchableOpacity onPress={onPress} onLongPress={toggleExpand} activeOpacity={0.92} style={styles.card}>
         <SafeBlurView intensity={20} tint="dark" style={StyleSheet.absoluteFillObject} />
 
@@ -133,6 +137,11 @@ export const ChecklistProgressCard: React.FC<ChecklistProgressCardProps> = ({
             )}
           </View>
         )}
+        {updatedAt ? (
+          <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: 8, textAlign: 'right', fontWeight: '500' }}>
+            Updated {new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        ) : null}
       </TouchableOpacity>
     </Animated.View>
   );

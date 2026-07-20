@@ -7,16 +7,16 @@
     "androidStatusBar": {
       "translucent": true,
       "barStyle": "light-content",
-      "backgroundColor": "#FFFFFF"
+      "backgroundColor": "#000000"
     },
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/autopilot-icon-black.png",
     "scheme": "autopilot",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/autopilot-logo-new.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
@@ -24,8 +24,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/autopilot-logo-adaptive.png",
-        "backgroundColor": "#0B1527"
+        "foregroundImage": "./assets/images/autopilot-icon-black.png",
+        "backgroundColor": "#000000"
       },
       "package": "com.autopilot.app",
       "googleServicesFile": "./google-services.json",
@@ -53,7 +53,7 @@
         {
           "image": "./assets/images/autopilot-logo-new.png",
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#000000"
         }
       ],
       [

@@ -192,18 +192,17 @@ class QueryTicketsTool(Tool):
                 resp = client.get(url, headers=_supabase_headers(), params=params)
 
             if not resp.is_success:
-                self.logger.warning(
-                    f"[QUERY_TICKETS] Supabase error {resp.status_code}: {resp.text[:200]} — "
-                    f"falling back to simulation mode"
+                self.logger.error(
+                    f"[QUERY_TICKETS] Supabase error {resp.status_code}: {resp.text[:200]}"
                 )
-                # Fall through to simulation mode instead of failing
-                return self._simulate_query(
-                    property_id=property_id,
-                    status=status,
-                    priority=priority,
-                    limit=limit,
-                    context=context,
+                # Fail loudly instead of silently substituting fabricated mock
+                # tickets — a real Supabase error (auth, network, bad query) must
+                # never be masked by data that looks real but isn't.
+                return ToolResult(
                     call_id=call_id,
+                    tool_name=self.name,
+                    success=False,
+                    error=f"QUERY_ERROR: Supabase returned {resp.status_code}: {resp.text[:200]}",
                 )
 
             tickets = resp.json()

@@ -22,7 +22,9 @@ export async function GET(request: NextRequest) {
         .select("*, items:sop_checklist_items(*), completions:sop_completions(*, user:users(id, full_name), items:sop_completion_items(*, checked_by_user:users(full_name)))")
         .eq("property_id", propertyId)
         .eq("is_active", true)
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .order("created_at", { foreignTable: "sop_completions", ascending: false })
+        .limit(5, { foreignTable: "sop_completions" }),
       admin
         .from("property_memberships")
         .select("user_id, role, users:users(id, full_name)")
