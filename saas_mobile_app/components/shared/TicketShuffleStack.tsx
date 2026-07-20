@@ -3,9 +3,9 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  Dimensions,
   Platform,
   LayoutChangeEvent,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, { 
   useSharedValue, 
@@ -26,10 +26,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import TicketCard from './TicketCard';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 // ─── Layout Constants ──────────────────────────────────────
-const CARD_WIDTH    = SCREEN_WIDTH - 32;
 const BORDER_WIDTH  = 2;
 const BORDER_RADIUS = 20;
 const MAX_VISIBLE   = 3;     // Max back cards shown as peeks
@@ -71,6 +68,8 @@ interface TicketShuffleStackProps {
 
 // ─── Stack Container ───────────────────────────────────────
 export function TicketShuffleStack({ tickets, user, propertyId, onEdit, tick }: TicketShuffleStackProps) {
+  const { width } = useWindowDimensions();
+  const CARD_WIDTH = width - 32;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tallestCardHeight, setTallestCardHeight] = useState(200);
   const translateX = useSharedValue(0);
@@ -99,7 +98,7 @@ export function TicketShuffleStack({ tickets, user, propertyId, onEdit, tick }: 
   if (tickets.length === 0) return null;
 
   return (
-    <View style={[styles.stackContainer, { height: tallestCardHeight + (MAX_VISIBLE * PEEK_HEIGHT) + 30 }]}>
+    <View style={[styles.stackContainer, { width: CARD_WIDTH, height: tallestCardHeight + (MAX_VISIBLE * PEEK_HEIGHT) + 30 }]}>
       {displayTickets.map((ticket, i) => (
         <AnimatedTicketCard
           key={ticket.id}
@@ -126,6 +125,8 @@ function AnimatedTicketCard({
   onSwipe: () => void; propertyId: string; onEdit: (t: Ticket) => void;
   onHeightMeasured: (h: number) => void; tick?: number;
 }) {
+  const { width: SCREEN_WIDTH } = useWindowDimensions();
+  const CARD_WIDTH = SCREEN_WIDTH - 32;
   const router = useRouter();
   const { isDark } = useTheme();
   const isTop = index === 0;
@@ -210,7 +211,7 @@ function AnimatedTicketCard({
     <GestureDetector gesture={pan}>
       <Animated.View style={[
         styles.animatedWrapper,
-        { top: baseTop },
+        { top: baseTop, width: CARD_WIDTH },
         animatedStyle,
         {
           shadowColor: isTop ? (isDark ? '#6366F1' : '#64748B') : 'transparent',
@@ -222,7 +223,6 @@ function AnimatedTicketCard({
         Platform.OS === 'web' && { touchAction: 'none' } as any,
       ]}>
         <View style={styles.borderContainer}>
-          {/* Rotating aurora border */}
           {cardHeight > 0 && (
             <RotatingBorder
               width={CARD_WIDTH}
@@ -233,19 +233,17 @@ function AnimatedTicketCard({
             />
           )}
 
-          {/* Glass card content */}
           <View style={[
             styles.glassContent,
             { 
               backgroundColor: isDark ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,1)',
-              height: cardHeight > 0 ? cardHeight : undefined // Let it be auto during first measure
+              height: cardHeight > 0 ? cardHeight : undefined
             },
           ]}>
             {Platform.OS === 'ios' && (
               <SafeBlurView intensity={isTop ? 60 : 80} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
             )}
             
-            {/* Top shimmer highlight */}
             <View pointerEvents="none" style={styles.shimmerWrapper}>
               <LinearGradient
                 colors={[isDark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,1)', 'rgba(255,255,255,0)']}
@@ -253,7 +251,6 @@ function AnimatedTicketCard({
               />
             </View>
 
-            {/* Inner Content Wrapper - We measure this! */}
             <View onLayout={onLayout} style={{ width: '100%' }}>
               <TicketCard
                 id={ticket.id}
@@ -295,7 +292,6 @@ function AnimatedTicketCard({
 
 const styles = StyleSheet.create({
   stackContainer: {
-    width: CARD_WIDTH,
     alignSelf: 'center',
     marginTop: 12,
     marginBottom: 20,
@@ -304,7 +300,6 @@ const styles = StyleSheet.create({
   animatedWrapper: {
     position: 'absolute',
     left: 0,
-    width: CARD_WIDTH,
     borderRadius: BORDER_RADIUS,
     shadowOffset: { width: 0, height: 8 },
   },

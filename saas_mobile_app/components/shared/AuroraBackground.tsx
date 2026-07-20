@@ -6,10 +6,8 @@
  */
 
 import React from 'react';
-import { StyleSheet, Dimensions, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-
-const { width: W, height: H } = Dimensions.get('window');
 
 export function AuroraBackground({ colors }: { colors?: any }) {
   return (

@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-const { width: SCREEN_W } = Dimensions.get('window');
 
 export interface MenuItem {
   label: string;

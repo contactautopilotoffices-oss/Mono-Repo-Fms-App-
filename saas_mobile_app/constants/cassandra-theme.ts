@@ -5,9 +5,7 @@
  * glassmorphism cards, generous whitespace.
  */
 
-import { Dimensions } from 'react-native';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 export const Colors = {
   // Backgrounds
@@ -108,8 +106,6 @@ export const Shadows = {
 };
 
 export const Layout = {
-  screenW: SCREEN_W,
-  screenH: SCREEN_H,
   safeTop: 60,
   safeBottom: 34,
   modalHeaderH: 80,

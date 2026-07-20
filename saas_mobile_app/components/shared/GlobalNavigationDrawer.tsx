@@ -9,7 +9,6 @@ import {
   ScrollView,
   Image,
   Modal,
-  Dimensions,
   Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +27,6 @@ import Animated, {
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 
 const DRAWER_WIDTH = 288;
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface GlobalNavigationDrawerProps {
   visible: boolean;

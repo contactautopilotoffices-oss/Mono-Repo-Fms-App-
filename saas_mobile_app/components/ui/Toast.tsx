@@ -114,17 +114,18 @@ export const Toast: React.FC<ToastProps> = ({
   );
 };
 
-const { width } = Dimensions.get('window');
-
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     bottom: 140,
-    left: (width - 340) / 2,
-    width: 340,
+    left: 16,
+    right: 16,
+    alignItems: 'center',
     zIndex: 9999,
   },
   content: {
+    width: '100%',
+    maxWidth: 340,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
