@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import Skeleton from './Skeleton';
 
 interface SkeletonLoaderProps {
-  type?: 'list' | 'grid' | 'detail' | 'dashboard';
+  type?: 'list' | 'grid' | 'detail' | 'dashboard' | 'notification';
   count?: number;
 }
 
@@ -43,6 +43,21 @@ export default function SkeletonLoader({ type = 'list', count = 5 }: SkeletonLoa
             <Skeleton height={16} width="90%" style={{ marginTop: 24 }} />
             <Skeleton height={16} width="85%" style={{ marginTop: 8 }} />
             <Skeleton height={16} width="90%" style={{ marginTop: 8 }} />
+          </View>
+        );
+      case 'notification':
+        return (
+          <View key={index} style={styles.notificationItem}>
+            <Skeleton width={44} height={44} borderRadius={12} />
+            <View style={styles.notificationContent}>
+              <View style={styles.notificationHeader}>
+                <Skeleton height={16} width="60%" />
+                <Skeleton width={8} height={8} borderRadius={4} style={{ marginLeft: 8 }} />
+              </View>
+              <Skeleton height={14} width="90%" style={{ marginTop: 6 }} />
+              <Skeleton height={14} width="70%" style={{ marginTop: 4 }} />
+              <Skeleton height={12} width="20%" style={{ marginTop: 8 }} />
+            </View>
           </View>
         );
       case 'list':
@@ -90,6 +105,20 @@ const styles = StyleSheet.create({
   listContent: {
     flex: 1,
     marginLeft: 16,
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 14,
+  },
+  notificationContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  notificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   gridItem: {
     width: '47%',

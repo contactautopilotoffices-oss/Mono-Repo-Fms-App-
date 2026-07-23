@@ -125,8 +125,8 @@ function BackgroundSlideshow() {
         source={BACKGROUND_IMAGES[2]} 
         style={[{ width: '100%', height: '100%', position: 'absolute', resizeMode: 'cover' }, style2]} 
       />
-      {/* Dark gradient overlay to make text readable */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)' }]} />
+      {/* Light overlay to preserve background image clarity */}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.1)' }]} />
     </View>
   );
 }

@@ -114,6 +114,23 @@ export async function prefetchImportantOnLogin(propertyId: string): Promise<void
   if (!propertyId || propertyId === 'all') return;
 
   await Promise.allSettled([
+    // Primary Tickets List
+    queryClient.prefetchQuery({
+      queryKey: [...queryKeys.property.tickets(propertyId), 'all', 'all', 'false', '50'],
+      queryFn: async () => {
+        const res = await serverApi.query({
+          table: 'tickets',
+          action: 'select',
+          select: `*, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id)), material_requests:procurement_material_requests(id, status)`,
+          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
+          orders: [{ column: 'created_at', ascending: false }],
+          limit: 50,
+        });
+        const items = (res.data ?? []) as any[];
+        return { tickets: items, hasMore: false, statusCounts: { all: items.length } };
+      },
+      staleTime: 5 * 60 * 1000,
+    }),
     // Checklist
     queryClient.prefetchQuery({
       queryKey: queryKeys.property.checklist(propertyId),

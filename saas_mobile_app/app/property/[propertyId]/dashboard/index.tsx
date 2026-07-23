@@ -2,13 +2,14 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useGlobalSearchParams, Redirect, usePathname } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
+import { LinearGradient } from 'expo-linear-gradient';
+import WeatherBackground from '@/components/dashboard/WeatherBackground';
 
 // ─── Role-based Dashboard imports ─────────────────────────────────────────────
 import LovableMstDashboard from '@/components/dashboard/LovableMstDashboard';
-
 import LovablePropertyAdminDashboard from '@/components/dashboard/LovablePropertyAdminDashboard';
 import SecurityDashboard from '@/components/dashboard/SecurityDashboard';
 import LovableSoftServiceManagerDashboard from '@/components/dashboard/LovableSoftServiceManagerDashboard';
@@ -33,11 +34,6 @@ export default function DashboardScreen() {
   const { propertyId } = useGlobalSearchParams<{ propertyId: string }>();
   const pathname = usePathname();
   
-  // TEMPORARY LOGGING
-  React.useEffect(() => {
-    console.log(`[Phase 1 Debug] Dashboard Index Rendered | Dashboard PropertyId: ${propertyId} | Route URL: ${pathname}`);
-  }, [propertyId, pathname]);
-
   const { membership, isMembershipLoading, user } = useAuth();
 
   // Determine the user's effective role for this property
@@ -75,13 +71,18 @@ export default function DashboardScreen() {
 
     if (propRole === 'procurement' || orgRole === 'procurement') return 'procurement';
 
-    // 3. Default to staff
+    // 4. Default to staff
     return propRole || 'staff';
   }, [membership, propertyId]);
 
   if (isMembershipLoading) {
     return (
-      <View style={[styles.loader, { backgroundColor: '#121212' }]}>
+      <View style={{ flex: 1 }}>
+        <LinearGradient
+          colors={['#1c2135', '#0f121e', '#07090e']}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <WeatherBackground condition={undefined} />
         <SkeletonLoader />
       </View>
     );
@@ -140,12 +141,3 @@ export default function DashboardScreen() {
   // Any other role (including staff, technician, unhandled roles) defaults to the staff dashboard
   return <LovableStaffDashboard propertyId={pid} />;
 }
-
-const styles = StyleSheet.create({
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#0f172a',
-  },
-});

@@ -32,6 +32,7 @@ import { RotatingBorder } from '@/components/shared/RotatingBorder';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
+import { queryClient } from '@/utils/queryClient';
 
 
 
@@ -441,6 +442,59 @@ const displayedTickets = useMemo(() => {
 
     return result;
   }, [data, isNeedsAttentionMode, searchQuery, materialFilter, ticketTypeFilter, sortBy]);
+
+  // Smart Cache Seeding & Viewport Prefetching
+  useEffect(() => {
+    if (displayedTickets && displayedTickets.length > 0) {
+      // 1. Seed detail cache for all loaded tickets (0 extra network calls)
+      displayedTickets.forEach((t: Ticket) => {
+        if (t?.id) {
+          queryClient.setQueryData(queryKeys.property.ticketDetail(t.id), (old: any) => {
+            if (old?.ticket) {
+              return { ...old, ticket: { ...old.ticket, ...t } };
+            }
+            return {
+              ticket: t,
+              currentUserRole: null,
+              comments: [],
+              activities: [],
+              escalationLogs: [],
+              validationEnabled: false,
+              userNameMap: {},
+              availableMSTs: [],
+              procurementRequests: [],
+              procurementLogs: [],
+              priceVisibilitySettings: []
+            };
+          });
+        }
+      });
+
+      // 2. Prefetch full detail for top 5 visible tickets in background
+      displayedTickets.slice(0, 5).forEach((t: Ticket) => {
+        if (t?.id && propertyId) {
+          queryClient.prefetchQuery({
+            queryKey: queryKeys.property.ticketDetail(t.id),
+            queryFn: async () => {
+              const res = await serverApi.query<Ticket>({
+                table: 'tickets',
+                action: 'select',
+                select: `*, assigned_to, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id))`,
+                filters: [
+                  { op: 'eq', column: 'id', value: t.id },
+                  { op: 'eq', column: 'property_id', value: propertyId }
+                ],
+                single: true
+              });
+              return res.data ?? t;
+            },
+            staleTime: 5 * 60 * 1000,
+          });
+        }
+      });
+    }
+  }, [displayedTickets, propertyId]);
+
 const hasMore = data?.hasMore ?? false;
 const statusCounts = data?.statusCounts ?? defaultCounts;
 
@@ -720,8 +774,8 @@ const onRefresh = () => {
       )}
 
         {/* Ticket List */}
-        {isLoading ? (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+        {(!isValidProperty || isLoading || isFetching || !data) && displayedTickets.length === 0 ? (
+          <ScrollView style={{ flex: 1, width: '100%' }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
             {[1, 2, 3, 4, 5].map((i) => (
               <TicketListItemSkeleton key={i} />
             ))}
@@ -789,7 +843,7 @@ const onRefresh = () => {
           onClose={() => setShowCreateModal(false)}
           propertyId={propertyId ?? ''}
           organizationId={orgId}
-          role={(membership as any)?.role === 'org_super_admin' ? 'super_admin' : ((membership as any)?.role === 'property_admin' ? 'admin' : 'tenant')}
+          role={(membership as any)?.role === 'org_super_admin' ? 'super_admin' : ((membership as any)?.role === 'property_admin' ? 'admin' : ((membership as any)?.role === 'tenant' ? 'tenant' : 'staff'))}
           onSuccess={() => refetch()}
         />
 

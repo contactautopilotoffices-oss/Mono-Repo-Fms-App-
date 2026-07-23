@@ -234,7 +234,8 @@ function computeDueStatus(
     endTime || null,
     lastCompletedAt || null,
     completions.find((c) => c.status === "in_progress")?.created_at,
-    refDate
+    refDate,
+    completions
   );
   return result as { due: boolean; label: string; status: DueStatus };
 }
@@ -344,7 +345,7 @@ function getTemplateGaps(
           const exists = completions.some(
             (c) =>
               c.completion_date === slot.date &&
-              (slot.time === null || c.slot_time === slot.time) &&
+              (slot.time === null || (c.slot_time && c.slot_time.slice(0, 5) === slot.time.slice(0, 5))) &&
               c.status === "completed",
           );
 

@@ -184,7 +184,11 @@ export default function TicketDetailScreen() {
   const insets = useSafeAreaInsets();
 
 
-  const [ticket, setTicket] = useState<Ticket | null>(null);
+  // Check React Query cache for pre-seeded ticket data from tickets list
+  const cachedTicketRaw = id ? queryClient.getQueryData<any>(queryKeys.property.ticketDetail(id)) : null;
+  const initialTicket = cachedTicketRaw?.ticket ? cachedTicketRaw.ticket : (cachedTicketRaw?.id ? cachedTicketRaw : null);
+
+  const [ticket, setTicket] = useState<Ticket | null>(() => initialTicket ?? null);
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -192,7 +196,7 @@ export default function TicketDetailScreen() {
   const [procurementRequests, setProcurementRequests] = useState<any[]>([]);
   const [procurementLogs, setProcurementLogs] = useState<ProcurementActivityLog[]>([]);
   const [priceVisibilitySettings, setPriceVisibilitySettings] = useState<ProcurementPriceVisibilitySetting[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialTicket);
   const [newComment, setNewComment] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [showMediaModal, setShowMediaModal] = useState(false);
@@ -254,10 +258,12 @@ export default function TicketDetailScreen() {
       const ticketError = ticketRes.error;
 
       if (ticketError || !ticketData) {
-        console.error('[fetchTicket] Failed to fetch ticket:', ticketError);
-        setTicket(null);
+        console.error('[fetchTicket] Server fetch returned error/empty:', ticketError);
+        if (!initialTicket && !ticket) {
+          setTicket(null);
+        }
         setLoading(false);
-        return;
+        return null;
       }
 
       // 1. Fetch current user's role for this property early for security check
@@ -319,8 +325,8 @@ export default function TicketDetailScreen() {
       const commentError = commentsRes.error;
       if (commentError) console.error('[fetchTicket] Comments error:', commentError);
       setComments(commentData);
-      if (activeTab !== 'chat' && commentData.length > 0) {
-        useUnreadStore.getState().setTicketChat(commentData.length);
+      if (activeTab !== 'chat' && (commentData?.length ?? 0) > 0) {
+        useUnreadStore.getState().setTicketChat(commentData?.length ?? 0);
       }
 
       // Fetch activity
@@ -374,7 +380,7 @@ export default function TicketDetailScreen() {
       const idsToResolve = Object.keys(newMap).filter(k =>
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)
       );
-      if (idsToResolve.length > 0) {
+      if ((idsToResolve?.length ?? 0) > 0) {
         const userRes = await serverApi.query<any[]>({
           table: 'users',
           action: 'select',
@@ -464,8 +470,8 @@ export default function TicketDetailScreen() {
       // Fetch procurement activity logs for this ticket
       let procurementLogsData: ProcurementActivityLog[] = [];
       try {
-        const matReqIds = procurementRequestsData.map((r: any) => r.id);
-        if (matReqIds.length > 0) {
+        const matReqIds = (procurementRequestsData || []).map((r: any) => r.id);
+        if ((matReqIds?.length ?? 0) > 0) {
           const logRes = await serverApi.query<ProcurementActivityLog[]>({
             table: 'procurement_activity_log',
             action: 'select',
@@ -536,18 +542,22 @@ export default function TicketDetailScreen() {
   );
 
   useEffect(() => {
-    if (data) {
+    if (data?.ticket) {
       setTicket(data.ticket);
-      setCurrentUserRole(data.currentUserRole);
-      setComments(data.comments);
-      setActivities(data.activities);
-      setEscalationLogs(data.escalationLogs);
+      setCurrentUserRole(data.currentUserRole ?? null);
+      setComments(data.comments ?? []);
+      setActivities(data.activities ?? []);
+      setEscalationLogs(data.escalationLogs ?? []);
       setProcurementRequests(data.procurementRequests || []);
       setProcurementLogs(data.procurementLogs || []);
       setPriceVisibilitySettings(data.priceVisibilitySettings || []);
       setValidationEnabled(data.validationEnabled);
-      setUserNameMap(data.userNameMap);
-      setAvailableMSTs(data.availableMSTs);
+      setUserNameMap(data.userNameMap ?? {});
+      setAvailableMSTs(data.availableMSTs ?? []);
+      setLoading(false);
+    } else if (data && (data as any).id) {
+      // Fallback for legacy cache entry (raw ticket object)
+      setTicket(data as Ticket);
       setLoading(false);
     } else if (!isLoading) {
       setLoading(false);
@@ -1029,7 +1039,7 @@ export default function TicketDetailScreen() {
   const primary = colors.primary;
   const textTertiary = colors.textTertiary;
 
-  if (loading) {
+  if (loading || isLoading || (!ticket && (isLoading || isFetching))) {
     return <TicketDetailSkeleton />;
   }
 
@@ -1052,7 +1062,7 @@ export default function TicketDetailScreen() {
   }
 
   const slaDeadline = ticket.sla_deadline ? new Date(ticket.sla_deadline) : null;
-  const isResolved = ['resolved', 'closed'].includes(ticket.status);
+  const isResolved = ['resolved', 'closed'].includes(ticket.status ?? '');
   const referenceTime = isResolved && ticket.resolved_at ? new Date(ticket.resolved_at) : new Date();
   const isSLABreached = Boolean(ticket.sla_breached) ||
     (slaDeadline !== null && slaDeadline < referenceTime);
@@ -1060,14 +1070,14 @@ export default function TicketDetailScreen() {
     ? referenceTime.getTime() - slaDeadline.getTime()
     : 0;
 
-  const availableStatuses = STATUS_TRANSITIONS[ticket.status] ?? [];
+  const availableStatuses = ticket?.status && STATUS_TRANSITIONS[ticket.status] ? STATUS_TRANSITIONS[ticket.status] : [];
 
   // Find the user who triggered a step by matching the closest activity log entry
   const findStepUser = (
     stepTime: string | null | undefined,
     stepLabel: string
   ): string | undefined => {
-    if (!stepTime) return undefined;
+    if (!stepTime || !ticket) return undefined;
     // Created: use ticket creator
     if (stepLabel === 'Created') {
       return ticket.creator?.full_name;
@@ -1080,7 +1090,8 @@ export default function TicketDetailScreen() {
     const stepMs = new Date(stepTime).getTime();
     let closest: Activity | null = null;
     let closestDiff = Infinity;
-    for (const act of activities) {
+    for (const act of (activities || [])) {
+      if (!act?.created_at) continue;
       const actMs = new Date(act.created_at).getTime();
       if (actMs <= stepMs) {
         const diff = stepMs - actMs;
@@ -1111,10 +1122,12 @@ export default function TicketDetailScreen() {
   }));
 
   // Reassignment history: filter activity log for assignment-related events
-  const reassignActivities = activities.filter(a =>
-    a.action?.includes('assigned') ||
-    a.action?.includes('reassign') ||
-    a.action?.includes('assigned_to')
+  const reassignActivities = (activities || []).filter(a =>
+    a?.action && (
+      a.action.includes('assigned') ||
+      a.action.includes('reassign') ||
+      a.action.includes('assigned_to')
+    )
   );
 
   return (
@@ -1161,7 +1174,7 @@ export default function TicketDetailScreen() {
             <TouchableOpacity
               style={styles.headerActionBtn}
               onPress={() => {
-                if (procurementRequests.length > 0) {
+                if ((procurementRequests?.length ?? 0) > 0) {
                   setShowMaterialRequestsModal(true);
                 } else {
                   setShowMaterialModal(true);
@@ -1170,9 +1183,9 @@ export default function TicketDetailScreen() {
               activeOpacity={0.7}
             >
               <Ionicons name="cart-outline" size={22} color={textSecondary} />
-              {procurementRequests.length > 0 && (
+              {(procurementRequests?.length ?? 0) > 0 && (
                 <View style={styles.cartBadge}>
-                  <Text style={styles.cartBadgeText}>{procurementRequests.length}</Text>
+                  <Text style={styles.cartBadgeText}>{procurementRequests?.length ?? 0}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -1453,7 +1466,7 @@ export default function TicketDetailScreen() {
                   Sequence of Events
                 </Text>
                 <Text style={[styles.seqCount, { color: textSecondary }]}>
-                  {1 + activities.length + escalationLogs.length + procurementLogs.length} events
+                  {1 + (activities?.length ?? 0) + (escalationLogs?.length ?? 0) + (procurementLogs?.length ?? 0)} events
                 </Text>
               </View>
 
@@ -1553,7 +1566,7 @@ export default function TicketDetailScreen() {
                     }
                   }
 
-                  const isLast = idx === activities.length - 1 && escalationLogs.length === 0 && procurementLogs.length === 0;
+                  const isLast = idx === (activities?.length ?? 0) - 1 && (escalationLogs?.length ?? 0) === 0 && (procurementLogs?.length ?? 0) === 0;
 
                   return (
                     <View key={act.id} style={styles.seqEvent}>
@@ -1649,10 +1662,10 @@ export default function TicketDetailScreen() {
                 })}
 
                 {/* 3. Escalation Events */}
-                {escalationLogs.map((log, idx) => {
+                {(escalationLogs ?? []).map((log, idx) => {
                   const reasonLabel = log.reason === 'timeout' ? 'SLA Timeout'
                     : log.reason === 'manual' ? 'Manual Escalation' : log.reason || 'Escalation';
-                  const isLast = idx === escalationLogs.length - 1 && procurementLogs.length === 0;
+                  const isLast = idx === (escalationLogs?.length ?? 0) - 1 && (procurementLogs?.length ?? 0) === 0;
                   return (
                     <View key={log.id} style={styles.seqEvent}>
                       <View style={styles.seqLeft}>
@@ -1722,8 +1735,8 @@ export default function TicketDetailScreen() {
                 })}
 
                 {/* 4. Procurement Activity Events */}
-                {procurementLogs.map((log, idx) => {
-                  const isLast = idx === procurementLogs.length - 1;
+                {(procurementLogs ?? []).map((log, idx) => {
+                  const isLast = idx === (procurementLogs?.length ?? 0) - 1;
                   const actionLabel = log.action?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Procurement Update';
                   const statusLabel = log.status
                     ? log.status === 'pending_quotation'
@@ -1836,12 +1849,12 @@ export default function TicketDetailScreen() {
           {activeTab === 'details' && (
             <>
               {/* Material Requests Section */}
-              {procurementRequests && procurementRequests.length > 0 && (
+              {(procurementRequests?.length ?? 0) > 0 && (
                 <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <Text style={[styles.sectionTitle, { color: textPrimary, marginBottom: 0 }]}>Material Requests</Text>
                     <View style={{ backgroundColor: 'rgba(59,130,246,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
-                      <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '700' }}>{procurementRequests.length} Request(s)</Text>
+                      <Text style={{ color: '#3B82F6', fontSize: 12, fontWeight: '700' }}>{procurementRequests?.length ?? 0} Request(s)</Text>
                     </View>
                   </View>
                   
@@ -2112,7 +2125,7 @@ export default function TicketDetailScreen() {
           {activeTab === 'chat' && (
             <View style={[styles.whatsappBackground, { backgroundColor: isDark ? '#0B141A' : '#EFEAE2' }]}>
               {/* Chat Feed */}
-              {(comments.length > 0) && (
+              {((comments?.length ?? 0) > 0) && (
               <View style={styles.whatsappChatContainer}>
                 {[
                   ...comments.map(c => ({ ...c, type: 'comment' as const }))
@@ -2265,7 +2278,7 @@ export default function TicketDetailScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-              {procurementRequests.length === 0 ? (
+              {(procurementRequests?.length ?? 0) === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Ionicons name="cart-outline" size={48} color={textTertiary} />
                   <Text style={{ color: textSecondary, marginTop: 12 }}>No material requests yet</Text>
@@ -2378,12 +2391,12 @@ export default function TicketDetailScreen() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 8 }}
             >
-              {availableMSTs.length === 0 ? (
+              {(availableMSTs?.length ?? 0) === 0 ? (
                 <Text style={[styles.noMSTText, { color: textSecondary }]}>
                   No technicians available
                 </Text>
               ) : (
-                availableMSTs.map(mst => (
+                (availableMSTs ?? []).map(mst => (
                   <TouchableOpacity
                     key={mst.id}
                     style={[styles.pickerItem, { borderColor }]}
@@ -2689,7 +2702,7 @@ function MaterialRequestProgress({ status, isDark }: { status?: string; isDark: 
         })}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', position: 'absolute', top: 4, left: '10%', right: '10%', height: 2, backgroundColor: lineColor, zIndex: -1 }}>
-        <View style={{ height: 2, backgroundColor: statusIndex === -1 ? '#EF4444' : '#3B82F6', width: statusIndex === -1 ? '0%' : `${(statusIndex / (steps.length - 1)) * 100}%` }} />
+        <View style={{ height: 2, backgroundColor: statusIndex === -1 ? '#EF4444' : '#3B82F6', width: statusIndex === -1 ? '0%' : `${(statusIndex / Math.max(1, (steps?.length ?? 1) - 1)) * 100}%` }} />
       </View>
     </View>
   );

@@ -66,7 +66,7 @@ export default function DashboardSidebar(props: DrawerContentComponentProps) {
       items: [
         { label: 'Rooms', route: `/(dashboard)/${orgId}/rooms`, icon: 'calendar-outline' },
         { label: 'Checklists', route: `/(dashboard)/${orgId}/sop/runner`, icon: 'checkmark-outline' },
-        { label: 'Diesel', route: `/(dashboard)/${orgId}/diesel`, icon: 'flame-outline' },
+        { label: 'Diesel Logger', route: `/(dashboard)/${orgId}/diesel`, icon: 'flame-outline' },
         { label: 'Electricity', route: `/(dashboard)/${orgId}/electricity`, icon: 'flash-outline' },
         { label: 'Utilities', route: `/(dashboard)/${orgId}/utilities/meters`, icon: 'speedometer-outline' },
       ],

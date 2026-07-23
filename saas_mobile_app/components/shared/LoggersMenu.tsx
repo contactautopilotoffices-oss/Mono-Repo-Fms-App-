@@ -26,7 +26,7 @@ export function LoggersMenu({ visible, onClose, propertyId }: LoggersMenuProps) 
       route: `/property/${propertyId}/electricity`,
     },
     {
-      title: 'Diesel',
+      title: 'Diesel Logger',
       icon: 'water' as const,
       bgColor: 'rgba(59,130,246,0.1)',
       iconColor: '#3B82F6',

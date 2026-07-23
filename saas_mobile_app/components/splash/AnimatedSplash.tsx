@@ -19,13 +19,14 @@ import Animated, {
   Easing,
   runOnJS,
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStore } from '@/stores/dashboardStore';
 import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
 
-const MIN_DISPLAY_MS = 600; // Total minimum time before exiting
-const HOLD_DURATION = 150;  // Initial hold time to ensure perfect handoff
-const EXIT_DURATION = 350;  // Snappy fade-out duration
+const MIN_DISPLAY_MS = 300; // Fast minimum time before exiting
+const HOLD_DURATION = 80;   // Short hold time for smooth handoff
+const EXIT_DURATION = 250;  // Snappy fade-out duration
 const SCALE_INITIAL = 1.0;
 const GROW_SCALE = 1.12;    // Scale to grow to during the subtle phase
 const EXIT_SCALE = 1.25;    // Scale out when finishing
@@ -145,15 +146,16 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     return () => clearTimeout(timer);
   }, [startupComplete, isAuthLoading, isMembershipLoading, phase, runExitAnimation]);
 
-  // Safety fallback
+  // Safety fallback — ensure splash exits cleanly after max 2.5s even on slow network
   useEffect(() => {
     const maxTimer = setTimeout(() => {
       if (!hasCompletedRef.current) {
         hasCompletedRef.current = true;
-        opacity.value = 0;
-        onAnimationComplete();
+        opacity.value = withTiming(0, { duration: 300 }, () => {
+          runOnJS(onAnimationComplete)();
+        });
       }
-    }, 8000);
+    }, 2500);
     return () => clearTimeout(maxTimer);
   }, [onAnimationComplete, opacity]);
 
@@ -167,6 +169,12 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
 
   return (
     <Animated.View style={[styles.container, containerStyle]} pointerEvents="none" onLayout={onLayout}>
+      <View style={StyleSheet.absoluteFillObject}>
+        <LinearGradient
+          colors={['#1c2135', '#0f121e', '#07090e']}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </View>
       <Animated.View style={[styles.logoContainer, logoStyle]}>
         <Image
           source={require('../../assets/images/autopilot-logo-new.png')}
@@ -181,20 +189,21 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#07090e',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
   },
   logoContainer: {
-    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
+    width: 240,
+    height: 80,
   },
   logo: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
+    width: 220,
+    height: 70,
+    tintColor: '#FFFFFF',
   },
 });
 

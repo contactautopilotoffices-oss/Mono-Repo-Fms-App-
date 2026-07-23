@@ -453,20 +453,19 @@ export default function StockScreen() {
         >
           <View style={styles.headerTop}>
             <TouchableOpacity
-              style={styles.headerIconBtn}
+              style={styles.headerBackBtn}
               onPress={() => router.back()}
               activeOpacity={0.7}
             >
               <ArrowLeft size={20} color="#FFFFFF" />
             </TouchableOpacity>
             <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.headerTitle} adjustsFontSizeToFit numberOfLines={1}>Stock</Text>
-              <Text style={[styles.headerTitle, { color: "#34D399", marginTop: -4 }]} adjustsFontSizeToFit numberOfLines={1}>Management</Text>
-              <Text style={styles.headerSubtitle} adjustsFontSizeToFit numberOfLines={1}>Inventory Management</Text>
+              <Text style={styles.headerTitle} adjustsFontSizeToFit numberOfLines={1}>Stock Management</Text>
+              <Text style={styles.headerSubtitle} adjustsFontSizeToFit numberOfLines={1}>Inventory Overview</Text>
             </View>
-            <View style={{ flexDirection: "row", gap: 6 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
               <TouchableOpacity
-                style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.35)", borderColor: "rgba(16,185,129,0.45)" }]}
+                style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.25)" }]}
                 onPress={() => setShowScannerModal(true)}
                 activeOpacity={0.7}
               >
@@ -490,14 +489,14 @@ export default function StockScreen() {
                 style={[
                   styles.headerIconBtn,
                   {
-                    backgroundColor: "rgba(59,130,246,0.35)",
-                    borderColor: "rgba(59,130,246,0.45)",
+                    backgroundColor: "#3B82F6",
+                    borderColor: "#3B82F6",
                   },
                 ]}
                 onPress={() => setShowAddModal(true)}
                 activeOpacity={0.7}
               >
-                <Plus size={18} color="#FFFFFF" />
+                <Plus size={20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1417,13 +1416,21 @@ const styles = StyleSheet.create({
     color: TOKENS.text.secondary,
     marginTop: 2,
   },
-  headerIconBtn: {
+  headerBackBtn: {
     width: 36,
     height: 36,
-    borderRadius: TOKENS.radius.btn,
-    backgroundColor: TOKENS.glass.bg,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: TOKENS.glass.border,
+    borderColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
   },

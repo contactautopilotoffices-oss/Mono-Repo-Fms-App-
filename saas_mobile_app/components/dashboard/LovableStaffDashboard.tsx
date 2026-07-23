@@ -73,8 +73,7 @@ import Toast from '@/components/ui/Toast';
 import FloatingMenu from '@/components/ui/FloatingMenu';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
 import { Audio } from 'expo-av';
-
-const { width: SCREEN_W } = Dimensions.get('window');
+import { useWindowDimensions } from 'react-native';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -159,14 +158,22 @@ interface TicketStackProps {
   tickets: Ticket[];
   propertyName?: string;
   onViewTicket?: (t: Ticket) => void;
+  screenWidth: number;
 }
 
-function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: TicketStackProps) {
+function TicketStack({ tickets: initialTickets, propertyName, onViewTicket, screenWidth }: TicketStackProps) {
   const [order, setOrder] = useState(initialTickets);
+  const [tallestCardHeight, setTallestCardHeight] = useState(210);
 
   useEffect(() => {
     setOrder(initialTickets);
   }, [initialTickets]);
+
+  const handleHeight = useCallback((h: number) => {
+    if (h > 0) {
+      setTallestCardHeight(prev => Math.abs(prev - h) > 1 ? Math.max(prev, h) : prev);
+    }
+  }, []);
 
   const sendToBack = useCallback(() => {
     setOrder((prev) => {
@@ -177,7 +184,7 @@ function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: Ti
   }, []);
 
   const visible = order.slice(0, MAX_STACK);
-  const totalHeight = CARD_H + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
+  const totalHeight = tallestCardHeight + PEEK_OFFSET * (Math.min(visible.length, MAX_STACK) - 1) + 4;
 
   return (
     <View style={{ height: totalHeight + 16, marginBottom: 8 }}>
@@ -190,6 +197,8 @@ function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: Ti
           onSwipeComplete={sendToBack}
           propertyName={propertyName}
           onViewTicket={onViewTicket}
+          screenWidth={screenWidth}
+          onHeightMeasured={handleHeight}
         />
       ))}
     </View>
@@ -197,7 +206,7 @@ function TicketStack({ tickets: initialTickets, propertyName, onViewTicket }: Ti
 }
 
 const StackCard = memo(function StackCard({
-  ticket, index, total, onSwipeComplete, propertyName, onViewTicket
+  ticket, index, total, onSwipeComplete, propertyName, onViewTicket, screenWidth, onHeightMeasured
 }: {
   ticket: Ticket;
   index: number;
@@ -205,6 +214,8 @@ const StackCard = memo(function StackCard({
   onSwipeComplete: () => void;
   propertyName?: string;
   onViewTicket?: (t: Ticket) => void;
+  screenWidth: number;
+  onHeightMeasured: (h: number) => void;
 }) {
   const isTop = index === 0;
 
@@ -231,13 +242,13 @@ const StackCard = memo(function StackCard({
       if (!isTop) return;
       translateX.value = e.translationX;
       translateY.value = e.translationY * 0.3;
-      rotate.value = interpolate(e.translationX, [-SCREEN_W, 0, SCREEN_W], [-12, 0, 12], Extrapolate.CLAMP);
+      rotate.value = interpolate(e.translationX, [-screenWidth, 0, screenWidth], [-12, 0, 12], Extrapolate.CLAMP);
     })
     .onEnd((e) => {
       if (!isTop) return;
       const shouldDismiss = Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 600;
       if (shouldDismiss) {
-        const dest = e.translationX > 0 ? SCREEN_W * 1.4 : -SCREEN_W * 1.4;
+        const dest = e.translationX > 0 ? screenWidth * 1.4 : -screenWidth * 1.4;
         translateX.value = withTiming(dest, { duration: 200 }, () => {
           runOnJS(onSwipeComplete)();
         });
@@ -283,7 +294,7 @@ const StackCard = memo(function StackCard({
       pointerEvents={isTop ? 'auto' : 'none'}
     >
       <GestureDetector gesture={pan}>
-        <Animated.View style={[{ flex: 1 }, panStyle]}>
+        <Animated.View style={panStyle} onLayout={(e) => onHeightMeasured(e.nativeEvent.layout.height)}>
           <TicketCard ticket={ticket} propertyName={propertyName} onView={() => onViewTicket?.(ticket)} />
         </Animated.View>
       </GestureDetector>
@@ -579,6 +590,7 @@ async function fetchTicketCountBatch(
 
 export default function LovableStaffDashboard({ propertyId }: Props) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { user, signOut, membership } = useAuth();
   const router = useRouter();
 
@@ -615,7 +627,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
     isCheckedIn: boolean;
     checklistStats?: { completed: number; total: number };
   }>(
-    [...queryKeys.property.mstDashboardLovable(propertyId), scopeFilter, user?.id || ''],
+    queryKeys.property.mstDashboardLovable(propertyId),
     async () => {
       const [propRes, ticketRes, shiftRes, checklistRes] = await Promise.all([
         serverApi.query<{ name: string }[]>({
@@ -628,7 +640,6 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
         serverApi.get<{ tickets: Ticket[]; total: number }>('/api/tickets', {
           propertyId,
           limit: '100',
-          ...(scopeFilter === 'my_tasks' && user?.id ? { userId: user.id } : {}),
         }),
         serverApi.query<{ is_checked_in: boolean }[]>({
           table: 'resolver_stats',
@@ -935,7 +946,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
             <Text style={{ fontSize: 12, color: '#FFFFFF' }}>View All</Text>
           </TouchableOpacity>
         </View>
-        {isLoading || isFetching ? (
+        {!hasValidDashboardData && (isLoading || isFetching) ? (
           <View style={{ alignItems: 'center', paddingVertical: 24 }}>
             <ActivityIndicator color="rgba(255,255,255,0.6)" />
           </View>
@@ -944,6 +955,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
             tickets={shuffledTickets.slice(0, 5)}
             propertyName={property?.name}
             onViewTicket={(t) => router.push({ pathname: '/property/[propertyId]/tickets/[id]', params: { propertyId, id: t.id } } as any)}
+            screenWidth={windowWidth}
           />
         ) : (
           <View style={styles.ticketStackEmpty}>
@@ -1147,7 +1159,7 @@ export default function LovableStaffDashboard({ propertyId }: Props) {
       </ScrollView>
 
       {/* Modals */}
-      <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} />
+      <TicketCreateModal isOpen={showCreate} onClose={() => setShowCreate(false)} propertyId={propertyId} organizationId={orgId} role="staff" />
       <SignOutModal visible={showSignOut} onClose={() => setShowSignOut(false)} onSignOut={signOut} />
       <GlobalNavigationDrawer
         visible={showDrawer}
@@ -1664,11 +1676,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: CARD_H,
   },
   // Card shell — bg handled by GeminiCardBorder.inner (#1B3040)
   tcCard: {
-    flex: 1,
     backgroundColor: 'transparent',
     padding: 14,
     gap: 6,

@@ -106,10 +106,11 @@ export function TicketCreateModal({
       try {
         const res = await fetchUsersList(undefined, pid);
         if (res && res.users) {
+          const allowedRoles = ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager', 'spoc', 'administrator', 'mst', 'staff', 'security', 'org_super_admin'];
           setPropertyUsers(
             res.users
               .map(u => ({ id: u.id, full_name: u.full_name || '', role: u.propertyRole }))
-              .filter(u => u.id && u.full_name)
+              .filter(u => u.id && u.full_name && u.role && allowedRoles.includes(u.role.toLowerCase()))
           );
         }
       } catch (e) {

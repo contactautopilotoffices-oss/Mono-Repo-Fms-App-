@@ -16,6 +16,7 @@ import { apiFetch } from '@/utils/api/mobileApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import SkeletonLoader from '@/components/ui/SkeletonLoader';
 
 interface Props {
   visible: boolean;
@@ -137,7 +138,7 @@ export default function NotificationModal({ visible, onClose, propertyId, role }
             </View>
 
             {isLoading ? (
-              <ActivityIndicator size="large" color="#708F96" style={styles.loader} />
+              <SkeletonLoader type="notification" count={5} />
             ) : (
               <FlatList
                 data={notifications}

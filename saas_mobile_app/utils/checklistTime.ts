@@ -142,6 +142,7 @@ export function isDue(
   lastCompletedAt?: string | null,
   startedAt?: string | null,
   baseDate?: Date,
+  completions?: any[],
 ): {
   due: boolean;
   label: string;
@@ -204,8 +205,15 @@ export function isDue(
       };
     }
 
+    const currentSlotTimeStr = `${String(currentSlot.getHours()).padStart(2, "0")}:${String(currentSlot.getMinutes()).padStart(2, "0")}`;
+    const slotCompletedInCompletions = completions && Array.isArray(completions) && completions.some((c: any) => {
+      const compDate = c.completion_date || (c.completed_at ? c.completed_at.split('T')[0] : '');
+      const compSlotTime = c.slot_time ? c.slot_time.slice(0, 5) : '';
+      return compDate === todayStr && compSlotTime === currentSlotTimeStr && c.status === 'completed';
+    });
+
     const lastDone = lastCompletedAt ? new Date(lastCompletedAt) : null;
-    const isDone = lastDone && lastDone >= currentSlot;
+    const isDone = slotCompletedInCompletions || (lastDone && lastDone >= currentSlot);
 
     if (isDone) {
       const nextSlot = todaySlots.find((s) => s > now);

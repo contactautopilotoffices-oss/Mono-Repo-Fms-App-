@@ -485,7 +485,6 @@ export default function PropertyLayout() {
     if (!membership?.properties)
       return { propertyName: '', propertyRole: null, propertyCode: undefined };
     const prop = membership.properties.find((p) => p.id === propertyId);
-    console.log('[PropertyLayout] propertyInfo — membership properties:', JSON.stringify(membership.properties.map(p => ({ id: p.id, name: p.name, role: p.role }))), 'selected prop:', prop?.name ?? 'not found');
     return {
       propertyName: prop?.name ?? '',
       propertyRole: prop?.role ?? null,
@@ -495,7 +494,6 @@ export default function PropertyLayout() {
 
   const currentRoute = useMemo(() => {
     const parts = pathname.split('/').filter(Boolean);
-    // If we're at /property/[id], the route is 'index' or 'dashboard'
     if (parts.length === 2 && parts[0] === 'property') return 'index';
     return parts[parts.length - 1] ?? 'index';
   }, [pathname]);
@@ -503,33 +501,26 @@ export default function PropertyLayout() {
   const isFullScreen = useMemo(() => {
     if (FULL_SCREEN_ROUTES.includes(currentRoute)) return true;
     
-    // Check for ticket details: property/[id]/tickets/[uuid]
     const parts = pathname.split('/').filter(Boolean);
     const ticketsIdx = parts.indexOf('tickets');
     if (ticketsIdx !== -1 && ticketsIdx === parts.length - 2) {
-      return true; // It's a detail page
+      return true;
     }
     
     return false;
   }, [currentRoute, pathname]);
 
-  // Loading state
-  // DEFENSE-IN-DEPTH: also guard against membership being null — this prevents
-  // the blank-sidebar bug where membership loads after the initial access check.
-  // In that gap, accessState.checking=false, authLoading=false, but membership=null.
   if (authLoading || accessState.checking || (user && !membership)) {
-    console.log('[PropertyLayout] Loading — authLoading:', authLoading, 'accessChecking:', accessState.checking, 'membershipNull:', !membership);
-    
-    // Render the skeleton that matches the UI component going to load
     if (currentRoute === 'index' || currentRoute === 'dashboard') {
       return (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
           <LinearGradient
             colors={['#1c2135', '#0f121e', '#07090e']}
             style={StyleSheet.absoluteFillObject}
           />
           <WeatherBackground condition={undefined} />
           <DashboardSkeleton />
+          <GlobalBottomNav />
         </View>
       );
     }
@@ -540,6 +531,7 @@ export default function PropertyLayout() {
           {[1, 2, 3, 4, 5].map((i) => (
             <TicketListItemSkeleton key={i} />
           ))}
+          <GlobalBottomNav />
         </View>
       );
     }
@@ -548,6 +540,7 @@ export default function PropertyLayout() {
       return (
         <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 60 }}>
           <ChecklistSkeleton />
+          <GlobalBottomNav />
         </View>
       );
     }
@@ -555,21 +548,18 @@ export default function PropertyLayout() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 60 }}>
         <SkeletonLoader type="list" count={5} />
+        <GlobalBottomNav />
       </View>
     );
   }
 
-  // Not authenticated
   if (!user) {
     return null;
   }
 
-  // Resolve role: use access check result, or fall back to AuthContext membership data
-  // (access check may fail on web due to RLS policies — membership data was already fetched during login)
   const propMembership = membership?.properties?.find((p) => p.id === propertyId);
   const membershipRole = propMembership?.role ?? null;
 
-  // Determine final role: prefer checkPropertyAccess result, fallback to membership role
   let role = accessState.authorized === true
     ? (accessState.role ?? membershipRole ?? '')
     : (membershipRole ?? '');
@@ -578,30 +568,9 @@ export default function PropertyLayout() {
     role = 'property_admin';
   }
 
-  console.log('[PropertyLayout] Final role resolution:', {
-    accessAuthorized: accessState.authorized,
-    accessRole: accessState.role,
-    membershipRole,
-    finalRole: role,
-    hasMembership: !!propMembership,
-    membershipNull: membership === null,
-    membershipPropertiesNull: membership?.properties == null,
-    propertyId,
-  });
-
-  // Not authorized for this property (only show if we genuinely have no role and no membership)
   if (!role && accessState.authorized === false) {
-    console.log('[PropertyLayout] Genuinely unauthorized — showing access denied');
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: '#000',
-          padding: 24,
-        }}
-      >
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', padding: 24 }}>
         <View style={styles.errorIcon}>
           <Text style={styles.errorIconText}>!</Text>
         </View>
@@ -613,13 +582,9 @@ export default function PropertyLayout() {
     );
   }
 
-  console.log('[PropertyLayout] Access granted — role:', role);
-
-
   const isTenantRoute = pathname?.includes('/tenant');
   const showTenantNav = role === 'tenant' || role === 'super_tenant' || isTenantRoute;
 
-  // ---- Unified sidebar layout for ALL roles (unless full-screen) ----
   if (isFullScreen) {
     return (
       <PropertyContext.Provider value={propertyInfo}>

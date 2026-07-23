@@ -18,6 +18,7 @@ import {
   Animated,
   PanResponder,
   Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
@@ -84,6 +85,7 @@ export default function StockScannerModal({
   const [galleryProcessing, setGalleryProcessing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(false);
+  const { width: windowWidth } = useWindowDimensions();
 
   // Screen dimensions for expandable panel
   const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -379,7 +381,7 @@ export default function StockScannerModal({
       : '#10B981';
 
     const isIN = item.action === 'IN';
-    const accentColor = isIN ? '#10B981' : '#EF4444';
+    const isCompact = windowWidth < 375;
 
     return (
         <View style={[styles.queueItem, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
@@ -418,7 +420,7 @@ export default function StockScannerModal({
         </View>
 
         {/* Action row & Quantity row */}
-        <View style={styles.queueBottomRow}>
+        <View style={[styles.queueBottomRow, isCompact && { flexDirection: 'column', alignItems: 'stretch' }]}>
           <View style={styles.queueActionRow}>
             <TouchableOpacity
               style={[
@@ -461,8 +463,8 @@ export default function StockScannerModal({
             </TouchableOpacity>
           </View>
 
-          <View style={styles.queueQtyRow}>
-            <View style={styles.queueQtyLabelGroup}>
+          <View style={[styles.queueQtyRow, isCompact && { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', justifyContent: 'space-between', width: '100%', marginTop: 8 }]}>
+            <View style={[styles.queueQtyLabelGroup, isCompact && { marginBottom: 0 }]}>
               <Text style={[styles.queueQtyLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>QTY</Text>
               <Text style={[styles.queueQtyUnit, { color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }]}>
                 ({item.unit || 'units'})
