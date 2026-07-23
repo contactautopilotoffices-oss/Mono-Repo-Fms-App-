@@ -177,7 +177,7 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
       </View>
       <Animated.View style={[styles.logoContainer, logoStyle]}>
         <Image
-          source={require('../../assets/images/autopilot-logo-new.png')}
+          source={require('../../assets/images/splash.png')}
           style={styles.logo}
           resizeMode="contain"
         />

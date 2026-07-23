@@ -14,9 +14,9 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/autopilot-logo-new.png",
+      "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#0F1521"
     },
     "ios": {
       "supportsTablet": true,
@@ -24,7 +24,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/autopilot-icon-white.png",
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.autopilot.app",
@@ -51,9 +51,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/autopilot-logo-new.png",
+          "image": "./assets/images/splash.png",
+          "imageWidth": 280,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#0F1521"
         }
       ],
       [
