@@ -434,8 +434,8 @@ export default function LovablePropertyAdminDashboard({ propertyId }: Props) {
               )}
             </View>
             <View style={styles.nameContainer}>
-              <Text style={styles.greetingText}>Hey, {user?.user_metadata?.full_name?.split(' ')[0] || 'Admin'}</Text>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>{propertyName}</Text>
+              <Text style={styles.greetingText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Hey, {user?.user_metadata?.full_name?.split(' ')[0] || 'Admin'}</Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{propertyName}</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -703,12 +703,12 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.xl, paddingBottom: 12 },
   hamburgerBtn: { padding: 4 },
-  headerCenter: { flex: 1, paddingHorizontal: 16 },
-  profileRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  headerCenter: { flex: 1, paddingHorizontal: 12, minWidth: 0 },
+  profileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', flexShrink: 0 },
   avatarImage: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
-  nameContainer: { justifyContent: 'center' },
+  nameContainer: { justifyContent: 'center', flex: 1, minWidth: 0 },
   greetingText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
   headerSubtitle: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 2 },
   headerRight: { flexDirection: 'row', gap: 14, alignItems: 'center' },

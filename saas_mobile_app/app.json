@@ -27,7 +27,7 @@
         "foregroundImage": "./assets/images/autopilot-icon-white.png",
         "backgroundColor": "#FFFFFF"
       },
-      "package": "com.autopilot.app",
+      "package": "com.autopilotoffices.fms",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",

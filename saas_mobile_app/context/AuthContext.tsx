@@ -339,10 +339,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log('[AuthContext] useEffect firing — fetching session...');
     supabase.auth
       .getSession()
-      .then(({ data: { session: initialSession }, error }) => {
+      .then(async ({ data: { session: initialSession }, error }) => {
         if (error) {
           console.error('[AuthContext] getSession error:', error.message);
-          // If the token is invalid, we must sign out to clear the corrupted session from storage
           if (error.message.includes('refresh_token_not_found') || error.message.includes('Invalid Refresh Token')) {
              supabase.auth.signOut().catch(() => {});
              setSession(null);
@@ -352,11 +351,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        console.log('[AuthContext] getSession result:', initialSession ? `user=${initialSession.user?.email}` : 'null session');
-        setSession(initialSession);
-        setUser(enrichUser(initialSession?.user ?? null));
-        if (initialSession?.user) {
-          fetchMembership(initialSession.user.id);
+        let activeSession = initialSession;
+        // If session exists but JWT is expired or close to expiry (e.g. after 2 days), attempt auto-refresh
+        if (activeSession && activeSession.expires_at && activeSession.expires_at * 1000 < Date.now() + 60000) {
+          console.log('[AuthContext] Token expired/expiring on boot, refreshing session...');
+          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr && refreshData.session) {
+            activeSession = refreshData.session;
+          } else if (refreshErr && (refreshErr.message.includes('refresh_token_not_found') || refreshErr.message.includes('Invalid Refresh Token'))) {
+            console.error('[AuthContext] Refresh failed, signing out:', refreshErr.message);
+            await supabase.auth.signOut().catch(() => {});
+            setSession(null);
+            setUser(null);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        console.log('[AuthContext] Initial session result:', activeSession ? `user=${activeSession.user?.email}` : 'null session');
+        setSession(activeSession);
+        setUser(enrichUser(activeSession?.user ?? null));
+        if (activeSession?.user) {
+          fetchMembership(activeSession.user.id);
         }
         setIsLoading(false);
       })

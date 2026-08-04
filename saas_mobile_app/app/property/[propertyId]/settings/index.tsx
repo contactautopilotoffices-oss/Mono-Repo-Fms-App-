@@ -506,7 +506,7 @@ export default function SettingsScreen() {
           <Text style={[styles.sectionLabel, { color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)' }]}>SUPPORT</Text>
 
           <MenuRow icon={<Shield size={18} color="#708F96" />} title="Security" subtitle="Password and authentication" onPress={() => setShowSecurityModal(true)} />
-          <MenuRow icon={<FileText size={18} color="#708F96" />} title="Terms & Privacy" subtitle="Legal information" onPress={() => {}} />
+          <MenuRow icon={<FileText size={18} color="#708F96" />} title="Terms & Privacy" subtitle="Legal information" onPress={() => router.push('/privacy-policy')} />
           <MenuRow icon={<HelpCircle size={18} color="#708F96" />} title="Help & Support" subtitle="Get assistance" onPress={() => {}} />
         </WidgetCard>
 

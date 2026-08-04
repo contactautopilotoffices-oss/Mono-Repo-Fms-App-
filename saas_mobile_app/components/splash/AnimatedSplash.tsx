@@ -171,7 +171,7 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     <Animated.View style={[styles.container, containerStyle]} pointerEvents="none" onLayout={onLayout}>
       <View style={StyleSheet.absoluteFillObject}>
         <LinearGradient
-          colors={['#1c2135', '#0f121e', '#07090e']}
+          colors={['#0F1521', '#0F1521', '#0F1521']}
           style={StyleSheet.absoluteFillObject}
         />
       </View>
@@ -189,7 +189,7 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#07090e',
+    backgroundColor: '#0F1521',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,

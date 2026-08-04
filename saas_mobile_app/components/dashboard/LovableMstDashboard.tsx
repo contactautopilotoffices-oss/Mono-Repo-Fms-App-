@@ -1093,10 +1093,10 @@ export default function LovableMstDashboard({ propertyId }: Props) {
                 </Text>
               </LinearGradient>
               <View style={[styles.nameContainer, { flex: 1 }]}>
-                <Text style={styles.greetingName} numberOfLines={1}>
+                <Text style={styles.greetingName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   Hey, {(user?.user_metadata?.full_name || mstUser.name).split(' ')[0]}
                 </Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                <Text style={styles.headerSubtitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   {property?.name || 'MST Portal'}
                 </Text>
               </View>
@@ -1224,6 +1224,8 @@ const styles = StyleSheet.create({
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   headerAvatar: {
     width: 44,
