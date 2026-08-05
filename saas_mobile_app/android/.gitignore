@@ -14,3 +14,7 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+*.aab
+*.apk
+*.keystore
+*.jks
