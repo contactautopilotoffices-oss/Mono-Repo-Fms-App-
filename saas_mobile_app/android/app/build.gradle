@@ -81,6 +81,9 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+project.ext.sentryCli = [
+    autoUpload: System.getenv("SENTRY_AUTH_TOKEN") != null
+]
 apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute().text.trim(), "sentry.gradle")
 
 android {
@@ -89,9 +92,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.autopilot.app'
+    namespace 'com.autopilotoffices.fms'
     defaultConfig {
-        applicationId 'com.autopilot.app'
+        applicationId 'com.autopilotoffices.fms'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
