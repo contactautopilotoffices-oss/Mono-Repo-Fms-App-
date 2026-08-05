@@ -23,6 +23,7 @@
       "bundleIdentifier": "com.autopilot.app"
     },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/autopilot-icon-white.png",
         "backgroundColor": "#FFFFFF"
