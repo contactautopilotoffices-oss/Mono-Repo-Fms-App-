@@ -1,5 +1,4 @@
 package com.autopilotoffices.fms
-import com.autopilotoffices.fms.BuildConfig
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

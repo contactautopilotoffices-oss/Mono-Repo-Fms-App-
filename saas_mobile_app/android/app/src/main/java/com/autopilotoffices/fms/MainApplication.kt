@@ -1,5 +1,4 @@
 package com.autopilotoffices.fms
-import com.autopilotoffices.fms.BuildConfig
 
 import android.app.Application
 import android.content.res.Configuration
