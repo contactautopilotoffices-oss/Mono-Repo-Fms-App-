@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { useGlobalSearchParams, useRouter, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -153,6 +154,8 @@ export default function StockScreen() {
   const { user } = useAuth();
   const colors = Colors[theme];
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const isCompact = windowWidth < 380;
 
   // ── State ────────────────────────────────────────────────────────────────────
 
@@ -463,31 +466,36 @@ export default function StockScreen() {
               <Text style={styles.headerTitle} adjustsFontSizeToFit numberOfLines={1}>Stock Management</Text>
               <Text style={styles.headerSubtitle} adjustsFontSizeToFit numberOfLines={1}>Inventory Overview</Text>
             </View>
-            <View style={{ flexDirection: "row", gap: 8 }}>
+            <View style={{ flexDirection: "row", gap: isCompact ? 5 : 8 }}>
               <TouchableOpacity
-                style={[styles.headerIconBtn, { backgroundColor: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.25)" }]}
+                style={[
+                  styles.headerIconBtn,
+                  isCompact && { width: 34, height: 34, borderRadius: 17 },
+                  { backgroundColor: "rgba(16,185,129,0.15)", borderColor: "rgba(16,185,129,0.25)" }
+                ]}
                 onPress={() => setShowScannerModal(true)}
                 activeOpacity={0.7}
               >
-                <Scan size={18} color="#34D399" />
+                <Scan size={isCompact ? 16 : 18} color="#34D399" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.headerIconBtn}
+                style={[styles.headerIconBtn, isCompact && { width: 34, height: 34, borderRadius: 17 }]}
                 onPress={() => setShowHistoryModal(true)}
                 activeOpacity={0.7}
               >
-                <History size={18} color="rgba(255,255,255,0.8)" />
+                <History size={isCompact ? 16 : 18} color="rgba(255,255,255,0.8)" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.headerIconBtn}
+                style={[styles.headerIconBtn, isCompact && { width: 34, height: 34, borderRadius: 17 }]}
                 onPress={() => setShowBulkImportModal(true)}
                 activeOpacity={0.7}
               >
-                <Upload size={18} color="rgba(255,255,255,0.8)" />
+                <Upload size={isCompact ? 16 : 18} color="rgba(255,255,255,0.8)" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
                   styles.headerIconBtn,
+                  isCompact && { width: 34, height: 34, borderRadius: 17 },
                   {
                     backgroundColor: "#3B82F6",
                     borderColor: "#3B82F6",
@@ -496,7 +504,7 @@ export default function StockScreen() {
                 onPress={() => setShowAddModal(true)}
                 activeOpacity={0.7}
               >
-                <Plus size={20} color="#FFFFFF" />
+                <Plus size={isCompact ? 18 : 20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1356,13 +1364,15 @@ function TintedGlassCard({
           <View style={styles.tintedCardBottom}>
             <View style={styles.tintedCardValueCol}>
               <Text
-                style={[styles.tintedValue, isCurrency && { fontSize: 22 }]}
+                style={[styles.tintedValue, isCurrency && { fontSize: 20 }]}
                 numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.65}
               >
                 {value}
               </Text>
               {subtitle && (
-                <Text style={styles.tintedSubtitle}>{subtitle}</Text>
+                <Text style={styles.tintedSubtitle} numberOfLines={1}>{subtitle}</Text>
               )}
             </View>
             {/* Decorative sparkline */}

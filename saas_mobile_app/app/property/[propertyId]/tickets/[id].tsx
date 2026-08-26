@@ -1980,7 +1980,12 @@ export default function TicketDetailScreen() {
                     optimisticMedia.before.type === 'image' ? (
                       <Image source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} />
                     ) : (
-                      <Video source={{ uri: optimisticMedia.before.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                      <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                        <Video source={{ uri: optimisticMedia.before.uri }} style={[styles.mediaImage, { width: '100%', height: '100%' }]} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                        <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>Just now</Text>
+                        </View>
+                      </View>
                     )
                   ) : ticket.photo_before_url ? (
                     <View style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -1992,14 +1997,25 @@ export default function TicketDetailScreen() {
                       </View>
                     </View>
                   ) : ticket.video_before_url ? (
-                    <Video
-                      source={{ uri: ticket.video_before_url }}
-                      style={styles.mediaImage}
-                      resizeMode={ResizeMode.COVER}
-                      isMuted
-                      shouldPlay
-                      isLooping
-                    />
+                    <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <Video
+                        source={{ uri: ticket.video_before_url }}
+                        style={[styles.mediaImage, { width: '100%', height: '100%' }]}
+                        resizeMode={ResizeMode.COVER}
+                        isMuted
+                        shouldPlay
+                        isLooping
+                      />
+                      <View style={{ position: 'absolute', top: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        <Ionicons name="videocam" size={10} color="#FFF" />
+                        <Text style={{ color: '#FFF', fontSize: 8, fontWeight: '700' }}>VIDEO</Text>
+                      </View>
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>
+                          {ticket.created_at ? new Date(ticket.created_at).toLocaleString() : ''}
+                        </Text>
+                      </View>
+                    </View>
                   ) : (
                     <View style={styles.mediaPlaceholder}>
                       <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
@@ -2034,7 +2050,12 @@ export default function TicketDetailScreen() {
                     optimisticMedia.after.type === 'image' ? (
                       <Image source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} />
                     ) : (
-                      <Video source={{ uri: optimisticMedia.after.uri }} style={styles.mediaImage} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                      <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                        <Video source={{ uri: optimisticMedia.after.uri }} style={[styles.mediaImage, { width: '100%', height: '100%' }]} resizeMode={ResizeMode.COVER} isMuted shouldPlay isLooping />
+                        <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>Just now</Text>
+                        </View>
+                      </View>
                     )
                   ) : ticket.photo_after_url ? (
                     <View style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -2046,14 +2067,25 @@ export default function TicketDetailScreen() {
                       </View>
                     </View>
                   ) : ticket.video_after_url ? (
-                    <Video
-                      source={{ uri: ticket.video_after_url }}
-                      style={styles.mediaImage}
-                      resizeMode={ResizeMode.COVER}
-                      isMuted
-                      shouldPlay
-                      isLooping
-                    />
+                    <View style={{ position: 'relative', width: '100%', height: '100%' }}>
+                      <Video
+                        source={{ uri: ticket.video_after_url }}
+                        style={[styles.mediaImage, { width: '100%', height: '100%' }]}
+                        resizeMode={ResizeMode.COVER}
+                        isMuted
+                        shouldPlay
+                        isLooping
+                      />
+                      <View style={{ position: 'absolute', top: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        <Ionicons name="videocam" size={10} color="#FFF" />
+                        <Text style={{ color: '#FFF', fontSize: 8, fontWeight: '700' }}>VIDEO</Text>
+                      </View>
+                      <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>
+                          {(ticket.resolved_at || ticket.updated_at) ? new Date(ticket.resolved_at || ticket.updated_at).toLocaleString() : ''}
+                        </Text>
+                      </View>
+                    </View>
                   ) : (
                     <View style={styles.mediaPlaceholder}>
                       <Ionicons name="camera-outline" size={28} color={isDark ? '#4B5563' : '#CBD5E1'} />
@@ -2539,6 +2571,8 @@ export default function TicketDetailScreen() {
         visible={showVideoPreview}
         onClose={() => setShowVideoPreview(false)}
         videoUrl={previewMediaUrl}
+        timestamp={selectedMediaSlot === 'before' ? ticket?.created_at : (ticket?.resolved_at || ticket?.updated_at)}
+        title={`${selectedMediaSlot === 'before' ? 'Before' : 'After'} Video Proof`}
       />
 
       {/* Edit Ticket Modal */}

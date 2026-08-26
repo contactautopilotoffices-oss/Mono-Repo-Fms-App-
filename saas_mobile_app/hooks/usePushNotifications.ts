@@ -486,6 +486,17 @@ export function usePushNotifications() {
       const content = notification.request.content;
       console.log('[Push] Foreground notification:', content);
 
+      const isTenant = membership?.org_role === 'tenant' || (membership?.properties && membership.properties.length > 0 && membership.properties.every(p => p.role === 'tenant'));
+      const titleStr = String(content.title || '').toLowerCase();
+      const bodyStr = String(content.body || '').toLowerCase();
+      const dataStr = JSON.stringify(content.data || {}).toLowerCase();
+      const isChecklist = titleStr.includes('checklist') || titleStr.includes('sop') || bodyStr.includes('checklist') || bodyStr.includes('sop') || dataStr.includes('checklist') || dataStr.includes('sop');
+
+      if (isTenant && isChecklist) {
+        console.log('[Push] Suppressing checklist notification banner for tenant user');
+        return;
+      }
+
       showBanner({
         id: notification.request.identifier,
         title: content.title || 'Notification',
@@ -496,7 +507,7 @@ export function usePushNotifications() {
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [membership]);
 
   // Notification tap listener (background / quit → foreground)
   useEffect(() => {

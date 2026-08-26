@@ -31,9 +31,16 @@ export default function TicketSLATile({
 
       {/* Open Tickets */}
       <View style={styles.row}>
-        <View>
-          <Text style={[styles.bigValue, { color: '#708F96' }]}>{openTickets}</Text>
-          <Text style={styles.metric}>Open Tickets</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={[styles.bigValue, { color: '#708F96' }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.65}
+          >
+            {openTickets}
+          </Text>
+          <Text style={styles.metric} numberOfLines={1}>Open Tickets</Text>
         </View>
         <View style={styles.progressTrack}>
           <View
@@ -47,9 +54,16 @@ export default function TicketSLATile({
 
       {/* SLA */}
       <View style={[styles.row, { marginTop: 20 }]}>
-        <View>
-          <Text style={[styles.bigValue, { color: slaColor }]}>{slaPercentage}%</Text>
-          <Text style={styles.metric}>SLA Met</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={[styles.bigValue, { color: slaColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.65}
+          >
+            {slaPercentage}%
+          </Text>
+          <Text style={styles.metric} numberOfLines={1}>SLA Met</Text>
         </View>
         <View style={styles.progressTrack}>
           <View
@@ -67,7 +81,7 @@ export default function TicketSLATile({
           <View style={styles.alertIcon}>
             <Ionicons name="warning-outline" size={16} color="#F59E0B" />
           </View>
-          <Text style={styles.alertText}>
+          <Text style={styles.alertText} numberOfLines={1}>
             {highPriorityCount} High Priority {highPriorityCount === 1 ? 'Ticket' : 'Tickets'}
           </Text>
         </View>
@@ -101,6 +115,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
   },
   bigValue: {
     fontSize: 36,
@@ -147,5 +162,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#475569',
+    flex: 1,
   },
 });

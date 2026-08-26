@@ -884,26 +884,29 @@ export async function uploadTicketMedia(
   mediaType: 'image' | 'video' = 'image'
 ): Promise<{ success: boolean; url?: string; type?: string; error?: string }> {
   const token = await getSupabaseToken();
-  const filename = mediaUri.split('/').pop() || (mediaType === 'image' ? 'photo.webp' : 'video.mp4');
-  const match = /\.(\w+)$/.exec(filename);
-  const ext = match ? match[1].toLowerCase() : (mediaType === 'image' ? 'webp' : 'mp4');
+  let safeFilename = mediaUri.split('/').pop() || (mediaType === 'image' ? 'photo.jpg' : 'video.mp4');
+  const match = /\.(\w+)$/.exec(safeFilename);
+  const ext = match ? match[1].toLowerCase() : (mediaType === 'image' ? 'jpg' : 'mp4');
+  if (!safeFilename.includes('.')) {
+    safeFilename = `${safeFilename}.${ext}`;
+  }
   
   let fileType = '';
   if (mediaType === 'image') {
-    fileType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+    fileType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : (ext === 'png' ? 'image/png' : `image/${ext}`);
   } else {
-    fileType = ext === 'mov' ? 'video/quicktime' : `video/${ext}`;
+    fileType = ext === 'mov' ? 'video/quicktime' : 'video/mp4';
   }
 
   const endpoint = mediaType === 'image' ? 'photos' : 'videos';
   const url = `${MOBILE_API_BASE}/api/tickets/${ticketId}/${endpoint}`;
-  console.log(`[uploadTicketMedia] Uploading to ${url} with type ${fileType}`);
+  console.log(`[uploadTicketMedia] Uploading to ${url} with filename ${safeFilename}, type ${fileType}`);
   
   try {
     const formData = new FormData();
     formData.append('file', {
       uri: mediaUri,
-      name: filename,
+      name: safeFilename,
       type: fileType,
     } as any);
     formData.append('type', type);

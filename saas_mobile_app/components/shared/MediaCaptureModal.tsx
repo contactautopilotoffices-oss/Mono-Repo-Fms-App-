@@ -115,7 +115,7 @@ export default function MediaCaptureModal({ isOpen, onClose, onCapture, title = 
     setIsLaunching(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mode === 'picture' ? ['images'] : ['images', 'videos'],
+        mediaTypes: ['images', 'videos'],
         quality: 0.85,
         allowsEditing: false,
       });

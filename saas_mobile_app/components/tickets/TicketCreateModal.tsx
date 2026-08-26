@@ -219,20 +219,32 @@ export function TicketCreateModal({
       });
       if (result.error) throw new Error(result.error);
 
-      if (media && result.ticket?.id) {
-        try {
-          const newTicketId = result.ticket.id;
-          let uriToUpload = media.uri;
-          if (media.type === 'image') uriToUpload = await compressImage(media.uri);
-          
-          await uploadTicketMedia(newTicketId, uriToUpload, 'before', media.type);
-        } catch (uploadError) {
-          console.error('Failed to upload media:', uploadError);
-        }
-      }
-      setSuccess(true);
+      // Instant optimistic UI callback
       onSuccess?.(result.ticket);
-      setTimeout(() => { handleReset(); onClose(); }, 2500);
+      setSuccess(true);
+
+      // Upload media concurrently without blocking modal dismissal
+      if (media && result.ticket?.id) {
+        const newTicketId = result.ticket.id;
+        const currentMedia = media;
+        (async () => {
+          try {
+            let uriToUpload = currentMedia.uri;
+            if (currentMedia.type === 'image') {
+              uriToUpload = await compressImage(currentMedia.uri);
+            }
+            await uploadTicketMedia(newTicketId, uriToUpload, 'before', currentMedia.type);
+          } catch (uploadError) {
+            console.error('Failed to upload media for ticket:', uploadError);
+          }
+        })();
+      }
+
+      // Quick 350ms checkmark transition then instant close
+      setTimeout(() => {
+        handleReset();
+        onClose();
+      }, 350);
     } catch (err: any) {
       setError(err.message || 'Failed to create ticket');
     } finally {

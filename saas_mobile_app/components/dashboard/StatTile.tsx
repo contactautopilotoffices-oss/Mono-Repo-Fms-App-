@@ -41,7 +41,7 @@ export default function StatTile({
       ]}
     >
       <View style={styles.header}>
-        <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
+        <Text style={[styles.label, { color: colors.textSecondary }]} numberOfLines={1}>{label}</Text>
         {icon && (
           <View style={[styles.iconContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
             <Ionicons name={icon} size={20} color={colors.textSecondary} />
@@ -50,7 +50,12 @@ export default function StatTile({
       </View>
 
       <View style={styles.valueRow}>
-        <Text style={[styles.value, { color: accentColor ?? colors.textPrimary }]}>
+        <Text
+          style={[styles.value, { color: accentColor ?? colors.textPrimary }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+        >
           {value}
         </Text>
         {trend && (
@@ -68,6 +73,7 @@ export default function StatTile({
                 styles.trendText,
                 { color: trend.isUp ? '#10B981' : '#EF4444' },
               ]}
+              numberOfLines={1}
             >
               {trend.isUp ? '↑' : '↓'} {trend.value}
             </Text>
@@ -77,7 +83,7 @@ export default function StatTile({
 
       {subtitle && (
         <View style={[styles.subtitleContainer, { borderTopColor: colors.border }]}>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>{subtitle}</Text>
         </View>
       )}
     </View>
@@ -94,6 +100,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 4,
     elevation: 1,
+    flex: 1,
+    minWidth: 120,
   },
   header: {
     flexDirection: 'row',
@@ -106,6 +114,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
+    flex: 1,
   },
   iconContainer: {
     width: 40,
@@ -119,6 +128,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 10,
+    flexWrap: 'wrap',
   },
   value: {
     fontSize: 36,

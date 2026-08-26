@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Modal,
   View,
+  Text,
   StyleSheet,
   TouchableOpacity,
   Image,
@@ -19,6 +20,8 @@ interface MediaViewerModalProps {
   visible: boolean;
   uri: string | null;
   type: 'photo' | 'video';
+  timestamp?: string | null;
+  title?: string;
   onClose: () => void;
 }
 
@@ -26,10 +29,24 @@ export default function MediaViewerModal({
   visible,
   uri,
   type,
+  timestamp,
+  title,
   onClose,
 }: MediaViewerModalProps) {
   const insets = useSafeAreaInsets();
   const [downloading, setDownloading] = useState(false);
+
+  const formattedTimestamp = timestamp
+    ? new Date(timestamp).toLocaleString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      })
+    : null;
 
   const handleDownload = async () => {
     if (!uri || downloading) return;
@@ -93,6 +110,18 @@ export default function MediaViewerModal({
             <Ionicons name="close" size={24} color="#FFF" />
           </TouchableOpacity>
 
+          {(title || formattedTimestamp) && (
+            <View style={styles.titleWrap}>
+              {title && <Text style={styles.titleText}>{title}</Text>}
+              {formattedTimestamp && (
+                <View style={styles.timestampBadge}>
+                  <Ionicons name="time-outline" size={12} color="#FFF" />
+                  <Text style={styles.timestampText}>{formattedTimestamp}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={handleDownload}
@@ -136,9 +165,37 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     zIndex: 10,
+  },
+  titleWrap: {
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: '60%',
+  },
+  titleText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  timestampBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  timestampText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   iconBtn: {
     width: 44,

@@ -125,7 +125,12 @@ function TintedGlassCard({
             </View>
             <Text style={styles.tintedLabel}>{label}</Text>
           </View>
-          <Text style={[styles.tintedValue, isCurrency && { fontSize: 20 }]} numberOfLines={1}>
+          <Text
+            style={[styles.tintedValue, isCurrency && { fontSize: 20 }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.65}
+          >
             {value}
           </Text>
         </View>

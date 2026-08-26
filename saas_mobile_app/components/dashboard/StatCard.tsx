@@ -63,6 +63,9 @@ export function StatCard({
             styles.value,
             { color: colors.text },
           ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
         >
           {typeof value === 'number' ? value.toLocaleString() : value}
         </Text>
@@ -78,7 +81,7 @@ export function StatCard({
 
       {/* Optional subtitle */}
       {subtitle && (
-        <Text style={[styles.subtitle, { color: colors.textTertiary }]}>
+        <Text style={[styles.subtitle, { color: colors.textTertiary }]} numberOfLines={1}>
           {subtitle}
         </Text>
       )}
@@ -107,7 +110,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 1,
     shadowRadius: 40,
     elevation: 8,
-    minWidth: 140,
+    minWidth: 120,
+    flex: 1,
   },
   iconCircle: {
     width: 48,
@@ -119,19 +123,20 @@ const styles = StyleSheet.create({
   },
   value: {
     fontSize: 36,
-        letterSpacing: -0.5,
+    letterSpacing: -0.5,
     lineHeight: 42,
     textAlign: 'center',
+    width: '100%',
   },
   title: {
     fontSize: 12,
-        textAlign: 'center',
+    textAlign: 'center',
     marginTop: 4,
     letterSpacing: 0.2,
   },
   subtitle: {
     fontSize: 10,
-        textAlign: 'center',
+    textAlign: 'center',
     marginTop: 2,
   },
   valueSkeleton: {

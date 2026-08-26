@@ -46,15 +46,20 @@ export default function KPICard({
     >
       {/* Header */}
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{title}</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
           <View style={styles.valueRow}>
-            <Text style={[styles.value, accentColor ? { color: accentColor } : {}]}>
+            <Text
+              style={[styles.value, accentColor ? { color: accentColor } : {}]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.65}
+            >
               {value}
             </Text>
             {trend && trendColors && (
               <View style={[styles.trendBadge, { backgroundColor: trendColors.bg, borderColor: trendColors.border }]}>
-                <Text style={[styles.trendText, { color: trendColors.text }]}>
+                <Text style={[styles.trendText, { color: trendColors.text }]} numberOfLines={1}>
                   {arrow} {trend.value}
                 </Text>
               </View>
@@ -69,7 +74,7 @@ export default function KPICard({
       {/* Subtitle */}
       {subtitle && (
         <View style={styles.subtitleContainer}>
-          <Text style={styles.subtitle}>{subtitle}</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>
         </View>
       )}
     </View>
@@ -116,6 +121,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 8,
+    flexWrap: 'wrap',
   },
   value: {
     fontSize: 36,

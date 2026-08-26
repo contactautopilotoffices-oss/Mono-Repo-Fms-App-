@@ -41,14 +41,32 @@ export default function NotificationModal({ visible, onClose, propertyId, role }
     }
   }, [visible, user]);
 
+  const isChecklistNotif = (n: any) => {
+    const typeStr = String(n.type || n.notification_type || n.entity_type || '').toLowerCase();
+    const titleStr = String(n.title || '').toLowerCase();
+    const bodyStr = String(n.body || n.message || '').toLowerCase();
+    return (
+      typeStr.includes('checklist') ||
+      typeStr.includes('sop') ||
+      titleStr.includes('checklist') ||
+      titleStr.includes('sop') ||
+      bodyStr.includes('checklist') ||
+      bodyStr.includes('sop')
+    );
+  };
+
   const fetchNotifications = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ success: boolean; data: any[] }>('/api/users/notifications');
+      const url = role ? `/api/users/notifications?role=${encodeURIComponent(role)}` : '/api/users/notifications';
+      const response = await apiFetch<{ success: boolean; data: any[] }>(url);
       if (!response.success || !response.data) {
         setNotifications([]);
       } else {
-        setNotifications(response.data);
+        const rawData = response.data || [];
+        const isTenant = role === 'tenant';
+        const filtered = isTenant ? rawData.filter(n => !isChecklistNotif(n)) : rawData;
+        setNotifications(filtered);
       }
     } catch (e) {
       setNotifications([]);

@@ -17,6 +17,7 @@ import { focusManager } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
 import { AnimatedSplash } from '@/components/splash/AnimatedSplash';
 import { useAuth } from '@/hooks/useAuth';
+import '@/utils/fontScaling';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();

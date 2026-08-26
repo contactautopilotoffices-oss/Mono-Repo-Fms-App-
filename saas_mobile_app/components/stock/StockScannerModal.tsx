@@ -86,6 +86,7 @@ export default function StockScannerModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(false);
   const { width: windowWidth } = useWindowDimensions();
+  const isCompact = windowWidth < 380;
 
   // Screen dimensions for expandable panel
   const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -171,15 +172,24 @@ export default function StockScannerModal({
     }
   }, [propertyId]);
 
-  // Add item to queue
+  // Add item to queue (or increment quantity if already present)
   const addToQueue = useCallback((item: StockItem, mode: string) => {
     const code = item.barcode || item.item_code || item.id;
-    if (scannedCodesRef.current.has(code)) {
-      setError(`"${item.name}" is already in the queue`);
-      return;
-    }
-    scannedCodesRef.current.add(code);
-    setQueue(prev => [...prev, { ...item, action: 'IN', qty: 1, notes: '', scanMode: mode }]);
+    setQueue(prev => {
+      const existingIdx = prev.findIndex(
+        q => (q.barcode && q.barcode === code) || (q.item_code && q.item_code === code) || q.id === item.id
+      );
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          qty: updated[existingIdx].qty + 1,
+        };
+        return updated;
+      }
+      scannedCodesRef.current.add(code);
+      return [...prev, { ...item, action: 'IN', qty: 1, notes: '', scanMode: mode }];
+    });
     setError(null);
   }, []);
 
@@ -187,10 +197,27 @@ export default function StockScannerModal({
   const handleBarCodeScanned = useCallback(async ({ data }: { data: string }) => {
     const code = data.trim();
     if (!code) return;
+    
+    // If already in queue, increment immediately without setting red error
+    setQueue(prev => {
+      const existingIdx = prev.findIndex(
+        q => (q.barcode && q.barcode === code) || (q.item_code && q.item_code === code) || q.id === code
+      );
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          qty: updated[existingIdx].qty + 1,
+        };
+        return updated;
+      }
+      return prev;
+    });
+
     if (scannedCodesRef.current.has(code)) {
-      setError(`Already in queue — scan a different item`);
       return;
     }
+
     setLoading(true);
     setError(null);
     const item = await fetchItemByBarcode(code);
@@ -254,10 +281,6 @@ export default function StockScannerModal({
   const handleManualSubmit = useCallback(async () => {
     const code = manualInput.trim();
     if (!code) return;
-    if (scannedCodesRef.current.has(code)) {
-      setError(`Already in queue — scan a different item`);
-      return;
-    }
     setLoading(true);
     setError(null);
     const item = await fetchItemByBarcode(code);
@@ -1012,11 +1035,11 @@ const styles = StyleSheet.create({
 
   // Action row — ADD / TAKE buttons
   queueActionRow: {
-    flexDirection: 'row', gap: 8, flex: 1,
+    flexDirection: 'row', gap: 8, flex: 1, minWidth: 0,
   },
   queueActionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, borderRadius: 8,
+    gap: 4, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 8,
     borderWidth: 1.5,
   },
   queueActionBtnINActive: {
@@ -1028,7 +1051,7 @@ const styles = StyleSheet.create({
   queueActionBtnInactive: {
     backgroundColor: 'transparent', borderColor: 'rgba(255,255,255,0.1)',
   },
-  queueActionBtnText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  queueActionBtnText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
 
   // Quantity row
   queueQtyRow: {

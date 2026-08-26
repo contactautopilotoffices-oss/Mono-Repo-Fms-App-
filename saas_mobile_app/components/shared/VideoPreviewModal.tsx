@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Modal,
   View,
+  Text,
   StyleSheet,
   TouchableOpacity,
   Dimensions,
@@ -16,11 +17,13 @@ interface VideoPreviewModalProps {
   visible: boolean;
   onClose: () => void;
   videoUrl: string | null;
+  timestamp?: string | null;
+  title?: string;
 }
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function VideoPreviewModal({ visible, onClose, videoUrl }: VideoPreviewModalProps) {
+export default function VideoPreviewModal({ visible, onClose, videoUrl, timestamp, title }: VideoPreviewModalProps) {
   const insets = useSafeAreaInsets();
   const videoRef = React.useRef<Video>(null);
 
@@ -39,6 +42,18 @@ export default function VideoPreviewModal({ visible, onClose, videoUrl }: VideoP
   }, [visible]);
 
   if (!videoUrl) return null;
+
+  const formattedTimestamp = timestamp
+    ? new Date(timestamp).toLocaleString('en-US', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      })
+    : null;
 
   return (
     <Modal
@@ -79,6 +94,19 @@ export default function VideoPreviewModal({ visible, onClose, videoUrl }: VideoP
           />
         </View>
 
+        {/* Header Overlay (Title & Timestamp) */}
+        {(title || formattedTimestamp) && (
+          <View style={[styles.headerOverlay, { top: Math.max(insets.top, 20) }]}>
+            {title && <Text style={styles.videoTitle}>{title}</Text>}
+            {formattedTimestamp && (
+              <View style={styles.timestampBadge}>
+                <Ionicons name="time-outline" size={13} color="#FFF" />
+                <Text style={styles.timestampText}>{formattedTimestamp}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Close Button */}
         <TouchableOpacity
           style={[styles.closeBtn, { top: Math.max(insets.top, 20) }]}
@@ -112,6 +140,36 @@ const styles = StyleSheet.create({
   video: {
     width: '100%',
     height: '100%',
+  },
+  headerOverlay: {
+    position: 'absolute',
+    left: 20,
+    right: 70,
+    zIndex: 10,
+    gap: 4,
+  },
+  videoTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  timestampBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  timestampText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
   closeBtn: {
     position: 'absolute',

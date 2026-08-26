@@ -1,13 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import SafeBlurView from '@/components/ui/SafeBlurView';
-
-const { width: SCREEN_W } = Dimensions.get('window');
-const TILE_GAP = 12;
-const TILES_PER_ROW = 3;
-const TILE_WIDTH = (SCREEN_W - 48 - TILE_GAP * (TILES_PER_ROW - 1)) / TILES_PER_ROW;
 
 interface TenantModuleCardProps {
   title: string;
@@ -30,8 +25,15 @@ export default function TenantModuleCard({
   delay = 0,
   onPress,
 }: TenantModuleCardProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  const isCompact = windowWidth < 360;
+  const tilesPerRow = isCompact ? 2 : 3;
+  const horizontalPadding = 32;
+  const tileGap = 10;
+  const dynamicTileWidth = (windowWidth - horizontalPadding - tileGap * (tilesPerRow - 1)) / tilesPerRow;
+
   return (
-    <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={styles.wrapper}>
+    <Animated.View entering={FadeInUp.delay(delay).duration(500)} style={[styles.wrapper, { width: dynamicTileWidth }]}>
       <TouchableOpacity activeOpacity={0.85} onPress={onPress} disabled={!onPress} style={styles.touchable}>
         <SafeBlurView intensity={40} style={styles.card} tint="dark">
           <View style={styles.content}>
@@ -57,7 +59,8 @@ export default function TenantModuleCard({
 
 const styles = StyleSheet.create({
   wrapper: {
-    width: TILE_WIDTH,
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   touchable: {
     width: '100%',

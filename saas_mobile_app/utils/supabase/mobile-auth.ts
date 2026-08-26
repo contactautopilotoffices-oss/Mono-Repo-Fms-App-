@@ -50,15 +50,38 @@ export async function getSupabaseToken(forceRefresh = false): Promise<string | n
   try {
     const supabase = createClient();
 
-    // On 401 retry: refresh the session to get a new, valid access token
+    // On 401 retry or explicit force: refresh the session to get a new, valid access token
     if (forceRefresh) {
-      const { data: refreshData } = await supabase.auth.refreshSession();
-      if (refreshData.session?.access_token) return refreshData.session.access_token;
+      try {
+        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+        if (!refreshErr && refreshData.session?.access_token) return refreshData.session.access_token;
+      } catch (e) {
+        console.warn('[mobile-auth] force refresh exception:', e);
+      }
     }
 
     // getSession() reads from cached storage — works immediately, no network call.
     const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData.session?.access_token) return sessionData.session.access_token;
+    const session = sessionData?.session;
+
+    if (session?.access_token) {
+      // Proactively check if token is expired or expiring soon (within 2 minutes)
+      const nowSec = Math.floor(Date.now() / 1000);
+      const isExpiredOrExpiring = session.expires_at ? session.expires_at <= nowSec + 120 : false;
+
+      if (isExpiredOrExpiring) {
+        console.log('[mobile-auth] Token expiring/expired, refreshing proactively...');
+        try {
+          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr && refreshData.session?.access_token) {
+            return refreshData.session.access_token;
+          }
+        } catch (e) {
+          console.warn('[mobile-auth] Proactive token refresh failed, returning current token:', e);
+        }
+      }
+      return session.access_token;
+    }
 
     // Fallback: forcefully read from MMKV storage directly
     const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';

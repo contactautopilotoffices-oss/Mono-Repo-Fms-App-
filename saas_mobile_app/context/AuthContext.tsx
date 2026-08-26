@@ -73,7 +73,8 @@ const MEMBERSHIP_CACHE_PREFIX = '@autopilot_membership:';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — mobile apps should cache aggressively
 
 async function loadCachedMembership(
-  userId: string
+  userId: string,
+  ignoreExpiry = true
 ): Promise<UserMembership | null> {
   try {
     const raw = await AsyncStorage.getItem(`${MEMBERSHIP_CACHE_PREFIX}${userId}`);
@@ -82,7 +83,9 @@ async function loadCachedMembership(
       data: UserMembership;
       timestamp: number;
     };
-    if (Date.now() - timestamp < CACHE_TTL_MS) return data;
+    // If within TTL or ignoring expiry for offline resilience, return data
+    if (ignoreExpiry || (Date.now() - timestamp < CACHE_TTL_MS)) return data;
+    return data || null;
   } catch {
     // Corrupt cache entry — treat as miss
   }
@@ -352,19 +355,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         let activeSession = initialSession;
-        // If session exists but JWT is expired or close to expiry (e.g. after 2 days), attempt auto-refresh
-        if (activeSession && activeSession.expires_at && activeSession.expires_at * 1000 < Date.now() + 60000) {
+        // If session exists but JWT is expired or close to expiry, attempt auto-refresh
+        if (activeSession && activeSession.expires_at && activeSession.expires_at * 1000 < Date.now() + 120000) {
           console.log('[AuthContext] Token expired/expiring on boot, refreshing session...');
-          const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-          if (!refreshErr && refreshData.session) {
-            activeSession = refreshData.session;
-          } else if (refreshErr && (refreshErr.message.includes('refresh_token_not_found') || refreshErr.message.includes('Invalid Refresh Token'))) {
-            console.error('[AuthContext] Refresh failed, signing out:', refreshErr.message);
-            await supabase.auth.signOut().catch(() => {});
-            setSession(null);
-            setUser(null);
-            setIsLoading(false);
-            return;
+          try {
+            const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+            if (!refreshErr && refreshData.session) {
+              activeSession = refreshData.session;
+            } else if (refreshErr) {
+              console.warn('[AuthContext] Refresh session warning:', refreshErr.message);
+              // Only sign out if the refresh token is explicitly invalidated on the server
+              if (refreshErr.message.includes('refresh_token_not_found') || refreshErr.message.includes('Invalid Refresh Token')) {
+                console.error('[AuthContext] Refresh token invalid, signing out:', refreshErr.message);
+                await supabase.auth.signOut().catch(() => {});
+                setSession(null);
+                setUser(null);
+                setIsLoading(false);
+                return;
+              }
+              // If it's a network error/offline, keep the activeSession so user stays logged in
+            }
+          } catch (e) {
+            console.warn('[AuthContext] Session refresh network exception:', e);
           }
         }
 
@@ -384,12 +396,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      setSession(nextSession);
-      setUser(enrichUser(nextSession?.user ?? null));
+      console.log('[AuthContext] onAuthStateChange event:', event, nextSession?.user?.email);
+      if (nextSession) {
+        setSession(nextSession);
+        setUser(enrichUser(nextSession.user ?? null));
+      }
 
-      if (event === 'SIGNED_IN' && nextSession?.user) {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && nextSession?.user) {
         fetchMembership(nextSession.user.id);
       } else if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
         setMembership(null);
         clearToken().catch(() => {});
       }

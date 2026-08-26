@@ -476,14 +476,32 @@ export default function NotificationBell({ style, iconColor, iconSize }: { style
   useEffect(() => {
     let channel: any;
     let mounted = true;
+    const currentProp = membership?.properties?.find(p => p.id === propertyId);
+    const isTenant = currentProp?.role === 'tenant' || membership?.org_role === 'tenant';
+
+    const isChecklistNotif = (n: any) => {
+      const typeStr = String(n.type || n.notification_type || n.entity_type || '').toLowerCase();
+      const titleStr = String(n.title || '').toLowerCase();
+      const bodyStr = String(n.body || n.message || '').toLowerCase();
+      return (
+        typeStr.includes('checklist') ||
+        typeStr.includes('sop') ||
+        titleStr.includes('checklist') ||
+        titleStr.includes('sop') ||
+        bodyStr.includes('checklist') ||
+        bodyStr.includes('sop')
+      );
+    };
 
     const fetch = async () => {
       if (!authUser?.id || !mounted) return;
       setIsLoading(true);
       const { data, error } = await serverApi.query({ table: 'notifications', action: 'select', filters: [{ op: 'eq', column: 'user_id', value: authUser.id }], orders: [{ column: 'created_at', ascending: false }], limit: 50 });
       if (mounted && !error && data) {
-        setNotifications(data as Notification[]);
-        setUnreadCount((data as any[]).filter((n: any) => !n.is_read).length);
+        const rawList = data as Notification[];
+        const filteredList = isTenant ? rawList.filter(n => !isChecklistNotif(n)) : rawList;
+        setNotifications(filteredList);
+        setUnreadCount(filteredList.filter((n: any) => !n.is_read).length);
       }
       if (mounted) setIsLoading(false);
     };
@@ -495,7 +513,11 @@ export default function NotificationBell({ style, iconColor, iconSize }: { style
         .channel(`notif-bell-${authUser.id}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${authUser.id}` }, (payload) => {
           if (!mounted) return;
-          setNotifications((prev) => [payload.new as Notification, ...prev]);
+          const newNotif = payload.new as Notification;
+          if (isTenant && isChecklistNotif(newNotif)) {
+            return; // Ignore checklist notifications for tenant
+          }
+          setNotifications((prev) => [newNotif, ...prev]);
           setUnreadCount((count) => count + 1);
         })
         .subscribe();

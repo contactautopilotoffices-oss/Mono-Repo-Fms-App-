@@ -800,9 +800,12 @@ export default function ChecklistScreen() {
   // History detail
   const [historyCompletion, setHistoryCompletion] =
     useState<SOPCompletion | null>(null);
-  const [mediaViewer, setMediaViewer] = useState<
-    { uri: string; type: "photo" | "video" } | null
-  >(null);
+  const [mediaViewer, setMediaViewer] = useState<{
+    uri: string;
+    type: "photo" | "video";
+    timestamp?: string | null;
+    title?: string;
+  } | null>(null);
 
   const handleDownloadMedia = async (uri: string, type: "photo" | "video") => {
     try {
@@ -2517,6 +2520,9 @@ export default function ChecklistScreen() {
                               <View style={{ position: "absolute", bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: colors.primary, borderRadius: 4 }}>
                                 <Text style={{ color: "white", fontSize: 7, fontWeight: "bold" }}>VIDEO</Text>
                               </View>
+                              <View style={{ position: "absolute", bottom: 4, right: 4, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 4 }}>
+                                <Text style={{ color: "white", fontSize: 7, fontWeight: "600" }}>Just now</Text>
+                              </View>
                               <TouchableOpacity
                                 onPress={() => handleRemoveMedia(checkItem, "video")}
                                 style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(239, 68, 68, 0.9)", justifyContent: "center", alignItems: "center" }}
@@ -2572,6 +2578,8 @@ export default function ChecklistScreen() {
           visible={!!mediaViewer}
           uri={mediaViewer?.uri || null}
           type={mediaViewer?.type || 'photo'}
+          timestamp={mediaViewer?.timestamp}
+          title={mediaViewer?.title}
           onClose={() => setMediaViewer(null)}
         />
       </View>
@@ -2840,7 +2848,7 @@ export default function ChecklistScreen() {
 
                       <TouchableOpacity
                         activeOpacity={0.92}
-                        onPress={() => compItem.photo_url && setMediaViewer({ uri: compItem.photo_url, type: 'photo' })}
+                        onPress={() => compItem.photo_url && setMediaViewer({ uri: compItem.photo_url, type: 'photo', timestamp: itemTimestamp, title: 'Photo Proof' })}
                       >
                         <View style={{ borderRadius: 12, overflow: 'hidden', height: 180 }}>
                           <Image source={{ uri: compItem.photo_url }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
@@ -2886,7 +2894,7 @@ export default function ChecklistScreen() {
 
                       <TouchableOpacity
                         activeOpacity={0.92}
-                        onPress={() => compItem.video_url && setMediaViewer({ uri: compItem.video_url, type: 'video' })}
+                        onPress={() => compItem.video_url && setMediaViewer({ uri: compItem.video_url, type: 'video', timestamp: itemTimestamp, title: 'Video Proof' })}
                       >
                         <View style={{ borderRadius: 12, overflow: 'hidden', height: 180, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
                           <ExpoAV.Video
@@ -2962,6 +2970,8 @@ export default function ChecklistScreen() {
           visible={!!mediaViewer}
           uri={mediaViewer?.uri || null}
           type={mediaViewer?.type || 'photo'}
+          timestamp={mediaViewer?.timestamp}
+          title={mediaViewer?.title}
           onClose={() => setMediaViewer(null)}
         />
       </View>
@@ -3846,6 +3856,8 @@ export default function ChecklistScreen() {
         visible={!!mediaViewer}
         uri={mediaViewer?.uri || null}
         type={mediaViewer?.type || 'photo'}
+        timestamp={mediaViewer?.timestamp}
+        title={mediaViewer?.title}
         onClose={() => setMediaViewer(null)}
       />
     </View>
