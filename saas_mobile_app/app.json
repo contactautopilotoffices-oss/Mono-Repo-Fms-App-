@@ -110,7 +110,7 @@
     "updates": {
       "enabled": false
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.0.1",
     "experiments": {
       "typedRoutes": true
     },
