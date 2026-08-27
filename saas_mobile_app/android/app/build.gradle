@@ -83,6 +83,12 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute().text.trim(), "sentry.gradle")
 
+// Skip Sentry source map upload during local builds if SENTRY_AUTH_TOKEN is not provided
+project.ext.shouldSentryAutoUploadGeneral = { ->
+    def token = System.getenv('SENTRY_AUTH_TOKEN')
+    return (token != null && !token.trim().isEmpty()) && (System.getenv('SENTRY_DISABLE_AUTO_UPLOAD') != 'true')
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
 
