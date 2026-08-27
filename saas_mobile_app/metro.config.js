@@ -52,6 +52,14 @@ config.resolver.blockList = [
 // TODO: Re-check after any @gorhom/portal upgrade > 1.0.14.
 const portalPackage = path.resolve(__dirname, 'node_modules/@gorhom/portal/src');
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Redirect node-fetch / @supabase/node-fetch to browser/RN native fetch shim
+  if (moduleName === '@supabase/node-fetch' || moduleName === 'node-fetch') {
+    return {
+      filePath: path.resolve(__dirname, 'shims/node-fetch.js'),
+      type: 'sourceFile'
+    };
+  }
+
   // Block Node.js core modules and ws (which is not needed in React Native)
   if (moduleName === 'ws' || moduleName === 'zlib' || moduleName === 'stream' || moduleName === 'crypto') {
     return {

@@ -7,6 +7,7 @@
 
 import { getCurrentUserId, getSupabaseToken } from '@/utils/supabase/mobile-auth';
 import { fetchWithRetry } from '@/utils/api/fetchWithRetry';
+import { showNetworkErrorToast } from '@/utils/networkToast';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -250,6 +251,19 @@ async function fileToBase64(file: File | Blob | ArrayBuffer): Promise<string> {
   });
 }
 
+function handleApiError(err: unknown): ServerApiResponse<any> {
+  const errMsg = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  const isNetwork = errMsg.includes('network') || errMsg.includes('failed to fetch') || errMsg.includes('timeout') || errMsg.includes('aborted');
+  if (isNetwork) {
+    showNetworkErrorToast('Network is slow or disconnected.');
+    return { data: null, error: { message: 'Network connection is slow or unavailable. Please check your internet.', code: 'NETWORK_ERROR' } };
+  }
+  if (err instanceof ServerApiError) {
+    return { data: null, error: { message: err.message, code: String(err.statusCode) } };
+  }
+  return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+}
+
 // ---------------------------------------------------------------------------
 // Public API — same interface as before
 // ---------------------------------------------------------------------------
@@ -274,10 +288,7 @@ export const serverApi = {
       const result = (await serverFetch('/api/query', body)) as ServerApiResponse<T>;
       return result;
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+      return handleApiError(err);
     }
   },
 
@@ -293,10 +304,7 @@ export const serverApi = {
       }
       return { data: result as T, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+      return handleApiError(err);
     }
   },
 
@@ -308,10 +316,7 @@ export const serverApi = {
       }
       return { data: result as T, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+      return handleApiError(err);
     }
   },
 
@@ -323,10 +328,7 @@ export const serverApi = {
       }
       return { data: result as T, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+      return handleApiError(err);
     }
   },
 
@@ -338,10 +340,7 @@ export const serverApi = {
       }
       return { data: result as T, error: null };
     } catch (err) {
-      if (err instanceof ServerApiError) {
-        return { data: null, error: { message: err.message, code: String(err.statusCode) } };
-      }
-      return { data: null, error: { message: err instanceof Error ? err.message : 'Unknown error' } };
+      return handleApiError(err);
     }
   },
 

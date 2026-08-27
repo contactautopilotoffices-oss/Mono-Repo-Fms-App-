@@ -18,21 +18,34 @@ import Toast from 'react-native-toast-message';
 import { AnimatedSplash } from '@/components/splash/AnimatedSplash';
 import { useAuth } from '@/hooks/useAuth';
 import '@/utils/fontScaling';
+import { showNetworkErrorToast } from '@/utils/networkToast';
+import { useNetworkMonitor } from '@/hooks/useNetworkMonitor';
+import { useOfflineMediaSync } from '@/hooks/useOfflineMediaSync';
 
 // Initialize Sentry crash reporting before anything else
 initSentry();
 
-// Global error handler to catch silent crashes (fallback when Sentry is not configured)
+// Global error handler to catch silent crashes and network glitches
 if (typeof window !== 'undefined') {
   const originalOnError = window.onerror;
   window.onerror = (msg, src, line, col, err) => {
     console.log('[GLOBAL ERROR]', msg, 'at', src, 'line:', line, 'col:', col, err?.stack);
+    const msgStr = String(msg || err?.message || '').toLowerCase();
+    if (msgStr.includes('network') || msgStr.includes('failed to fetch') || msgStr.includes('timeout') || msgStr.includes('aborted')) {
+      showNetworkErrorToast('Network connection is slow or unavailable.');
+      return true; // Suppress crash for network glitches
+    }
     if (originalOnError) return originalOnError(msg, src, line, col, err);
     return false;
   };
   const originalOnUnhandledRejection = window.onunhandledrejection;
   window.onunhandledrejection = (e: PromiseRejectionEvent) => {
     console.log('[UNHANDLED REJECTION]', e.reason);
+    const reasonStr = String(e?.reason?.message || e?.reason || '').toLowerCase();
+    if (reasonStr.includes('network') || reasonStr.includes('failed to fetch') || reasonStr.includes('timeout') || reasonStr.includes('aborted')) {
+      showNetworkErrorToast('Network connection is slow or unavailable.');
+      return undefined; // Suppress unhandled network promise rejection crash
+    }
     if (originalOnUnhandledRejection) return originalOnUnhandledRejection.call(window, e);
     return undefined;
   };
@@ -41,13 +54,18 @@ if (typeof window !== 'undefined') {
 // Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
 
-// Error boundary to catch silent crashes
+// Error boundary to catch crashes and convert network errors to non-intrusive toasts
 class ErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean; error?: Error }> {
   constructor(props: { children: ReactNode; fallback?: ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }
   static getDerivedStateFromError(error: Error) {
+    const msg = String(error?.message || '').toLowerCase();
+    if (msg.includes('network') || msg.includes('failed to fetch') || msg.includes('timeout') || msg.includes('aborted')) {
+      showNetworkErrorToast('Network is slow or disconnected.');
+      return { hasError: false };
+    }
     return { hasError: true, error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
@@ -162,8 +180,6 @@ function RootLayoutInner() {
 
 export default Sentry.wrap(RootLayoutInner);
 
-import { useOfflineMediaSync } from '@/hooks/useOfflineMediaSync';
-
 interface AppContentProps {
   colorScheme: any;
   appReady: boolean;
@@ -183,6 +199,8 @@ function AppContent({
   usePushNotifications();
   // Register offline media sync for checklists
   useOfflineMediaSync();
+  // Monitor real-time network connectivity changes with toast notifications
+  useNetworkMonitor();
 
   const { isLoading: isAuthLoading, isMembershipLoading } = useAuth();
 
@@ -206,8 +224,6 @@ function AppContent({
     console.log('[RootLayout] Animated splash complete');
     setSplashAnimationComplete(true);
   }, [setSplashAnimationComplete]);
-
-  // Native splash screen hiding is now delegated to AnimatedSplash to ensure a seamless handoff.
 
   // Show animated splash while app is initializing and until animation finishes
   const showAnimatedSplash = !splashAnimationComplete;

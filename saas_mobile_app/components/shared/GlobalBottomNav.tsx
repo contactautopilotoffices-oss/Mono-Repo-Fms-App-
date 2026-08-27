@@ -1,25 +1,18 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter, useGlobalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import SafeBlurView from '@/components/ui/SafeBlurView';
-import SidekickFace from '@/components/dashboard/SidekickFace';
-import CassandraSessionModal from '@/components/cassandra/CassandraSessionModal';
 import GlobalNavigationDrawer from '@/components/shared/GlobalNavigationDrawer';
-import { useCassandraStore } from '@/stores/cassandraStore';
-import { useUnreadStore } from '@/stores/unreadStore';
 import { useAuth } from '@/hooks/useAuth';
-
-const fontSans = Platform.OS === 'ios' ? 'System' : 'sans-serif';
 
 export default function GlobalBottomNav() {
   const router = useRouter();
@@ -27,6 +20,7 @@ export default function GlobalBottomNav() {
   const { propertyId: localPropId } = useGlobalSearchParams<{ propertyId: string }>();
   const insets = useSafeAreaInsets();
   const { membership } = useAuth();
+  const [showDrawer, setShowDrawer] = useState(false);
 
   // Safely extract propertyId from pathname to prevent stale layout bugs in Expo Router
   const propertyId = useMemo(() => {
@@ -38,21 +32,6 @@ export default function GlobalBottomNav() {
     }
     return localPropId;
   }, [pathname, localPropId]);
-
-  const [showChat, setShowChat] = useState(false);
-  const [showDrawer, setShowDrawer] = useState(false);
-
-  // Cassandra voice state
-  const voiceState = useCassandraStore((s) => s.voiceState);
-  const faceState: any = (() => {
-    if (voiceState === 'recording' || voiceState === 'processing' || voiceState === 'connecting') return 'listening';
-    if (voiceState === 'speaking') return 'speaking';
-    if (voiceState === 'error') return 'alert';
-    return 'idle';
-  })();
-
-  const orgId = membership?.org_id ?? '';
-  const ticketChatCount = useUnreadStore((s) => s.ticketChatCount);
 
   const propRole = useMemo(() => {
     const prop = membership?.properties?.find((p: any) => p.id === propertyId);
@@ -69,18 +48,16 @@ export default function GlobalBottomNav() {
     const p = pathname.toLowerCase();
     if (p.endsWith('/dashboard') || p.endsWith('/security') || p.endsWith('/property/' + propertyId?.toLowerCase()) || p.match(/\/property\/[^\/]+$/)) return 'dashboard';
     if (p.includes('/tickets')) return 'tickets';
-    if (p.includes('/stock')) return 'stock';
     if (p.includes('/checklist')) return 'checklist';
+    if (p.includes('/stock')) return 'stock';
     return 'more';
   }, [pathname, propertyId]);
 
   const navigate = (route: string) => {
-    // Ensure we don't navigate to /property/undefined/tickets
     const validPropId = (propertyId && propertyId !== 'undefined' && propertyId !== 'null') 
       ? propertyId 
       : (membership?.properties?.[0]?.id ?? 'all');
       
-    console.log(`[VERIFICATION LOG] BottomNav Navigating | Route: ${route} | Stale localPropId: ${localPropId} | BottomNav Parsed PropertyId: ${propertyId} | Final: ${validPropId}`);
     router.push(`/property/${validPropId}/${route}` as any);
   };
 
@@ -88,6 +65,7 @@ export default function GlobalBottomNav() {
     <>
       <View style={styles.container}>
         <SafeBlurView intensity={80} style={[styles.navPill, { paddingBottom: insets.bottom > 0 ? insets.bottom + 6 : 14 }]} tint="dark">
+          {/* 1. Dashboard / Overview */}
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'dashboard' && styles.navItemActive]}
             onPress={() => navigate(isSecurity ? 'security' : 'dashboard')}
@@ -96,11 +74,14 @@ export default function GlobalBottomNav() {
             <Ionicons
               name={activeTab === 'dashboard' ? (isSecurity ? 'shield' : 'grid') : (isSecurity ? 'shield-outline' : 'grid-outline')}
               size={22}
-              color={activeTab === 'dashboard' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+              color={activeTab === 'dashboard' ? '#FFF' : 'rgba(255,255,255,0.45)'}
             />
-            <Text style={[styles.navLabel, activeTab === 'dashboard' && styles.navLabelActive]}>{isSecurity ? 'Overview' : 'Dashboard'}</Text>
+            <Text style={[styles.navLabel, activeTab === 'dashboard' && styles.navLabelActive]}>
+              {isSecurity ? 'Overview' : 'Dashboard'}
+            </Text>
           </TouchableOpacity>
 
+          {/* 2. Tickets */}
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'tickets' && styles.navItemActive]}
             onPress={() => navigate('tickets')}
@@ -109,27 +90,14 @@ export default function GlobalBottomNav() {
             <Ionicons
               name={activeTab === 'tickets' ? 'ticket' : 'ticket-outline'}
               size={22}
-              color={activeTab === 'tickets' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+              color={activeTab === 'tickets' ? '#FFF' : 'rgba(255,255,255,0.45)'}
             />
-            <Text style={[styles.navLabel, activeTab === 'tickets' && styles.navLabelActive]}>Tickets</Text>
+            <Text style={[styles.navLabel, activeTab === 'tickets' && styles.navLabelActive]}>
+              Tickets
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.navItemCenter} onPress={() => { setShowChat(true); useUnreadStore.getState().clearTicketChat(); }} activeOpacity={0.8}>
-            <View style={styles.orbWrapper}>
-              <View style={styles.orb}>
-                <SidekickFace state={faceState} size={32} onClick={() => { setShowChat(true); useUnreadStore.getState().clearTicketChat(); }} />
-              </View>
-              {ticketChatCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {ticketChatCount > 99 ? '99+' : ticketChatCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.navLabel}>Cassandra</Text>
-          </TouchableOpacity>
-
+          {/* 3. Checklists (for soft services) or Stock */}
           {isSoftServicesStaff ? (
             <TouchableOpacity
               style={[styles.navItem, activeTab === 'checklist' && styles.navItemActive]}
@@ -139,9 +107,11 @@ export default function GlobalBottomNav() {
               <Ionicons
                 name={activeTab === 'checklist' ? 'checkbox' : 'checkbox-outline'}
                 size={22}
-                color={activeTab === 'checklist' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+                color={activeTab === 'checklist' ? '#FFF' : 'rgba(255,255,255,0.45)'}
               />
-              <Text style={[styles.navLabel, activeTab === 'checklist' && styles.navLabelActive]}>Checklists</Text>
+              <Text style={[styles.navLabel, activeTab === 'checklist' && styles.navLabelActive]}>
+                Checklists
+              </Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -150,14 +120,17 @@ export default function GlobalBottomNav() {
               activeOpacity={0.7}
             >
               <Ionicons
-                name={activeTab === 'stock' ? 'business' : 'business-outline'}
+                name={activeTab === 'stock' ? 'cube' : 'cube-outline'}
                 size={22}
-                color={activeTab === 'stock' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+                color={activeTab === 'stock' ? '#FFF' : 'rgba(255,255,255,0.45)'}
               />
-              <Text style={[styles.navLabel, activeTab === 'stock' && styles.navLabelActive]}>Stock</Text>
+              <Text style={[styles.navLabel, activeTab === 'stock' && styles.navLabelActive]}>
+                Stock
+              </Text>
             </TouchableOpacity>
           )}
 
+          {/* 4. More */}
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'more' && styles.navItemActive]}
             onPress={() => setShowDrawer(true)}
@@ -166,20 +139,14 @@ export default function GlobalBottomNav() {
             <Ionicons
               name="ellipsis-horizontal"
               size={22}
-              color={activeTab === 'more' ? '#FFF' : 'rgba(255,255,255,0.4)'}
+              color={activeTab === 'more' ? '#FFF' : 'rgba(255,255,255,0.45)'}
             />
-            <Text style={[styles.navLabel, activeTab === 'more' && styles.navLabelActive]}>More</Text>
+            <Text style={[styles.navLabel, activeTab === 'more' && styles.navLabelActive]}>
+              More
+            </Text>
           </TouchableOpacity>
         </SafeBlurView>
       </View>
-
-      <CassandraSessionModal
-        visible={showChat}
-        onClose={() => setShowChat(false)}
-        orgId={orgId}
-        propertyId={propertyId ?? ''}
-        initialMode="text"
-      />
 
       <GlobalNavigationDrawer
         visible={showDrawer}
@@ -202,14 +169,14 @@ const styles = StyleSheet.create({
   navPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-evenly',
+    justifyContent: 'space-around',
     width: '100%',
     paddingTop: 10,
     paddingBottom: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(14, 14, 22, 0.92)',
+    backgroundColor: 'rgba(14, 14, 22, 0.94)',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
   },
@@ -222,58 +189,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   navItemActive: {
-    // subtle highlight if needed
-  },
-  navItemCenter: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1.2,
-    gap: 3,
-    marginTop: -6,
+    opacity: 1,
   },
   navLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 9,
-    fontWeight: '700',
-        marginTop: 2,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+    letterSpacing: -0.1,
   },
   navLabelActive: {
     color: '#FFF',
+    fontWeight: '700',
   },
-  orb: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-    shadowColor: '#3B82F6',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  orbWrapper: {
-    position: 'relative',
-  },
-  badge: {
-    position: 'absolute',
-    top: -2,
-    right: -4,
-    backgroundColor: '#EF4444',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#000',
-    paddingHorizontal: 3,
-  },
-  badgeText: {
-    color: '#FFF',
-    fontSize: 9,
-    fontWeight: '800',
-      },
 });
