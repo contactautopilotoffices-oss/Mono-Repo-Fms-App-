@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.autopilot.app"
+      "bundleIdentifier": "com.autopilotoffices.fms"
     },
     "android": {
       "versionCode": 2,
