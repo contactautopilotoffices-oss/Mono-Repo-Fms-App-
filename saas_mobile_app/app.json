@@ -23,7 +23,7 @@
       "bundleIdentifier": "com.autopilotoffices.fms"
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/autopilot-icon-white.png",
         "backgroundColor": "#FFFFFF"
@@ -98,6 +98,13 @@
       [
         "expo-build-properties",
         {
+          "android": {
+            "packagingOptions": {
+              "jniLibs": {
+                "useLegacyPackaging": false
+              }
+            }
+          },
           "ios": {
             "useFrameworks": "static"
           }

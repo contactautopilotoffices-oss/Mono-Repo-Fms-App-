@@ -12,7 +12,8 @@
     "web": "expo start --web",
     "tunnel": "expo start --tunnel",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "postinstall": "node scripts/patch-pdfium.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

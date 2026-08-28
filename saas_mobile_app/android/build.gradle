@@ -19,6 +19,11 @@ allprojects {
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
   }
+  configurations.all {
+    resolutionStrategy {
+      force 'io.legere:pdfiumandroid:1.0.34'
+    }
+  }
 }
 
 apply plugin: "expo-root-project"
