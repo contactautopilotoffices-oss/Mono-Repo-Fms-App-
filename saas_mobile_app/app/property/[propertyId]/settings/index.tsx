@@ -265,10 +265,12 @@ export default function SettingsScreen() {
   const handleUploadBg = async () => {
     if (Platform.OS === 'web') return;
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'We need camera roll permissions to upload an image.');
-        return;
+      if (Platform.OS === 'ios') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Denied', 'We need camera roll permissions to upload an image.');
+          return;
+        }
       }
       
       const result = await ImagePicker.launchImageLibraryAsync({

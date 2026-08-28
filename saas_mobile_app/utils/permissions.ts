@@ -57,7 +57,11 @@ export async function requestCameraPermissionWithSettings(): Promise<boolean> {
  * If previously denied permanently, prompts the user to open System Settings.
  */
 export async function requestMediaLibraryPermissionWithSettings(): Promise<boolean> {
-  // Use ImagePicker for reading gallery
+  // Android 13+ (API 33+) uses the System Photo Picker which requires zero permissions
+  if (Platform.OS === 'android') {
+    return true;
+  }
+  // On iOS, request Photo Library permission
   const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status === 'granted') return true;
 
