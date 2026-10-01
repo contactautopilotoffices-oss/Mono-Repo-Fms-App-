@@ -20,6 +20,7 @@ import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
 import { requestCameraPermissionWithSettings, requestMediaLibraryPermissionWithSettings } from '@/utils/permissions';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 import { useQueryClient } from '@tanstack/react-query';
 import { Colors } from '@/constants/Colors';
@@ -99,6 +100,10 @@ export default function ProfileScreen() {
     fetchProfile,
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   useEffect(() => {
     if (profile) {
@@ -274,7 +279,7 @@ export default function ProfileScreen() {
       <ScrollView
         style={s.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />}
         contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
       >
         {/* ── Avatar Section ── */}

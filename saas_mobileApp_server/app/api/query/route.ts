@@ -73,14 +73,18 @@ export async function POST(request: NextRequest) {
       const idsToCheck = propertyId ? [propertyId] : (propertyIds ?? []);
 
       if (idsToCheck.length > 0) {
-        for (const id of idsToCheck) {
-          const access = await getPropertyAccess(auth.user.id, id);
-          if (!access.authorized) {
-            return NextResponse.json(
-              { error: "Forbidden: you do not have access to this property" },
-              { status: 403 }
-            );
-          }
+        // Checked in parallel, and de-duplicated first: a multi-property filter
+        // used to pay one serial access lookup per id (each of which was itself
+        // 2 to 4 serial DB queries).
+        const uniqueIds = [...new Set(idsToCheck.filter(Boolean))];
+        const accessResults = await Promise.all(
+          uniqueIds.map((id) => getPropertyAccess(auth.user!.id, id))
+        );
+        if (accessResults.some((access) => !access.authorized)) {
+          return NextResponse.json(
+            { error: "Forbidden: you do not have access to this property" },
+            { status: 403 }
+          );
         }
       } else if (body.table === "notifications") {
         const userIdFilter = body.filters?.find(

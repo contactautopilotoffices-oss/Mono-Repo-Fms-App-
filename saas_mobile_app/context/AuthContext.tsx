@@ -156,24 +156,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsMembershipLoading(!cached);
 
       try {
-        // Fetch organisation membership
-        const { data: orgData, error: orgError } = await serverApi.query<any>({
-          table: 'organization_memberships',
-          action: 'select',
-          select: `
-            role,
-            organization:organizations (
-              id,
-              name
-            )
-          `,
-          filters: [
-            { op: 'eq', column: 'user_id', value: userId },
-            { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
-          ],
-          limit: 1,
-          maybeSingle: true,
-        });
+        // Org membership and property memberships are independent lookups, so they
+        // run concurrently. They used to be awaited one after the other, and the
+        // splash screen is held until this whole chain resolves, so every
+        // serialised hop here was added directly to cold-start time.
+        const [
+          { data: orgData, error: orgError },
+          { data: propData, error: propError },
+        ] = await Promise.all([
+          serverApi.query<any>({
+            table: 'organization_memberships',
+            action: 'select',
+            select: `
+              role,
+              organization:organizations (
+                id,
+                name
+              )
+            `,
+            filters: [
+              { op: 'eq', column: 'user_id', value: userId },
+              { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
+            ],
+            limit: 1,
+            maybeSingle: true,
+          }),
+          serverApi.query<any[]>({
+            table: 'property_memberships',
+            action: 'select',
+            select: `
+              role,
+              property:properties (
+                id,
+                name,
+                code,
+                image_url
+              )
+            `,
+            filters: [
+              { op: 'eq', column: 'user_id', value: userId },
+              { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
+            ],
+          }),
+        ]);
 
         if (orgError) {
           console.error('[AuthContext] org membership fetch error:', orgError);
@@ -184,25 +209,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Safely extract org from join result — guard against null/undefined join
         const orgFromJoin = (orgData as any)?.organization;
         const fetchedOrgId = typeof orgFromJoin?.id === 'string' ? orgFromJoin.id : null;
-
-        // Fetch all property memberships for this user
-        const { data: propData, error: propError } = await serverApi.query<any[]>({
-          table: 'property_memberships',
-          action: 'select',
-          select: `
-            role,
-            property:properties (
-              id,
-              name,
-              code,
-              image_url
-            )
-          `,
-          filters: [
-            { op: 'eq', column: 'user_id', value: userId },
-            { op: 'or', expression: 'is_active.eq.true,is_active.is.null' },
-          ],
-        });
 
         if (propError) {
           console.error('[AuthContext] property membership fetch error:', propError);
@@ -254,8 +260,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        console.log('[AuthContext] property memberships raw:', JSON.stringify(propData));
-        console.log('[AuthContext] builtProperties:', JSON.stringify(builtProperties));
 
         // PERMANENT FIX: Derive org_id from properties if no org membership exists.
         // This handles property-only users who lack an organization_memberships row.

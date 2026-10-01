@@ -202,7 +202,14 @@ finishes, so it also directly extends the splash.
 - `loadMore` bumps `limit`, and `limit` is **in the query key**, so "load more" refetches all
   rows from offset 0 and re-runs the 4 counts instead of appending a page.
 - FlashList is passed FlatList-only props (`initialNumToRender`, `maxToRenderPerBatch`,
-  `windowSize`) which it ignores, and no `estimatedItemSize`.
+  `windowSize`) which it ignores. (**Correction after implementation:**
+  `estimatedItemSize` *was* already set on every FlashList in the app. An earlier
+  draft of this report claimed it was missing on eight lists. That was wrong, and it
+  was caught by a duplicate-attribute compile error when "adding" it.)
+- `TicketListItem` runs a 1-second `setInterval` **per row**, firing two state updates
+  each, so a screen of 20 rows means 40 re-renders every second, permanently.
+  `TicketCard` has the same per-instance fallback timer. This is probably the single
+  biggest cause of general scroll and tap jank, ahead of the persister.
 - The `displayedTickets` useMemo runs date math and nested `.some()` over every row on every
   filter change.
 
@@ -302,8 +309,10 @@ Phase 1 alone takes roughly 400 to 600 ms off *every* call in the app.
     the query key.
 17. **Debounce search 300 ms**, and filter the fetched page client side where the dataset allows
     it instead of refetching.
-18. **`React.memo` on `TicketListItem`**, `useCallback` on `renderTicket`, add
-    `estimatedItemSize`, drop the FlatList-only props.
+18. **`React.memo` on `TicketListItem`** with a custom comparator (the parent passes
+    a fresh `onPress` and a freshly derived `escalationChain` per row, so a default
+    shallow compare can never match and memo would do nothing), `useCallback` on
+    `renderTicket`, and one shared app-wide ticker in place of the per-row timers.
 19. **Move row-level computation (SLA, needs-attention, escalation chain) into the query's
     `select`**, so it runs once per fetch instead of once per render.
 
@@ -347,3 +356,63 @@ one and a half:
 4. Do not refetch what you just wrote (broken: `refetchOnMount: 'always'` everywhere).
 
 Fix 1 and 4 and the app changes character immediately, before any server work lands.
+
+
+---
+
+# Implementation notes (added after the fixes landed)
+
+What the implementation pass found that this analysis had missed or got wrong:
+
+1. **`estimatedItemSize` was never missing.** The scan behind that claim was faulty.
+   Corrected inline above.
+
+2. **A runaway refetch loop in the three Lovable dashboards.** An effect with
+   `isFetching` and `hasValidDashboardData` in its deps and no guard meant any
+   response failing the shape check (an error payload, a 403) produced: fetch
+   settles, `isFetching` goes false, effect reruns, refetch, repeat, for as long as
+   the screen stayed open. Not a slow query, a permanent request loop.
+
+3. **Per-row 1-second timers**, as corrected above.
+
+4. **An N+1 loop in `useOrgData`.** Three separate `for` loops each issued one
+   request per property (electricity reading, health score, attention items). For an
+   org with 20 properties that is 7 + 60 = 67 sequential round trips for one screen.
+
+5. **A latent crash in `TicketCard`.** `resolvedAt` is declared in the props interface
+   and read at line 61 but was never destructured. `@ts-nocheck` hid it.
+
+6. **Dead prefetch code.** `prefetchCriticalOnLogin` prefetched tickets under a
+   hardcoded 6-element query key while the screen registers an 11-element one, and
+   wrote a bare array where the screen caches an object. It spent a request on every
+   login to populate an entry nothing read, after an unconditional 1.5s sleep.
+
+Also corrected while implementing: the post-update verification must NOT treat an
+empty returned row set as failure. The server runs SELECTs through the admin client
+but mutations through the anon client under RLS, so the implicit SELECT-after-UPDATE
+can legitimately come back empty for a row the user may both see and update. Failing
+there would have rolled back a write that actually landed.
+
+## Deliberately not done
+
+- **Pagination still over-fetches.** `loadMore` raises `limit`, which is in the query
+  key, so page 2 refetches rows 1..40 rather than appending 21..40. The status counts
+  no longer re-run (they moved to their own key, keyed without `limit`) and
+  `placeholderData` stops the list flashing empty, but converting the screen to
+  `useInfiniteQuery` is a real refactor of a 1400-line file.
+- **Per-screen aggregate endpoints (phase 2).** `fetchTicket` now runs in 3 parallel
+  waves instead of 10 serial awaits, which captures most of the latency win without a
+  server contract change. A single `GET /api/tickets/:id/detail` is still the better
+  end state.
+- **Merging the two servers.** Out of scope for a performance pass.
+
+## Verification status
+
+`node_modules` is not installed in the environment these changes were made in, so
+`tsc -p`, `eslint` and `jest` could not be run. What was done instead: a standalone
+`tsc` syntax/grammar pass over all 60 changed files (which caught two real
+duplicate-attribute bugs), and standalone unit tests for the three pieces of new
+logic that are easy to get subtly wrong: the JWT verifier (15 cases including
+alg-confusion, tampering, expiry and clock skew), the property-access memo (TTL,
+eviction, invalidation) and the persistence allowlist. **The full typecheck, lint and
+test suite still needs to run, and the app needs a manual smoke test.**

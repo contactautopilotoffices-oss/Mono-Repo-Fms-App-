@@ -1436,7 +1436,7 @@ export default function DieselScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.diesel(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
 
   const generators = data?.generators ?? [];

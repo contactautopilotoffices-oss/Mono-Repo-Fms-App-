@@ -54,6 +54,7 @@ import {
   Star,
 } from 'lucide-react-native';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1084,9 +1085,11 @@ export default function UsersScreen() {
     fetchUsers,
     { staleTime: 1000 * 60 * 5 }
   );
-  const users = Array.isArray(data) ? data : [];
 
-  const handleRefresh = () => refetch();
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+  const users = Array.isArray(data) ? data : [];
 
   // Dynamically extract all unique roles present in the team
   const availableRoles = useMemo(() => {
@@ -1257,8 +1260,8 @@ export default function UsersScreen() {
           ListEmptyComponent={<EmptyState colors={colors} />}
           refreshControl={
             <RefreshControl
-              refreshing={isFetching}
-              onRefresh={handleRefresh}
+              refreshing={pullRefreshing}
+              onRefresh={onPullRefresh}
               tintColor="#7CB9A8"
               colors={['#7CB9A8']}
             />

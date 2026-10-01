@@ -98,8 +98,6 @@ function RootLayoutInner() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [splashAnimationComplete, setSplashAnimationComplete] = useState(false);
 
-  console.log('[RootLayout] Rendering...');
-
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [fontError, setFontError] = useState<Error | null>(null);
 

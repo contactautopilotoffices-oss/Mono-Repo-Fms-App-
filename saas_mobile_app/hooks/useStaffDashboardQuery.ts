@@ -62,21 +62,31 @@ export async function fetchStaffDashboardData(
   // Helper to safely get data from serverApi responses
   const getData = <T,>(res: any): T | null => res?.data ?? null;
 
-  const [propRes, ticketRes, shiftRes, skillsRes, resolverStatsRes, ppmRes] = await Promise.allSettled([
+  // Columns are explicit rather than '*'. Two reasons: '*' pulled every column of
+  // every ticket for the property on one of the app's landing screens, and it does
+  // NOT include related rows, so the `assignee` and `creator` joins that
+  // StaffTicket declares were always undefined. Naming them fixes that and shrinks
+  // the payload at the same time.
+  const TICKET_COLUMNS = `id, ticket_number, title, description, status, priority, created_at,
+                          assigned_to, photo_before_url, sla_due_at,
+                          assignee:users!assigned_to(full_name, email, user_photo_url),
+                          creator:users!raised_by(full_name)`;
+
+  const [propRes, ticketRes, resolverStatsRes, skillsRes, ppmRes] = await Promise.allSettled([
     serverApi.query({ table: 'properties', action: 'select', select: 'name', filters: [{ op: 'eq', column: 'id', value: propertyId }], limit: 1, maybeSingle: true }),
-    serverApi.query({ table: 'tickets', action: 'select', select: '*', filters: [{ op: 'eq', column: 'property_id', value: propertyId }], orders: [{ column: 'created_at', ascending: false }] }),
+    serverApi.query({ table: 'tickets', action: 'select', select: TICKET_COLUMNS, filters: [{ op: 'eq', column: 'property_id', value: propertyId }], orders: [{ column: 'created_at', ascending: false }] }),
+    // One resolver_stats read, not two. The second query fetched is_available and
+    // active_shift_id from the same row into a variable nothing ever read.
     serverApi.query({ table: 'resolver_stats', action: 'select', select: 'is_checked_in', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'user_id', value: userId }], limit: 1, maybeSingle: true }),
     serverApi.query({ table: 'mst_skills', action: 'select', select: 'skill_group_code', filters: [{ op: 'eq', column: 'user_id', value: userId }, { op: 'eq', column: 'property_id', value: propertyId }], limit: 1, maybeSingle: true }),
-    serverApi.query({ table: 'resolver_stats', action: 'select', select: 'is_available, active_shift_id', filters: [{ op: 'eq', column: 'property_id', value: propertyId }, { op: 'eq', column: 'user_id', value: userId }], limit: 1, maybeSingle: true }),
     ppmService.fetchStats(propertyId),
   ]);
 
   // Extract data from PromiseSettledResult
   const propData = propRes.status === 'fulfilled' ? getData<any>(propRes.value) : null;
   const ticketData = (ticketRes.status === 'fulfilled' ? getData<any[]>(ticketRes.value) : null) || [];
-  const shiftData = shiftRes.status === 'fulfilled' ? getData<any>(shiftRes.value) : null;
+  const shiftData = resolverStatsRes.status === 'fulfilled' ? getData<any>(resolverStatsRes.value) : null;
   const skillsData = skillsRes.status === 'fulfilled' ? getData<any>(skillsRes.value) : null;
-  const resolverData = resolverStatsRes.status === 'fulfilled' ? getData<any>(resolverStatsRes.value) : null;
   const ppmValue = ppmRes.status === 'fulfilled' ? ppmRes.value : null;
   const ppmData = ppmValue?.success ? ppmValue.data : null;
 

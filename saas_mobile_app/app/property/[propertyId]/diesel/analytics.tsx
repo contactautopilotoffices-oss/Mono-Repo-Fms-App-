@@ -314,7 +314,7 @@ export default function DieselAnalyticsScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.dieselAnalytics(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
 
   const generators = data?.generators ?? [];

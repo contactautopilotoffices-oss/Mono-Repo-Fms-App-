@@ -71,7 +71,7 @@ export default function WaterLoggerScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load water data'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: true }
   );
 
   // Extract tariffs from sources (embedded) + flatten

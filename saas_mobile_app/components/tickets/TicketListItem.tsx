@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import StatusBadge from './StatusBadge';
+import { useSharedTicker } from '@/hooks/useSharedTicker';
 import SafeBlurView from '@/components/ui/SafeBlurView';
 
 interface TicketListItemProps {
@@ -49,28 +50,27 @@ function formatTimeAgo(dateStr: string): string {
   return 'Just now';
 }
 
-export default function TicketListItem({
+function TicketListItem({
   id, title, status, priority, ticketNumber,
   createdAt, resolvedAt, assignedTo, assigneePhotoUrl, photoUrl,
   escalationChain, hasMaterial, materialCount, onPress,
 }: TicketListItemProps) {
-  const [timeAgo, setTimeAgo] = useState(() => formatTimeAgo(createdAt));
   const isClosed = ['resolved', 'closed', 'completed'].includes(status?.toLowerCase() || '');
 
-  // Live timer logic matching TicketCard.tsx
   const dateObj = React.useMemo(() => new Date(createdAt), [createdAt]);
   const resolvedObj = React.useMemo(() => resolvedAt ? new Date(resolvedAt) : null, [resolvedAt]);
-  
-  const [internalTick, setInternalTick] = useState(0);
 
-  useEffect(() => {
-    if (isClosed) return;
-    const interval = setInterval(() => {
-      setTimeAgo(formatTimeAgo(createdAt));
-      setInternalTick(prev => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [createdAt, isClosed]);
+  // One shared interval for the whole app instead of one per row, and no
+  // subscription at all for a closed ticket (its elapsed time is fixed). Each row
+  // previously ran its own 1s timer firing TWO state updates, so a screen of 20
+  // rows meant 40 re-renders every second, permanently.
+  const tick = useSharedTicker(!isClosed);
+
+  const timeAgo = React.useMemo(
+    () => formatTimeAgo(createdAt),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [createdAt, tick]
+  );
 
   const elapsedSec = React.useMemo(
     () => {
@@ -78,7 +78,7 @@ export default function TicketListItem({
       return Math.max(0, Math.floor((end - dateObj.getTime()) / 1000));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [internalTick, dateObj, isClosed, resolvedObj]
+    [tick, dateObj, isClosed, resolvedObj]
   );
 
   const formatElapsed = (sec: number) => {
@@ -430,3 +430,43 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+/**
+ * memo'd because the list screen holds a lot of local state (filters, modals,
+ * search) and every one of those updates re-rendered every visible row.
+ *
+ * A custom comparator is required rather than the default shallow compare: the
+ * parent builds a fresh `onPress` closure and a freshly derived
+ * `escalationChain` array for each item on every render, so shallow equality
+ * would always fail and memo would do nothing. `onPress` only ever navigates to
+ * this row's id, so its identity is not meaningful; `escalationChain` is compared
+ * by content.
+ */
+function escalationChainEqual(
+  a: TicketListItemProps['escalationChain'],
+  b: TicketListItemProps['escalationChain'],
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].name !== b[i].name || a[i].avatar !== b[i].avatar) return false;
+  }
+  return true;
+}
+
+export default React.memo(TicketListItem, (prev, next) =>
+  prev.id === next.id &&
+  prev.title === next.title &&
+  prev.status === next.status &&
+  prev.priority === next.priority &&
+  prev.ticketNumber === next.ticketNumber &&
+  prev.createdAt === next.createdAt &&
+  prev.resolvedAt === next.resolvedAt &&
+  prev.assignedTo === next.assignedTo &&
+  prev.assigneePhotoUrl === next.assigneePhotoUrl &&
+  prev.photoUrl === next.photoUrl &&
+  prev.hasMaterial === next.hasMaterial &&
+  prev.materialCount === next.materialCount &&
+  escalationChainEqual(prev.escalationChain, next.escalationChain)
+);

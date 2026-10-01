@@ -19,6 +19,7 @@ import { useTheme } from '@/context';
 import TicketCard from '@/components/shared/TicketCard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 
 const { width: FLOWMAP_WIDTH, height: FLOWMAP_HEIGHT } = Dimensions.get('window');
@@ -100,6 +101,10 @@ export default function LiveFlowMap() {
     fetchFlowData,
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const tickets = data?.tickets ?? [];
   const propertyName = data?.propertyName ?? 'Property';
@@ -410,7 +415,7 @@ export default function LiveFlowMap() {
           style={styles.content}
           scrollEnabled={!isDragging}
           contentContainerStyle={{ paddingBottom: 100 }}
-          refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} />}
         >
           {activeStages.map((stage) => {
             const stageTickets = groupedTickets[stage.key] || [];

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   ActivityIndicator,
@@ -76,6 +77,10 @@ export default function SnagReportDetailScreen() {
     { staleTime: 1000 * 60 * 5 }
   );
 
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+
   const onRefresh = () => refetch();
 
   const bg = isDark ? '#151B2B' : '#F8FAFC';
@@ -87,7 +92,7 @@ export default function SnagReportDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}

@@ -345,7 +345,7 @@ export default function ElectricityAnalyticsScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.electricityAnalytics(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
 
   const meters = data?.meters ?? [];

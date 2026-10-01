@@ -35,26 +35,35 @@ export default function useOrgData(orgId: string) {
     setIsLoading(true);
 
     try {
-      // 1. Fetch organization details
-      const { data: orgData } = await serverApi.query<{ name: string }>({
-        table: 'organizations',
-        action: 'select',
-        select: 'name',
-        filters: [{ op: 'eq', column: 'id', value: orgId }],
-        single: true,
-      });
+      // ───────────────────────────────────────────────────────────────────────
+      // This used to be ~7 serial awaits PLUS three separate `for` loops that
+      // issued one request per property (electricity reading, health score,
+      // attention items). For an org with 20 properties that is 7 + 60 = 67
+      // sequential round trips to render one screen.
+      //
+      // Now: 2 waves, with the per-property work fanned out concurrently inside
+      // each wave.
+      // ───────────────────────────────────────────────────────────────────────
 
-      const orgName = orgData?.name || 'Organization';
+      // ── Wave 1: org name + the property list it all keys off ───────────────
+      const [orgRes, propsRes] = await Promise.all([
+        serverApi.query<{ name: string }>({
+          table: 'organizations',
+          action: 'select',
+          select: 'name',
+          filters: [{ op: 'eq', column: 'id', value: orgId }],
+          single: true,
+        }),
+        serverApi.query<any[]>({
+          table: 'properties',
+          action: 'select',
+          select: 'id, name, code, image_url, organization_id',
+          filters: [{ op: 'eq', column: 'organization_id', value: orgId }],
+        }),
+      ]);
 
-      // 2. Fetch all properties belonging to this organization
-      const { data: properties } = await serverApi.query<any[]>({
-        table: 'properties',
-        action: 'select',
-        select: '*',
-        filters: [{ op: 'eq', column: 'organization_id', value: orgId }],
-      });
-
-      const propertyList = (properties || []) as any[];
+      const orgName = orgRes.data?.name || 'Organization';
+      const propertyList = (propsRes.data || []) as any[];
       const propIds = propertyList.map((p: any) => p.id);
 
       if (propIds.length === 0) {
@@ -74,106 +83,110 @@ export default function useOrgData(orgId: string) {
         return;
       }
 
-      // 3. Fetch tickets across all properties
-      const { data: ticketsData } = await serverApi.query<any[]>({
-        table: 'tickets',
-        action: 'select',
-        select: '*',
-        filters: [{ op: 'in', column: 'property_id', values: propIds }],
-      });
-      const tickets = (ticketsData || []) as any[];
-
-      // 4. Fetch SOP completions across all properties
-      const { data: sopData } = await serverApi.query<any[]>({
-        table: 'sop_completions',
-        action: 'select',
-        select: 'status',
-        filters: [{ op: 'in', column: 'property_id', values: propIds }],
-      });
-
-      let sopTotal = 0;
-      let sopCount = 0;
-      if (sopData) {
-        sopTotal = sopData.length;
-        sopCount = sopData.filter((s: any) => s.status === 'completed').length;
-      }
-
-      // 5. Fetch energy readings (latest reading for each property, then sum)
-      let energyKwh = 0;
-      for (const propId of propIds) {
-        const { data: elecData } = await serverApi.query<any>({
-          table: 'electricity_readings',
+      // ── Wave 2: everything else, all at once ───────────────────────────────
+      const [
+        ticketsRes,
+        sopRes,
+        vmsRes,
+        revRes,
+        energyResults,
+        healthResults,
+        attentionResults,
+      ] = await Promise.all([
+        serverApi.query<any[]>({
+          table: 'tickets',
           action: 'select',
-          select: 'final_units',
-          filters: [{ op: 'eq', column: 'property_id', value: propId }],
-          orders: [{ column: 'created_at', ascending: false }],
-          limit: 1,
-          maybeSingle: true,
-        });
-        if (elecData) {
-          energyKwh += Math.round((elecData as any).final_units || 0);
-        }
-      }
+          // Explicit columns: this was `select: '*'` across EVERY property in the
+          // org, which pulls every column of every ticket over the wire.
+          select: 'id, ticket_number, title, status, priority, created_at, resolved_at, property_id, assigned_to, raised_by',
+          filters: [{ op: 'in', column: 'property_id', values: propIds }],
+        }),
+        serverApi.query<any[]>({
+          table: 'sop_completions',
+          action: 'select',
+          select: 'status',
+          filters: [{ op: 'in', column: 'property_id', values: propIds }],
+        }),
+        serverApi.query<any[]>({
+          table: 'visitor_logs',
+          action: 'select',
+          select: 'status',
+          filters: [{ op: 'in', column: 'property_id', values: propIds }],
+        }),
+        serverApi.query<any[]>({
+          table: 'vendor_daily_revenue',
+          action: 'select',
+          select: 'revenue_amount',
+          filters: [{ op: 'in', column: 'property_id', values: propIds }],
+        }),
 
-      // 6. Fetch visitor logs
-      const { data: vmsData } = await serverApi.query<any[]>({
-        table: 'visitor_logs',
-        action: 'select',
-        select: 'status',
-        filters: [{ op: 'in', column: 'property_id', values: propIds }],
-      });
+        // Per-property fan-outs. Still one request each (the latest reading per
+        // property and these two RPCs are not expressible as a single call), but
+        // concurrent rather than sequential.
+        Promise.all(
+          propIds.map((propId: string) =>
+            serverApi.query<any>({
+              table: 'electricity_readings',
+              action: 'select',
+              select: 'final_units',
+              filters: [{ op: 'eq', column: 'property_id', value: propId }],
+              orders: [{ column: 'created_at', ascending: false }],
+              limit: 1,
+              maybeSingle: true,
+            }).catch(() => ({ data: null, error: null }))
+          )
+        ),
+        Promise.all(
+          propIds.map((propId: string) =>
+            serverApi
+              .rpc<number>('get_property_health_score', { property_id: propId })
+              .catch(() => ({ data: null, error: null }))
+          )
+        ),
+        Promise.all(
+          propIds.map((propId: string) =>
+            serverApi
+              .rpc<any[]>('get_attention_items', { p_property_id: propId, p_limit: 3 })
+              .catch(() => ({ data: null, error: null }))
+          )
+        ),
+      ]);
 
-      let vmsStats = { total: 0, in: 0, out: 0 };
-      if (vmsData) {
-        const total = vmsData.length;
-        const checkedIn = vmsData.filter((v: any) => v.status === 'checked_in').length;
-        const checkedOut = vmsData.filter((v: any) => v.status === 'checked_out').length;
-        vmsStats = { total, in: checkedIn, out: checkedOut };
-      }
+      const tickets = (ticketsRes.data || []) as any[];
 
-      // 7. Fetch Cafeteria revenue
-      const { data: revData } = await serverApi.query<any[]>({
-        table: 'vendor_daily_revenue',
-        action: 'select',
-        select: 'revenue_amount',
-        filters: [{ op: 'in', column: 'property_id', values: propIds }],
-      });
+      const sopData = sopRes.data ?? [];
+      const sopTotal = sopData.length;
+      const sopCount = sopData.filter((s: any) => s.status === 'completed').length;
 
-      let vendorStats = { revenue: 0, commission: 0 };
-      if (revData) {
-        const totalRev = (revData as any[]).reduce((acc, row) => acc + (row.revenue_amount || 0), 0);
-        vendorStats = { revenue: totalRev, commission: totalRev * 0.1 };
-      }
+      const vmsData = vmsRes.data ?? [];
+      const vmsStats = {
+        total: vmsData.length,
+        in: vmsData.filter((v: any) => v.status === 'checked_in').length,
+        out: vmsData.filter((v: any) => v.status === 'checked_out').length,
+      };
 
-      // 8. Fetch health scores for each property and average them
-      let totalHealthScore = 0;
-      let validScoresCount = 0;
-      for (const propId of propIds) {
-        try {
-          const { data: healthData } = await serverApi.rpc<number>('get_property_health_score', {
-            property_id: propId,
-          });
-          if (healthData && typeof healthData === 'number') {
-            totalHealthScore += healthData;
-            validScoresCount++;
-          }
-        } catch (_) {}
-      }
-      const healthScore = validScoresCount > 0 ? Math.round(totalHealthScore / validScoresCount) : 100;
+      const totalRev = (revRes.data ?? []).reduce(
+        (acc: number, row: any) => acc + (row.revenue_amount || 0),
+        0
+      );
+      const vendorStats = { revenue: totalRev, commission: totalRev * 0.1 };
 
-      // 9. Fetch attention items across all properties
-      let attentionItems: any[] = [];
-      for (const propId of propIds) {
-        try {
-          const { data: attentionData } = await serverApi.rpc<any[]>('get_attention_items', {
-            p_property_id: propId,
-            p_limit: 3,
-          });
-          if (attentionData && Array.isArray(attentionData)) {
-            attentionItems = [...attentionItems, ...attentionData];
-          }
-        } catch (_) {}
-      }
+      const energyKwh = energyResults.reduce(
+        (acc: number, r: any) => acc + Math.round(r?.data?.final_units || 0),
+        0
+      );
+
+      const validScores = healthResults
+        .map((r: any) => r?.data)
+        .filter((v: any): v is number => typeof v === 'number');
+      const healthScore =
+        validScores.length > 0
+          ? Math.round(validScores.reduce((a: number, b: number) => a + b, 0) / validScores.length)
+          : 100;
+
+      const attentionItems = attentionResults.flatMap((r: any) =>
+        Array.isArray(r?.data) ? r.data : []
+      );
 
       setData({
         orgName,

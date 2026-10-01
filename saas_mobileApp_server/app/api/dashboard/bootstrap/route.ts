@@ -3,6 +3,16 @@ import { getAuthenticatedUser, getPropertyAccess } from "@/lib/auth";
 import { getCache, setCache, CACHE_TTL } from "@/lib/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+/** Statuses that count as "open" on the dashboard tile. */
+const OPEN_TICKET_STATUSES = [
+  "open",
+  "in_progress",
+  "assigned",
+  "client_raised",
+  "waitlist",
+  "blocked",
+] as const;
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
@@ -40,7 +50,9 @@ export async function GET(request: NextRequest) {
       profileResult,
       notificationsResult,
       recentTicketsResult,
-      ticketStatsResult,
+      ticketTotalResult,
+      ticketOpenResult,
+      ticketMineResult,
       propertyResult,
       stockResult,
       sopTemplatesResult,
@@ -65,10 +77,22 @@ export async function GET(request: NextRequest) {
         .order("created_at", { ascending: false })
         .limit(50),
 
-      // Ticket Stats
+      // Ticket Stats — counted in the DB. This used to select every ticket row
+      // for the property just to call .length and .filter() on them, which grew
+      // linearly with ticket history on the single hottest request in the app.
       admin.from("tickets")
-        .select("id, status, assigned_to")
+        .select("id", { count: "exact", head: true })
         .eq("property_id", propertyId),
+
+      admin.from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("property_id", propertyId)
+        .in("status", OPEN_TICKET_STATUSES),
+
+      admin.from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("property_id", propertyId)
+        .eq("assigned_to", userId),
 
       // Property Name
       admin.from("properties").select("name").eq("id", propertyId).single(),
@@ -93,9 +117,9 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Compute derived stats
-    const allTickets = ticketStatsResult.data ?? [];
-    const openTickets = allTickets.filter(t => ['open', 'in_progress', 'assigned', 'client_raised', 'waitlist', 'blocked'].includes(t.status)).length;
-    const myTickets = allTickets.filter(t => t.assigned_to === userId).length;
+    const totalTickets = ticketTotalResult.count ?? 0;
+    const openTickets = ticketOpenResult.count ?? 0;
+    const myTickets = ticketMineResult.count ?? 0;
 
     const allStock = stockResult.data ?? [];
     const lowStock = allStock.filter(s => s.quantity > 0 && s.quantity <= (s.min_threshold ?? 10)).length;
@@ -107,7 +131,7 @@ export async function GET(request: NextRequest) {
       notifications: { unreadCount: notificationsResult.count ?? 0 },
       recentTickets: recentTicketsResult.data ?? [],
       ticketStats: {
-        total: allTickets.length,
+        total: totalTickets,
         open: openTickets,
         mine: myTickets,
       },

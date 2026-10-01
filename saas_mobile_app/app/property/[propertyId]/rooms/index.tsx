@@ -302,7 +302,7 @@ export default function RoomsScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.rooms(propertyId),
     fetchData,
-    { staleTime: 1000 * 30, refetchOnMount: 'always' }
+    { staleTime: 1000 * 30, refetchOnMount: true }
   );
 
   const rooms = data?.rooms ?? [];

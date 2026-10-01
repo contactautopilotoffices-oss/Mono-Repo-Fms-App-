@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -56,6 +57,10 @@ export default function ExecutiveSummaryScreen() {
     load,
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const onRefresh = () => refetch();
 
@@ -117,7 +122,7 @@ export default function ExecutiveSummaryScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}

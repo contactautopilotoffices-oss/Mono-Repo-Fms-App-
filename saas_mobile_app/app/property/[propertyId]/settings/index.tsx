@@ -21,6 +21,7 @@ import { useGlobalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/context';
 import { useAuth } from '@/hooks/useAuth';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 import { Colors, DASHBOARD_BACKGROUNDS, type DashboardBgKey } from '@/constants/Colors';
 import { createClient } from '@/utils/supabase/client';
@@ -167,6 +168,10 @@ export default function SettingsScreen() {
     fetchData,
     { staleTime: 1000 * 60 * 5 }
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const property = data?.property ?? null;
   const userProfile = data?.userProfile ?? null;
@@ -427,7 +432,7 @@ export default function SettingsScreen() {
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />}
         contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
       >
         {/* ── Property ── */}

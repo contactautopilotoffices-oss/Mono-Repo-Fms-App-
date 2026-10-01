@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAnonClient } from "@/lib/supabase/client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verifySupabaseJwt, canVerifyLocally } from "@/lib/jwt";
+import { getCache, setCache, deleteCache } from "@/lib/cache";
 
 export interface AuthenticatedUser {
   id: string;
@@ -27,6 +29,31 @@ export async function getAuthenticatedUser(request: NextRequest): Promise<{
     };
   }
 
+  // Fast path: verify the JWT signature locally. This replaces a 100 to 300 ms
+  // HTTP round trip to Supabase Auth that previously ran on EVERY request to
+  // every route, before any cache lookup.
+  //
+  // On anything it cannot verify it falls THROUGH to the network check rather
+  // than rejecting. That matters: Supabase projects using asymmetric signing keys
+  // (ES256/RS256) issue tokens this HS256 path cannot validate, and a hard reject
+  // there would 401 every single request. Falling through means the worst case is
+  // the old behaviour (one extra round trip), never a lockout. Security is
+  // unchanged because a forged token fails both checks.
+  if (canVerifyLocally()) {
+    const claims = verifySupabaseJwt(token);
+    if (claims) {
+      return {
+        token,
+        user: {
+          id: claims.sub,
+          email: typeof claims.email === "string" ? claims.email : undefined
+        }
+      };
+    }
+  }
+
+  // Authoritative check: used when no JWT secret is configured, when the token is
+  // not HS256, or when local verification rejected it.
   const supabase = createAnonClient(token);
   const { data, error } = await supabase.auth.getUser(token);
 
@@ -72,10 +99,105 @@ const MST_ROLES = ['mst', 'master_admin', 'super_admin'];
 // Mirrors saas_one web app property-access logic + super_tenant portfolio check.
 // Any user that can READ property data passes this gate.
 
-export async function getPropertyAccess(userId: string, propertyId: string) {
-  const admin = createAdminClient();
+export type PropertyAccess =
+  | { authorized: true; role: string }
+  | { authorized: false; role?: undefined };
 
-  console.log(`[getPropertyAccess] START userId: ${userId}, propertyId: ${propertyId}`);
+/** How long a property-access decision is trusted in Redis. */
+const ACCESS_CACHE_TTL_SECONDS = 5 * 60;
+
+/**
+ * In-process fallback TTL, in ms.
+ *
+ * Deliberately much shorter than the Redis TTL: an in-memory entry cannot be
+ * invalidated from another instance, so the window in which a revoked membership
+ * still passes must stay small. This exists so the saved DB round trips do not
+ * depend on Redis being configured.
+ */
+const ACCESS_MEMO_TTL_MS = 60 * 1000;
+
+/** Bound the map so a long-lived instance cannot grow it without limit. */
+const ACCESS_MEMO_MAX_ENTRIES = 500;
+
+const accessMemo = new Map<string, { role: string; at: number }>();
+
+function accessCacheKey(userId: string, propertyId: string): string {
+  return `access:${userId}:${propertyId}`;
+}
+
+function readMemo(key: string): string | null {
+  const hit = accessMemo.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > ACCESS_MEMO_TTL_MS) {
+    accessMemo.delete(key);
+    return null;
+  }
+  return hit.role;
+}
+
+function writeMemo(key: string, role: string): void {
+  if (accessMemo.size >= ACCESS_MEMO_MAX_ENTRIES) {
+    // Evict the oldest insertion; Map preserves insertion order.
+    const oldest = accessMemo.keys().next().value;
+    if (oldest !== undefined) accessMemo.delete(oldest);
+  }
+  accessMemo.set(key, { role, at: Date.now() });
+}
+
+/**
+ * Drop a cached access decision.
+ *
+ * Call this whenever a membership changes (added, removed, role changed, or
+ * deactivated) so a revoked user stops passing the gate before the TTL lapses.
+ */
+export async function invalidatePropertyAccess(userId: string, propertyId: string): Promise<void> {
+  const key = accessCacheKey(userId, propertyId);
+  accessMemo.delete(key);
+  await deleteCache(key);
+}
+
+/**
+ * Property access gate, cached.
+ *
+ * The underlying resolver runs 2 to 4 sequential DB queries, and it ran on every
+ * single request to every property-scoped route, including requests that then
+ * hit a Redis cache and did no other DB work at all. Caching the decision for a
+ * few minutes removes that fixed cost from the hot path.
+ *
+ * Only positive decisions are cached. A denial is cheap to recompute and must
+ * not be sticky: a user who has just been granted access should not be locked
+ * out for the rest of the TTL.
+ */
+export async function getPropertyAccess(
+  userId: string,
+  propertyId: string
+): Promise<PropertyAccess> {
+  const key = accessCacheKey(userId, propertyId);
+
+  // 1. In-process memo: no network at all.
+  const memoRole = readMemo(key);
+  if (memoRole) return { authorized: true, role: memoRole };
+
+  // 2. Redis, when configured (shared across instances).
+  const cached = await getCache<{ role: string }>(key);
+  if (cached?.role) {
+    writeMemo(key, cached.role);
+    return { authorized: true, role: cached.role };
+  }
+
+  // 3. The real thing: 2 to 4 sequential DB queries.
+  const result = await resolvePropertyAccess(userId, propertyId);
+
+  if (result.authorized && result.role) {
+    writeMemo(key, result.role);
+    await setCache(key, { role: result.role }, ACCESS_CACHE_TTL_SECONDS);
+  }
+
+  return result;
+}
+
+async function resolvePropertyAccess(userId: string, propertyId: string): Promise<PropertyAccess> {
+  const admin = createAdminClient();
 
   // 1. Master admin bypass
   const { data: userProfile } = await admin
@@ -85,7 +207,6 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .maybeSingle();
 
   if (userProfile?.is_master_admin) {
-    console.log(`[getPropertyAccess] Master admin bypass`);
     return { authorized: true, role: "master_admin" };
   }
 
@@ -108,7 +229,6 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     .maybeSingle();
 
   if (pmError) console.error(`[getPropertyAccess] Property membership error:`, pmError);
-  console.log(`[getPropertyAccess] propertyMembership:`, propertyMembership);
 
   if (propertyMembership) {
     // MST users from property_memberships get access
@@ -130,7 +250,6 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
       .maybeSingle();
 
     if (omError) console.error(`[getPropertyAccess] Org membership error:`, omError);
-    console.log(`[getPropertyAccess] orgMembership:`, orgMembership);
 
     if (orgMembership) {
       // MST users get access to ALL properties in the org
@@ -163,6 +282,5 @@ export async function getPropertyAccess(userId: string, propertyId: string) {
     }
   }
 
-  console.log(`[getPropertyAccess] FAILED. Returning authorized: false`);
   return { authorized: false as const };
 }
