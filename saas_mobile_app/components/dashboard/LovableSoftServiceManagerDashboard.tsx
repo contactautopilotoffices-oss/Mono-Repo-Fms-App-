@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo, useRef} from 'react';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import {
   View,
@@ -736,10 +736,24 @@ export default function LovableSoftServiceManagerDashboard({ propertyId }: Props
     });
   }, []);
 
+  // Recovery refetch, at most once per property.
+  //
+  // This previously had isFetching and hasValidDashboardData in its deps with no
+  // guard, so any response that did not satisfy hasValidDashboardData (an error
+  // payload, a 403, an unexpected shape) produced a loop: fetch settles ->
+  // isFetching false -> effect reruns -> refetch -> repeat, hammering the server
+  // for as long as the screen stayed open.
+  const recoveryFetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (propertyId && !hasValidDashboardData && !isFetching) {
-      refetch();
+    if (!propertyId) return;
+    if (hasValidDashboardData) {
+      recoveryFetchedFor.current = null; // reset so a later failure can retry once
+      return;
     }
+    if (isFetching) return;
+    if (recoveryFetchedFor.current === propertyId) return;
+    recoveryFetchedFor.current = propertyId;
+    refetch();
   }, [propertyId, hasValidDashboardData, isFetching, refetch]);
 
   const onRefresh = () => {

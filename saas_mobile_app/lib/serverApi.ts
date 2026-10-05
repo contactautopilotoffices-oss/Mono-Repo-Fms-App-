@@ -5,8 +5,14 @@
 // Supabase directly. The interface is identical so all callers are unaffected.
 // ============================================================================
 
-import { getCurrentUserId, getSupabaseToken } from '@/utils/supabase/mobile-auth';
-import { fetchWithRetry } from '@/utils/api/fetchWithRetry';
+import {
+  getCurrentUserId,
+  getSupabaseToken,
+  getAuthTokens,
+  clearAuthTokenCache,
+  type AuthTokens,
+} from '@/utils/supabase/mobile-auth';
+import { fetchWithRetry, type FetchRetryOptions } from '@/utils/api/fetchWithRetry';
 import { showNetworkErrorToast } from '@/utils/networkToast';
 
 // ---------------------------------------------------------------------------
@@ -14,7 +20,57 @@ import { showNetworkErrorToast } from '@/utils/networkToast';
 // ---------------------------------------------------------------------------
 
 const MOBILE_SERVER_URL = process.env.EXPO_PUBLIC_MOBILE_SERVER_URL ?? 'http://192.168.31.236:3000';
-console.log('[serverApi] Initialized with MOBILE_SERVER_URL:', MOBILE_SERVER_URL);
+
+if (__DEV__) {
+  console.log('[serverApi] Initialized with MOBILE_SERVER_URL:', MOBILE_SERVER_URL);
+}
+
+const SUPABASE_PROJECT_ID = (() => {
+  const match = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').match(
+    /https:\/\/([^.]+)\.supabase\.co/
+  );
+  return match ? match[1] : null;
+})();
+
+/**
+ * Build request headers from an already-resolved token snapshot.
+ *
+ * Centralised so the three call paths (query, GET, request) cannot drift, and so
+ * none of them re-reads the session: that was the per-request cost this replaces.
+ */
+function buildAuthHeaders(tokens: AuthTokens | null, contentType?: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (contentType) headers['Content-Type'] = contentType;
+  if (!tokens?.accessToken) return headers;
+
+  headers['Authorization'] = `Bearer ${tokens.accessToken}`;
+
+  // Auth cookie, kept for the case where MOBILE_SERVER_URL points at the Next.js
+  // web app, whose middleware expects a Cookie rather than a bearer token.
+  //
+  // The expensive part was never building the header: it was that each call site
+  // made a SECOND getSession() read just to obtain the refresh token. The token
+  // snapshot now carries both from one read, so this costs a string concat.
+  if (SUPABASE_PROJECT_ID && tokens.refreshToken) {
+    const cookieValue = JSON.stringify([
+      tokens.accessToken,
+      tokens.refreshToken,
+      null,
+      null,
+      null,
+    ]);
+    headers['Cookie'] = `sb-${SUPABASE_PROJECT_ID}-auth-token=${encodeURIComponent(cookieValue)}`;
+  }
+
+  return headers;
+}
+
+/** Writes must not be auto-replayed; a timed-out mutation may already have landed. */
+function retryPolicyFor(body: unknown): FetchRetryOptions {
+  const action = (body as { action?: string } | null)?.action;
+  const isMutation = !!action && action !== 'select';
+  return isMutation ? { maxRetries: 1 } : {};
+}
 
 // ---------------------------------------------------------------------------
 // Response type (kept identical for callers)
@@ -58,79 +114,32 @@ interface QueryFilter {
 // ---------------------------------------------------------------------------
 
 async function serverFetch(endpoint: string, body: unknown): Promise<unknown> {
-  const doFetch = async (authToken: string | null) => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+  const retryPolicy = retryPolicyFor(body);
+  // Serialise once, not once per attempt.
+  const payload = JSON.stringify(body);
 
-    const { createClient } = require('@/utils/supabase/client');
-    const supabase = createClient();
-    
-    // If no token was provided, try to fetch it directly from the local client session
-    if (!authToken) {
-      try {
-        const { data } = await supabase.auth.getSession();
-        authToken = data?.session?.access_token || null;
-      } catch (e) {
-        console.warn('[serverApi] Failed to get session for auth token:', e);
-      }
-    }
+  const doFetch = async (tokens: AuthTokens | null) =>
+    fetchWithRetry(
+      `${MOBILE_SERVER_URL}${endpoint}`,
+      {
+        method: 'POST',
+        headers: buildAuthHeaders(tokens, 'application/json'),
+        body: payload,
+      },
+      retryPolicy
+    );
 
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-      
-      // Defensive fix: If the MOBILE_SERVER_URL inadvertently points to the Next.js web app (e.g. www.back2basiics.com)
-      // the web app's middleware.ts will reject the request with 401 Unauthorized because it expects a Cookie,
-      // not just a Bearer token. We synthesize the cookie here just like apiFetch does.
-      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-      const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
-      if (projectIdMatch) {
-        const projectId = projectIdMatch[1];
-        const cookieName = `sb-${projectId}-auth-token`;
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (data?.session) {
-            const cookieValue = JSON.stringify([
-              data.session.access_token,
-              data.session.refresh_token,
-              null,
-              null,
-              null
-            ]);
-            headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
-          }
-        } catch (e) {
-          console.warn('[serverApi] Failed to synthesize cookie:', e);
-        }
-      }
-    }
+  let tokens = await getAuthTokens();
+  let response = await doFetch(tokens);
 
-    console.log(`[serverApi] POST ${MOBILE_SERVER_URL}${endpoint}`);
-    return fetchWithRetry(`${MOBILE_SERVER_URL}${endpoint}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-  };
-
-  let token = await getSupabaseToken();
-  let response = await doFetch(token);
-
-  // Retry once on 401 — force-refresh the session to get a fresh access token
-  if (response.status === 401) {
-    token = await getSupabaseToken(true);
-    if (token) {
-      response = await doFetch(token);
-    }
-  }
-
-  // Retry once on 403 — property-switching race: prefetch fires before the
-  // session token is updated; a force-refresh gets the correct fresh token
-  // which lets the server re-evaluate the user's property_membership.
-  if (response.status === 403) {
-    token = await getSupabaseToken(true);
-    if (token) {
-      response = await doFetch(token);
+  // Retry once on 401 (expired token) or 403 (property-switch race: the request
+  // went out before the session carried the new property membership). Both are
+  // fixed by forcing a fresh token, and one retry covers both cases.
+  if (response.status === 401 || response.status === 403) {
+    clearAuthTokenCache();
+    tokens = await getAuthTokens(true);
+    if (tokens) {
+      response = await doFetch(tokens);
     }
   }
 
@@ -149,67 +158,31 @@ async function serverGet(
   endpoint: string,
   query?: Record<string, string | number | boolean | null | undefined>
 ): Promise<unknown> {
-  const doFetch = async (authToken: string | null) => {
-    const headers: Record<string, string> = {};
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-
-      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-      const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
-      if (projectIdMatch) {
-        const projectId = projectIdMatch[1];
-        const cookieName = `sb-${projectId}-auth-token`;
-        const { createClient } = require('@/utils/supabase/client');
-        const supabase = createClient();
-        // Fire and forget since doFetch isn't normally strictly awaiting the cookie, 
-        // but wait! We are inside an async function. Let's await it.
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (data?.session) {
-            const cookieValue = JSON.stringify([
-              data.session.access_token,
-              data.session.refresh_token,
-              null,
-              null,
-              null
-            ]);
-            headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
-          }
-        } catch (e) {}
-      }
-    }
-
-    const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
-    for (const [key, value] of Object.entries(query ?? {})) {
-      if (value !== undefined && value !== null && value !== '') {
-        url.searchParams.set(key, String(value));
-      }
-    }
-
-    console.log(`[serverApi] GET ${url.toString()}`);
-
-    return fetchWithRetry(url.toString(), {
-      method: 'GET',
-      headers,
-    });
-  };
-
-  let token = await getSupabaseToken();
-  let response = await doFetch(token);
-
-  // Retry once on 401 — force-refresh the session to get a fresh access token
-  if (response.status === 401) {
-    token = await getSupabaseToken(true);
-    if (token) {
-      response = await doFetch(token);
+  // Build the URL once, outside the attempt closure.
+  const url = new URL(`${MOBILE_SERVER_URL}${endpoint}`);
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
     }
   }
+  const href = url.toString();
 
-  // Retry once on 403 — property-switching race (same as serverFetch above)
-  if (response.status === 403) {
-    token = await getSupabaseToken(true);
-    if (token) {
-      response = await doFetch(token);
+  const doFetch = async (tokens: AuthTokens | null) =>
+    fetchWithRetry(href, {
+      method: 'GET',
+      headers: buildAuthHeaders(tokens),
+    });
+
+  let tokens = await getAuthTokens();
+  let response = await doFetch(tokens);
+
+  // One forced-refresh retry covers both an expired token (401) and the
+  // property-switch race (403).
+  if (response.status === 401 || response.status === 403) {
+    clearAuthTokenCache();
+    tokens = await getAuthTokens(true);
+    if (tokens) {
+      response = await doFetch(tokens);
     }
   }
 
@@ -345,63 +318,30 @@ export const serverApi = {
   },
 
   async request(endpoint: string, method: string, body?: unknown): Promise<unknown> {
-    const doFetch = async (tokenParam: string | null) => {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      const { createClient } = require('@/utils/supabase/client');
-      const supabase = createClient();
-      let authToken = tokenParam;
-      
-      // If no token was provided, try to fetch it directly from the local client session
-      if (!authToken) {
-        try {
-          const { data } = await supabase.auth.getSession();
-          authToken = data?.session?.access_token || null;
-        } catch (e) {
-          console.warn('[serverApi] Failed to get session for auth token:', e);
-        }
-      }
+    const payload = body ? JSON.stringify(body) : undefined;
+    // Anything that is not a GET changes state, so it must not be auto-replayed.
+    const retryPolicy: FetchRetryOptions =
+      method.toUpperCase() === 'GET' ? {} : { maxRetries: 1 };
 
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-        const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-        const projectIdMatch = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
-        if (projectIdMatch) {
-          const projectId = projectIdMatch[1];
-          const cookieName = `sb-${projectId}-auth-token`;
-          try {
-            const { data } = await supabase.auth.getSession();
-            if (data?.session) {
-              const cookieValue = JSON.stringify([
-                data.session.access_token,
-                data.session.refresh_token,
-                null,
-                null,
-                null
-              ]);
-              headers['Cookie'] = `${cookieName}=${encodeURIComponent(cookieValue)}`;
-            }
-          } catch (e) {
-            console.warn('[serverApi] Failed to synthesize cookie:', e);
-          }
-        }
-      }
-      return fetchWithRetry(`${MOBILE_SERVER_URL}${endpoint}`, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    };
+    const doFetch = async (tokens: AuthTokens | null) =>
+      fetchWithRetry(
+        `${MOBILE_SERVER_URL}${endpoint}`,
+        {
+          method,
+          headers: buildAuthHeaders(tokens, 'application/json'),
+          body: payload,
+        },
+        retryPolicy
+      );
 
-    let token = await getSupabaseToken();
-    let response = await doFetch(token);
+    let tokens = await getAuthTokens();
+    let response = await doFetch(tokens);
 
-    if (response.status === 401) {
-      token = await getSupabaseToken(true);
-      if (token) {
-        response = await doFetch(token);
+    if (response.status === 401 || response.status === 403) {
+      clearAuthTokenCache();
+      tokens = await getAuthTokens(true);
+      if (tokens) {
+        response = await doFetch(tokens);
       }
     }
 

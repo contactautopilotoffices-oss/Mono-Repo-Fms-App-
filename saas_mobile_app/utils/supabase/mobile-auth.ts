@@ -108,6 +108,72 @@ export async function getSupabaseToken(forceRefresh = false): Promise<string | n
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Auth token snapshot (single read per request)
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string | null;
+}
+
+/**
+ * Short-lived memo of the last successful token read.
+ *
+ * Each outbound API call used to call getSession() two or three times (once for
+ * the bearer token, again to synthesise the auth cookie). getSession() takes an
+ * internal lock and can touch storage, so on a screen that fires several
+ * requests it was real serialised work on the JS thread for a value that cannot
+ * meaningfully change between calls in the same tick.
+ *
+ * The TTL is deliberately far shorter than the token lifetime, and
+ * getSupabaseToken() still does its own expiry check, so a stale entry can never
+ * outlive the token it holds.
+ */
+const TOKEN_MEMO_TTL_MS = 3000;
+let tokenMemo: { tokens: AuthTokens; at: number } | null = null;
+
+/** Drop the memo. Call on sign-out, sign-in, or any forced refresh. */
+export function clearAuthTokenCache(): void {
+  tokenMemo = null;
+}
+
+/**
+ * Get access + refresh token in ONE session read, memoised for a few seconds.
+ *
+ * Prefer this over calling getSupabaseToken() and getSession() separately.
+ */
+export async function getAuthTokens(forceRefresh = false): Promise<AuthTokens | null> {
+  if (forceRefresh) clearAuthTokenCache();
+
+  const memo = tokenMemo;
+  if (memo && Date.now() - memo.at < TOKEN_MEMO_TTL_MS) {
+    return memo.tokens;
+  }
+
+  const accessToken = await getSupabaseToken(forceRefresh);
+  if (!accessToken) {
+    clearAuthTokenCache();
+    return null;
+  }
+
+  let refreshToken: string | null = null;
+  try {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    // Only pair the refresh token with the access token we actually return.
+    if (data?.session?.access_token === accessToken) {
+      refreshToken = data.session.refresh_token ?? null;
+    }
+  } catch {
+    // Non-fatal: the bearer token alone is enough for the Fastify server.
+  }
+
+  const tokens: AuthTokens = { accessToken, refreshToken };
+  tokenMemo = { tokens, at: Date.now() };
+  return tokens;
+}
+
 /**
  * Get the current user's ID, with the same session-first strategy as getSupabaseToken.
  * Safe to call from non-React service files (unlike useAuth() which requires a hook).

@@ -56,6 +56,7 @@ import {
 } from "lucide-react-native";
 import { useServerQuery } from "@/hooks/useServerQuery";
 import { queryKeys } from '@/utils/queryKeys';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 
 Dimensions.get("window");
 
@@ -254,6 +255,10 @@ export default function StockScreen() {
     { staleTime: 1000 * 60 * 5 }
   );
 
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
   const categories: string[] = data?.categories ?? [];
@@ -289,8 +294,6 @@ export default function StockScreen() {
   }, [items]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  const handleRefresh = () => refetch();
-
   const handleBulkImportSuccess = (count: number) => {
     refetch();
     Alert.alert('Success', `Imported ${count} items successfully!`);
@@ -674,8 +677,8 @@ export default function StockScreen() {
         keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl
-            refreshing={isFetching}
-            onRefresh={handleRefresh}
+            refreshing={pullRefreshing}
+            onRefresh={onPullRefresh}
             tintColor="#3B82F6"
           />
         }

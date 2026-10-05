@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useState, useCallback } from 'react';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   TouchableOpacity, ActivityIndicator,
@@ -110,6 +111,10 @@ export default function RequestsReportScreen() {
     { staleTime: 1000 * 60 * 5 }
   );
 
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+
   const onRefresh = () => refetch();
 
   const prevMonth = () => { if (monthIdx < MONTHS.length - 1) setMonthIdx(m => m + 1); };
@@ -124,7 +129,7 @@ export default function RequestsReportScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />
+          <RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />
         }
       >
         {/* Header */}

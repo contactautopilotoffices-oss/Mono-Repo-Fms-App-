@@ -26,10 +26,14 @@ export function useServerQuery<T>(
     queryFn,
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 60 * 24,
-    retry: 2,
+    retry: 1,
     refetchOnWindowFocus: false,
     networkMode: 'offlineFirst',
-    enabled: !!queryKey[queryKey.length - 1],
+    // Guard against an unresolved id in the key (e.g. a route param that is still
+    // undefined on first render) without disabling a query whose last key segment
+    // is legitimately an empty string, 0 or false — a filter or search term, say.
+    // The old `!!queryKey[queryKey.length - 1]` silently never ran those.
+    enabled: queryKey.every((part) => part !== undefined && part !== null),
     ...options,
   });
 }

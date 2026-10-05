@@ -51,7 +51,7 @@ export default function CafeteriaHistoryScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load cafeteria data'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: true }
   );
 
   const vendors = useMemo(() => {
@@ -74,7 +74,7 @@ export default function CafeteriaHistoryScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load revenue history'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: true }
   );
 
   const filteredRevenues = useMemo(() => {

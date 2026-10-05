@@ -71,39 +71,24 @@ export async function prefetchCriticalOnLogin(
 ): Promise<void> {
   if (!propertyId || propertyId === 'all') return;
 
-  // Small delay to let the Supabase session token fully propagate after sign-in.
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  // Short delay to let the Supabase session token settle after sign-in. Was
+  // 1500ms, which simply postponed the dashboard prefetch by a second and a half
+  // on every login. serverApi now force-refreshes the token and retries once on a
+  // 401, so a token that is not quite ready self-heals instead of needing to be
+  // waited out.
+  await new Promise((resolve) => setTimeout(resolve, 300));
 
   // Prefetch dashboard data - this is the main critical prefetch
   await prefetchDashboard(propertyId);
 
-  // Also prefetch tickets with the EXACT query key the ticket page uses
-  try {
-    await queryClient.prefetchQuery({
-      queryKey: ['tickets', propertyId, 'all', 'all', 'false', '20'],
-      queryFn: async () => {
-        const { data } = await serverApi.query({
-          table: 'tickets',
-          action: 'select',
-          select: `id, title, description, status, priority, ticket_number, created_at,
-                   property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
-                   assignee:users!assigned_to(id, full_name, user_photo_url),
-                   creator:users!raised_by(id, full_name)`,
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'created_at', ascending: false }],
-          limit: 21,
-        });
-        return data ?? [];
-      },
-      staleTime: 5 * 60 * 1000,
-    });
-  } catch (error: any) {
-    if (isAccessDeniedError(error)) {
-      console.log('[prefetchService] Skipping tickets prefetch - no access to property');
-    } else {
-      console.error('[prefetchService] Tickets prefetch error:', error);
-    }
-  }
+  // NOTE: a tickets prefetch used to live here. It was dead code in two ways:
+  // it wrote a bare array while the list screen caches
+  // `{ tickets, hasMore }`, and it hardcoded the query key
+  // `['tickets', propertyId, 'all', 'all', 'false', '20']`, which never matched
+  // the key the screen actually registers (that key also carries the category,
+  // raisedBy, assignedTo, sort and search filters). So it spent a request on
+  // every login and populated an entry nothing ever read. The dashboard prefetch
+  // above already warms what the first screen needs.
 }
 
 // ---------------------------------------------------------------------------

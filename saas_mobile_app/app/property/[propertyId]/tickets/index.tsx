@@ -31,6 +31,7 @@ import SafeBlurView from '@/components/ui/SafeBlurView';
 import { RotatingBorder } from '@/components/shared/RotatingBorder';
 import { TicketCreateModal } from '@/components/tickets/TicketCreateModal';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { queryKeys } from '@/utils/queryKeys';
 import { queryClient } from '@/utils/queryClient';
 
@@ -164,6 +165,10 @@ export default function TicketsScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // The input renders `searchQuery` so typing stays instant; only the network
+  // query uses the debounced value. Previously every keystroke triggered a
+  // refetch (which also re-ran the status counts).
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [raisedByFilter, setRaisedByFilter] = useState('all');
@@ -251,8 +256,8 @@ export default function TicketsScreen() {
       queryFilters.push({ op: 'neq', column: 'internal', value: true });
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase().trim();
       queryFilters.push({ op: 'or', expression: `title.ilike.*${q}*,ticket_number.ilike.*${q}*,description.ilike.*${q}*` });
     }
 
@@ -273,7 +278,7 @@ export default function TicketsScreen() {
       limit,
       offset,
     };
-  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant, searchQuery]);
+  }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant, debouncedSearch]);
 
 const defaultCounts: Record<StatusFilter, number> = {
   all: 0, mine: 0, open: 0, closed: 0,
@@ -326,12 +331,22 @@ const getStatusCounts = useCallback(async () => {
       return res.count ?? 0;
     };
 
-    counts.all = await fetchCount([]);
-    if (authUser?.id) {
-      counts.mine = await fetchCount([{ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` }]);
-    }
-    counts.open = await fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] }]);
-    counts.closed = await fetchCount([{ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] }]);
+    // These four counts are independent, so they run concurrently. Awaiting them
+    // one by one meant the list waited on four serialised round trips (on top of
+    // the ticket query itself) before it could paint.
+    const [all, mine, open, closed] = await Promise.all([
+      fetchCount([]),
+      authUser?.id
+        ? fetchCount([{ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` }])
+        : Promise.resolve(0),
+      fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] }]),
+      fetchCount([{ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] }]),
+    ]);
+
+    counts.all = all;
+    counts.mine = mine;
+    counts.open = open;
+    counts.closed = closed;
 
     return counts;
   } catch (err) {
@@ -341,13 +356,13 @@ const getStatusCounts = useCallback(async () => {
 }, [propertyId, dateRange, authUser?.id, membership?.properties, isTenant]);
 
 const fetchTickets = useCallback(async () => {
-  if (!isValidProperty) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+  if (!isValidProperty) return { tickets: [] as Ticket[], hasMore: false };
   try {
     const qParams = buildQueryParams(0, limit + 1);
-    if (!qParams) return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
-    
+    if (!qParams) return { tickets: [] as Ticket[], hasMore: false };
+
     const res = await serverApi.query<Ticket[]>(qParams as any);
-    
+
     let items: Ticket[] = (res.data ?? []) as Ticket[];
     if (res.error && (res.error as any).code === 'PGRST116') {
       items = [];
@@ -359,23 +374,63 @@ const fetchTickets = useCallback(async () => {
     if (isTenant) {
       items = items.filter(t => !t.internal);
     }
-    
+
     const hasMoreItems = items.length > limit;
-    const counts = await getStatusCounts();
-    return { tickets: items.slice(0, limit), hasMore: hasMoreItems, statusCounts: counts };
+    return { tickets: items.slice(0, limit), hasMore: hasMoreItems };
   } catch (err) {
     console.error('Error fetching tickets:', err);
-    return { tickets: [] as Ticket[], hasMore: false, statusCounts: defaultCounts };
+    return { tickets: [] as Ticket[], hasMore: false };
   }
-}, [propertyId, buildQueryParams, limit, getStatusCounts, membership?.role]);
+}, [propertyId, buildQueryParams, limit, membership?.role]);
 
+// EVERY input that changes the server query belongs in the key. Previously
+// category/raisedBy/assignedTo/sortBy/search were missing from it, so changing a
+// filter wrote different data into the SAME cache entry and needed a hand-rolled
+// refetch() effect to stay correct. With them in the key React Query refetches on
+// its own, each filter combination is cached separately, and going back to a
+// previous filter is instant instead of another round trip.
 const { data, isLoading, isFetching, refetch } = useServerQuery(
-  [...queryKeys.property.tickets(propertyId), statusFilter, dateRange, String(isNeedsAttentionMode), String(limit)],
+  [
+    ...queryKeys.property.tickets(propertyId),
+    statusFilter,
+    dateRange,
+    String(isNeedsAttentionMode),
+    String(limit),
+    categoryFilter,
+    raisedByFilter,
+    assignedToFilter,
+    sortBy,
+    debouncedSearch,
+  ],
   fetchTickets,
-  { 
+  {
     staleTime: 1000 * 60 * 5,
     enabled: isValidProperty,
-    refetchOnMount: 'always',
+    // `true`, not 'always': a cached filter combination paints immediately and
+    // only refetches once it is stale.
+    refetchOnMount: true,
+    // Keep showing the previous page/filter's rows while the next one loads, so
+    // the list never flashes empty when a filter changes.
+    placeholderData: (prev: any) => prev,
+  }
+);
+
+// Status counts live in their own cache entry, keyed WITHOUT `limit`, because
+// paginating cannot change them. Folded into the list query they were recomputed
+// (four count queries) every time the user tapped "Load more".
+const { data: statusCountsData } = useServerQuery(
+  [
+    ...queryKeys.property.tickets(propertyId),
+    'status-counts',
+    dateRange,
+    authUser?.id ?? 'anon',
+  ],
+  getStatusCounts,
+  {
+    staleTime: 1000 * 60 * 5,
+    enabled: isValidProperty,
+    refetchOnMount: true,
+    placeholderData: (prev: any) => prev,
   }
 );
 
@@ -443,73 +498,78 @@ const displayedTickets = useMemo(() => {
     return result;
   }, [data, isNeedsAttentionMode, searchQuery, materialFilter, ticketTypeFilter, sortBy]);
 
-  // Smart Cache Seeding & Viewport Prefetching
+  // Seed the detail cache from rows we already hold, so tapping a ticket paints
+  // instantly instead of showing a skeleton.
+  //
+  // Two things were wrong here before:
+  //   1. It also prefetched full detail for the top 5 rows — five extra requests
+  //      that re-fired whenever `displayedTickets` changed identity (i.e. on every
+  //      search keystroke), and wrote a RAW ticket object under the detail key,
+  //      which is not the shape the detail screen stores. Removed: the list query
+  //      already carries everything the seed needs.
+  //   2. The seed was written with a current timestamp, so the entry looked FRESH
+  //      while holding empty comments/activities. `updatedAt: 1` marks it
+  //      immediately stale, so the detail screen paints the seed and then
+  //      revalidates. Without this, cache-respecting refetch would show a ticket
+  //      with no comments.
+  //
+  // Keyed on `data` rather than `displayedTickets`: client-side filtering and
+  // sorting produce a new array identity but no new ticket data to seed.
   useEffect(() => {
-    if (displayedTickets && displayedTickets.length > 0) {
-      // 1. Seed detail cache for all loaded tickets (0 extra network calls)
-      displayedTickets.forEach((t: Ticket) => {
-        if (t?.id) {
-          queryClient.setQueryData(queryKeys.property.ticketDetail(t.id), (old: any) => {
-            if (old?.ticket) {
-              return { ...old, ticket: { ...old.ticket, ...t } };
-            }
-            return {
-              ticket: t,
-              currentUserRole: null,
-              comments: [],
-              activities: [],
-              escalationLogs: [],
-              validationEnabled: false,
-              userNameMap: {},
-              availableMSTs: [],
-              procurementRequests: [],
-              procurementLogs: [],
-              priceVisibilitySettings: []
-            };
-          });
-        }
-      });
+    const rows = data?.tickets;
+    if (!rows?.length) return;
 
-      // 2. Prefetch full detail for top 5 visible tickets in background
-      displayedTickets.slice(0, 5).forEach((t: Ticket) => {
-        if (t?.id && propertyId) {
-          queryClient.prefetchQuery({
-            queryKey: queryKeys.property.ticketDetail(t.id),
-            queryFn: async () => {
-              const res = await serverApi.query<Ticket>({
-                table: 'tickets',
-                action: 'select',
-                select: `*, assigned_to, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id))`,
-                filters: [
-                  { op: 'eq', column: 'id', value: t.id },
-                  { op: 'eq', column: 'property_id', value: propertyId }
-                ],
-                single: true
-              });
-              return res.data ?? t;
-            },
-            staleTime: 5 * 60 * 1000,
-          });
-        }
-      });
+    for (const t of rows) {
+      if (!t?.id) continue;
+      queryClient.setQueryData(
+        queryKeys.property.ticketDetail(t.id),
+        (old: any) => {
+          // Never overwrite a fully loaded entry with the list's partial row.
+          if (old?.ticket) return { ...old, ticket: { ...old.ticket, ...t } };
+          return {
+            ticket: t,
+            currentUserRole: null,
+            comments: [],
+            activities: [],
+            escalationLogs: [],
+            validationEnabled: false,
+            userNameMap: {},
+            availableMSTs: [],
+            procurementRequests: [],
+            procurementLogs: [],
+            priceVisibilitySettings: [],
+          };
+        },
+        { updatedAt: 1 }
+      );
     }
-  }, [displayedTickets, propertyId]);
+  }, [data, propertyId]);
 
 const hasMore = data?.hasMore ?? false;
-const statusCounts = data?.statusCounts ?? defaultCounts;
+const statusCounts = statusCountsData ?? defaultCounts;
 
 const loadMore = () => {
   if (!hasMore || !propertyId) return;
   setLimit(prev => prev + PAGE_SIZE);
 };
 
-const onRefresh = () => {
-  if (limit !== PAGE_SIZE) {
-    setLimit(PAGE_SIZE);
-  } else {
-    refetch();
+// Tracked separately from isFetching so the pull-to-refresh spinner reflects a
+// user gesture only, not every background revalidation.
+const [isRefreshing, setIsRefreshing] = useState(false);
+
+const onRefresh = useCallback(async () => {
+  setIsRefreshing(true);
+  try {
+    if (limit !== PAGE_SIZE) {
+      // Changing `limit` changes the query key, which refetches on its own.
+      setLimit(PAGE_SIZE);
+    } else {
+      await refetch();
+    }
+  } finally {
+    setIsRefreshing(false);
   }
-};
+}, [limit, refetch]);
 
   // Fetch users for Raised By / Assigned To filters
   const fetchFilterOptions = useCallback(async () => {
@@ -552,15 +612,11 @@ const onRefresh = () => {
     }
   }, [isNeedsAttentionMode]);
 
-  // Refetch when advanced filters change
-  useEffect(() => {
-    if (!isNeedsAttentionMode) {
-      refetch();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryFilter, raisedByFilter, assignedToFilter, sortBy, searchQuery]);
-
-  const renderTicket = ({ item }: { item: Ticket }) => {
+  // useCallback: a fresh renderItem identity on every render defeats FlashList's
+  // own memoisation, so any of this screen's many useState values changing
+  // re-rendered every visible row. `router` and `propertyId` are the only things
+  // it closes over, and both are stable.
+  const renderTicket = useCallback(({ item }: { item: Ticket }) => {
     const logs = item.ticket_escalation_logs;
     let escalationChain: { name: string; avatar?: string | null }[] | undefined;
     if (logs && logs.length > 0) {
@@ -598,7 +654,7 @@ const onRefresh = () => {
         onPress={() => router.push(`/property/${propertyId}/tickets/${item.id}`)}
       />
     );
-  };
+  }, [propertyId, router]);
 
   const cardBg = isDark ? 'rgba(30,38,55,0.88)' : 'rgba(255,255,255,0.88)';
   const textPrimary = isDark ? '#F0F4F8' : '#1A2332';
@@ -806,12 +862,13 @@ const onRefresh = () => {
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
-            initialNumToRender={6}
-            maxToRenderPerBatch={4}
-            windowSize={5}
             refreshControl={
               <RefreshControl
-                refreshing={isFetching}
+                // Only a user-initiated pull shows the spinner. Bound to
+                // isFetching, every background refresh rendered as a full
+                // pull-to-refresh, so the screen read as "loading" even with data
+                // already on it.
+                refreshing={isRefreshing}
                 onRefresh={onRefresh}
                 tintColor="#7CB9A8"
                 colors={['#7CB9A8']}

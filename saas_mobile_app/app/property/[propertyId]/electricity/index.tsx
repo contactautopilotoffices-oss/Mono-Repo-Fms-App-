@@ -2144,7 +2144,7 @@ export default function ElectricityScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.electricity(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
 
   const [selectedSpreadsheetId, setSelectedSpreadsheetId] = useState<string | null>(null);

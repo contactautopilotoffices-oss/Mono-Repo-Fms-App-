@@ -35,6 +35,7 @@ import {
 } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 
 interface Vendor {
@@ -134,6 +135,10 @@ export default function VendorRevenueScreen() {
     { staleTime: 1000 * 60 * 5 }
   );
 
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -199,7 +204,7 @@ export default function VendorRevenueScreen() {
       <FlatList
         data={vendors}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor={colors.primary} />}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>

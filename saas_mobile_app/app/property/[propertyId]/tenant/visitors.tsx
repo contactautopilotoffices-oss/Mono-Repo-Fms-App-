@@ -543,7 +543,7 @@ export default function TenantVisitorsPage() {
       });
     },
     enabled: !!propertyId && !!user?.id,
-    refetchOnMount: 'always',
+    refetchOnMount: true,
   });
 
   // Apply client-side filters (status, category, search)

@@ -248,7 +248,7 @@ export default function SecurityDashboard() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.security(propertyId),
     fetchStats,
-    { staleTime: 1000 * 60, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60, refetchOnMount: true }
   );
 
   const stats = data?.stats ?? { activeVisitors: 0, incidentsToday: 0, securityAlerts: 0, openTickets: 0 };

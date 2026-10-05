@@ -149,10 +149,15 @@ export async function apiFetch<T>(
     }
   }
 
-  const response = await fetchWithRetry(`${MOBILE_API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  // Only idempotent reads may be auto-retried. Replaying a POST/PATCH/DELETE that
+  // merely timed out can duplicate an upload or apply a change twice.
+  const isRead = (options?.method ?? 'GET').toUpperCase() === 'GET';
+
+  const response = await fetchWithRetry(
+    `${MOBILE_API_BASE}${endpoint}`,
+    { ...options, headers },
+    isRead ? {} : { maxRetries: 1 }
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');

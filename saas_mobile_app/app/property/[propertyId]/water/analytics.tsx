@@ -55,7 +55,7 @@ export default function WaterAnalyticsScreen() {
       if (!res.success || !res.data) throw new Error(String(res.error || 'Failed to load analytics'));
       return res.data;
     },
-    { staleTime: 1000 * 60 * 2, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 2, refetchOnMount: true }
   );
 
   const sources = data?.sources ?? [];

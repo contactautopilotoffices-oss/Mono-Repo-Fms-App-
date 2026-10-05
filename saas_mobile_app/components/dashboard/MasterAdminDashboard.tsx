@@ -25,6 +25,7 @@ import WeatherBadge from '@/components/dashboard/WeatherBadge';
 import { useWeather } from '@/hooks/useWeather';
 import { queryKeys } from '@/utils/queryKeys';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useTheme } from '@/context';
 import SignOutModal from '../ui/SignOutModal';
 import Skeleton from '../ui/Skeleton';
@@ -110,6 +111,10 @@ export default function MasterAdminDashboard() {
   }>(queryKeys.admin.masterAdmin(user?.id ?? 'none'), fetchData, {
     staleTime: 1000 * 60 * 5,
   });
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const organizations = data?.organizations ?? [];
   const users = data?.users ?? [];
@@ -204,7 +209,7 @@ export default function MasterAdminDashboard() {
   const renderOverviewTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Header */}
@@ -320,7 +325,7 @@ export default function MasterAdminDashboard() {
   const renderOrganizationsTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Search */}
@@ -398,7 +403,7 @@ export default function MasterAdminDashboard() {
   const renderUsersTab = () => (
     <ScrollView
       style={styles.tabContent}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={onRefresh} tintColor="#708F96" />}
+      refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor="#708F96" />}
           showsVerticalScrollIndicator={false}
     >
       {/* Search */}

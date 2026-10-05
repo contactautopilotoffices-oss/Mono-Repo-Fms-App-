@@ -16,6 +16,7 @@ import {
   Save, Trash2, ChevronLeft, Shield, Zap, Timer, User,
 } from 'lucide-react-native';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 import {
   fetchEscalationHierarchies, createEscalationHierarchy,
@@ -152,8 +153,12 @@ export default function EscalationScreen() {
   const { data, isLoading, isFetching, refetch } = useServerQuery(
     queryKeys.property.escalation(propertyId),
     fetchAll,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' },
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true },
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const hierarchies = data?.hierarchies ?? [];
   const users = data?.users ?? [];
@@ -296,7 +301,7 @@ export default function EscalationScreen() {
       <FlatList
         data={hierarchies}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor={colors.primary} />}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         ListEmptyComponent={
           <View style={styles.emptyState}>

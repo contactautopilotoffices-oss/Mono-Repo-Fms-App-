@@ -927,7 +927,7 @@ export default function ChecklistScreen() {
   const { data, isLoading, refetch } = useServerQuery(
     queryKeys.property.checklist(propertyId),
     fetchData,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
 
   const templates = data?.templates ?? [];

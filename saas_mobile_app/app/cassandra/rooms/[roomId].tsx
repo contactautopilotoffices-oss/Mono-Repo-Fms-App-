@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 import { getRoomFull, endRoom } from '@/services/cassandra/cassandraRoomService';
 import {
@@ -266,6 +267,10 @@ function RoomDetailContent() {
     { staleTime: 1000 * 60 * 5 }
   );
 
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
+
   const handleEndSession = async () => {
     if (!propertyId || !roomId) return;
     setIsEnding(true);
@@ -280,8 +285,6 @@ function RoomDetailContent() {
       setIsEnding(false);
     }
   };
-
-  const handleRefresh = () => refetch();
 
   const isLive = room?.status === 'active' || room?.status === 'waiting';
   const isEnded = room?.status === 'ended';
@@ -329,8 +332,8 @@ function RoomDetailContent() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isFetching}
-            onRefresh={handleRefresh}
+            refreshing={pullRefreshing}
+            onRefresh={onPullRefresh}
             tintColor={Colors.violet}
             colors={[Colors.violet]}
           />

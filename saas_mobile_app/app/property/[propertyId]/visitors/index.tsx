@@ -54,6 +54,7 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useServerQuery } from '@/hooks/useServerQuery';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { queryKeys } from '@/utils/queryKeys';
 
 // ---------------------------------------------------------------------------
@@ -1242,13 +1243,15 @@ export default function VisitorsScreen() {
   const { data, isLoading, isFetching, refetch } = useServerQuery(
     [...queryKeys.property.visitors(propertyId), statusFilter, dateFilter, customFromDate.toISOString(), customToDate.toISOString()],
     fetchVisitors,
-    { staleTime: 1000 * 60 * 5, refetchOnMount: 'always' }
+    { staleTime: 1000 * 60 * 5, refetchOnMount: true }
   );
+
+  // Pull-to-refresh spinner is driven by the gesture, not by isFetching:
+  // bound to isFetching, every background revalidation looked like a full reload.
+  const { refreshing: pullRefreshing, onRefresh: onPullRefresh } = usePullToRefresh(refetch);
 
   const visitors = data?.visitors ?? [];
   const stats = data?.stats ?? { total: 0, checked_in: 0, checked_out: 0 };
-
-  const handleRefresh = () => refetch();
 
   const handleCheckout = async () => {
     if (!selectedVisitor) return;
@@ -1461,7 +1464,7 @@ export default function VisitorsScreen() {
               showsVerticalScrollIndicator={false}
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               refreshControl={
-                <RefreshControl refreshing={isFetching} onRefresh={handleRefresh} tintColor={colors.primary} />
+                <RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} tintColor={colors.primary} />
               }
             />
           )}

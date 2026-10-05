@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, memo } from 'react';
+import { useSharedTicker } from '@/hooks/useSharedTicker';
 import {
   View,
   Text,
@@ -51,7 +52,7 @@ export interface TicketCardProps {
 }
 
 const TicketCard = memo(function TicketCard({
-  id, title, priority, status, ticketNumber, createdAt,
+  id, title, priority, status, ticketNumber, createdAt, resolvedAt,
   assignedTo, assigneePhotoUrl, photoUrl, propertyName,
   materialsOrdered, escalationChain, raisedByTenant,
   onClick, onEdit, onDelete, onShare, onValidate, onReject, style, compact,
@@ -95,15 +96,11 @@ const TicketCard = memo(function TicketCard({
   const isClosed = ['COMPLETED', 'CLOSED', 'RESOLVED'].includes(status?.toUpperCase() || '');
   const isCritical = priority?.toUpperCase() === 'CRITICAL' && !isClosed;
 
-  const [internalTick, setInternalTick] = useState(0);
-
-  useEffect(() => {
-    if (isClosed || tick !== undefined) return;
-    const interval = setInterval(() => {
-      setInternalTick(prev => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isClosed, tick]);
+  // Fallback ticker for callers that do not pass `tick`. This used to be a
+  // per-instance setInterval, so a screen rendering N cards ran N timers. The
+  // shared ticker is a single app-wide interval that also stops while the app is
+  // backgrounded, and subscribing is skipped entirely for a closed ticket.
+  const internalTick = useSharedTicker(!isClosed && tick === undefined);
 
   // Elapsed time: reads from parent's shared tick if provided, otherwise uses internal tick.
   const elapsedSec = useMemo(

@@ -16,7 +16,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { queryClient, mmkvPersister } from '@/utils/queryClient';
+import { queryClient, mmkvPersister, shouldPersistQuery } from '@/utils/queryClient';
 
 interface PersistGateProps {
   children: React.ReactNode;
@@ -39,9 +39,10 @@ export function PersistGate({ children, onReady }: PersistGateProps) {
       persistOptions={{
         persister: mmkvPersister,
         dehydrateOptions: {
-          shouldDehydrateQuery: (query: any) => {
-            return query.state.status === 'success';
-          },
+          // Allowlist, not "everything that succeeded". See shouldPersistQuery:
+          // persisting the whole cache meant a multi-MB JSON.stringify on the JS
+          // thread on every flush, and a big blocking parse at boot.
+          shouldDehydrateQuery: shouldPersistQuery,
         },
       }}
       onSuccess={() => setIsRestored(true)}

@@ -1,4 +1,4 @@
-import { redis } from './redis';
+import { redis, isRedisConfigured } from './redis';
 
 // Cache TTL constants in seconds
 export const CACHE_TTL = {
@@ -11,6 +11,7 @@ export const CACHE_TTL = {
  * Fetch data from cache
  */
 export async function getCache<T>(key: string): Promise<T | null> {
+  if (!isRedisConfigured) return null;
   try {
     const data = await redis.get<T>(key);
     return data;
@@ -24,6 +25,7 @@ export async function getCache<T>(key: string): Promise<T | null> {
  * Set data to cache with a TTL
  */
 export async function setCache<T>(key: string, data: T, ttl: number = CACHE_TTL.HOT): Promise<void> {
+  if (!isRedisConfigured) return;
   try {
     await redis.set(key, data, { ex: ttl });
   } catch (error) {
@@ -35,6 +37,7 @@ export async function setCache<T>(key: string, data: T, ttl: number = CACHE_TTL.
  * Delete a specific cache key
  */
 export async function deleteCache(key: string): Promise<void> {
+  if (!isRedisConfigured) return;
   try {
     await redis.del(key);
   } catch (error) {
@@ -46,6 +49,7 @@ export async function deleteCache(key: string): Promise<void> {
  * Invalidate multiple cache keys using a pattern
  */
 export async function invalidatePattern(pattern: string): Promise<void> {
+  if (!isRedisConfigured) return;
   try {
     // Note: Upstash Redis over REST has limited support for keys/scan. 
     // We fetch matching keys first and then delete them.

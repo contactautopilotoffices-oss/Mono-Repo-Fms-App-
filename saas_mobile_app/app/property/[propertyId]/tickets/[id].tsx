@@ -47,6 +47,11 @@ import * as MediaLibrary from 'expo-media-library';
 import { useServerQuery } from '@/hooks/useServerQuery';
 import { queryKeys } from '@/utils/queryKeys';
 import { queryClient } from '@/utils/queryClient';
+import {
+  patchTicketEverywhere,
+  patchTicketStatusCounts,
+  rollbackTicketPatch,
+} from '@/utils/ticketing/ticketCache';
 import TicketDetailSkeleton from '@/components/tickets/TicketDetailSkeleton';
 import { canUserSeePrices, ProcurementPriceVisibilitySetting } from '@/utils/procurement';
 
@@ -266,249 +271,226 @@ export default function TicketDetailScreen() {
         return null;
       }
 
-      // 1. Fetch current user's role for this property early for security check
-      let userRole = null;
-      if (authUser?.id) {
-        const memberRes = await serverApi.query<any>({
+      // ─────────────────────────────────────────────────────────────────────
+      // This used to be ~10 sequential awaits. Each one was its own HTTP round
+      // trip, so opening a ticket cost ten serialised network hops before the
+      // screen had everything it needed. Nothing below depends on anything else
+      // in the same wave, so they now run concurrently: 3 waves instead of 10.
+      // ─────────────────────────────────────────────────────────────────────
+
+      const ticketOrgId = (ticketData as any)?.organization_id ?? null;
+
+      // ── Wave 1: everything that only needs the ticket we already have ──────
+      const [
+        memberRes,
+        commentsRes,
+        activityRes,
+        escRes,
+        featRes,
+        mstRes,
+        procurementRes,
+        visRes,
+      ] = await Promise.all([
+        authUser?.id
+          ? serverApi.query<any>({
+              table: 'property_memberships',
+              action: 'select',
+              select: 'role',
+              filters: [
+                { op: 'eq', column: 'user_id', value: authUser.id },
+                { op: 'eq', column: 'property_id', value: propertyId },
+                { op: 'eq', column: 'is_active', value: true },
+              ],
+              single: true,
+            })
+          : Promise.resolve({ data: null, error: null }),
+
+        serverApi.query<Comment[]>({
+          table: 'ticket_comments',
+          action: 'select',
+          select: `*, user:users(full_name, user_photo_url)`,
+          filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+          orders: [{ column: 'created_at', ascending: true }],
+        }),
+
+        serverApi.query<Activity[]>({
+          table: 'ticket_activity_log',
+          action: 'select',
+          select: `*`,
+          filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+          orders: [{ column: 'created_at', ascending: true }],
+        }),
+
+        serverApi.query<EscalationLog[]>({
+          table: 'ticket_escalation_logs',
+          action: 'select',
+          select: `*, from_employee:users!from_employee_id(full_name), to_employee:users!to_employee_id(full_name)`,
+          filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+          orders: [{ column: 'escalated_at', ascending: true }],
+        }),
+
+        serverApi.query<any>({
+          table: 'property_features',
+          action: 'select',
+          select: 'feature_key, is_enabled',
+          filters: [
+            { op: 'eq', column: 'property_id', value: propertyId },
+            { op: 'eq', column: 'feature_key', value: 'ticket_validation' },
+          ],
+          single: true,
+        }),
+
+        serverApi.query<any[]>({
           table: 'property_memberships',
           action: 'select',
-          select: 'role',
+          select: 'role, user:users(id, full_name)',
           filters: [
-            { op: 'eq', column: 'user_id', value: authUser.id },
             { op: 'eq', column: 'property_id', value: propertyId },
-            { op: 'eq', column: 'is_active', value: true }
+            { op: 'eq', column: 'is_active', value: true },
           ],
-          single: true
-        });
-        userRole = memberRes.data?.role ?? null;
-        setCurrentUserRole(userRole);
-      }
+        }),
 
-      // 2. Internal Ticket Security Guard
+        serverApi.query<any[]>({
+          table: 'material_requests',
+          action: 'select',
+          select: `*, items:material_request_items(*), requester:users!requested_by(full_name), assignee:users!assignee_uid(full_name)`,
+          filters: [{ op: 'eq', column: 'ticket_id', value: id }],
+          orders: [{ column: 'created_at', ascending: false }],
+        }),
+
+        ticketOrgId
+          ? serverApi.query<ProcurementPriceVisibilitySetting[]>({
+              table: 'procurement_price_visibility',
+              action: 'select',
+              select: 'property_id, roles, users',
+              filters: [{ op: 'eq', column: 'organization_id', value: ticketOrgId }],
+            })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const userRole = memberRes.data?.role ?? null;
+      setCurrentUserRole(userRole);
+
+      // Internal Ticket Security Guard — still enforced before anything renders.
       const isTenant = userRole === 'tenant' || userRole === 'super_tenant';
       if (ticketData.is_internal && isTenant) {
         console.warn('[fetchTicket] Unauthorized access to internal ticket');
         Alert.alert('Access Denied', 'This is an internal maintenance ticket and is not visible to tenants.');
         router.back();
         setLoading(false);
-        return;
+        return null;
       }
-
-      // DEBUG: Log assignee resolution for web-vs-mobile comparison
-      console.log('[fetchTicket] Ticket loaded:', {
-        ticketId: ticketData.id,
-        status: ticketData.status,
-        rawAssignedTo: ticketData.assigned_to,
-        resolvedAssigneeId: ticketData.assignee?.id,
-        resolvedAssigneeName: ticketData.assignee?.full_name,
-      });
 
       // Property segregation guard
       if (ticketData.property_id !== propertyId) {
         console.error('[fetchTicket] Property segregation violation');
         setTicket(null);
         setLoading(false);
-        return;
+        return null;
       }
 
-      setTicket(ticketData as Ticket);
-
-      // Fetch comments
-      const commentsRes = await serverApi.query<Comment[]>({
-        table: 'ticket_comments',
-        action: 'select',
-        select: `*, user:users(full_name, user_photo_url)`,
-        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
-        orders: [{ column: 'created_at', ascending: true }]
-      });
+      if (commentsRes.error) console.error('[fetchTicket] Comments error:', commentsRes.error);
       const commentData = commentsRes.data ?? [];
-      const commentError = commentsRes.error;
-      if (commentError) console.error('[fetchTicket] Comments error:', commentError);
-      setComments(commentData);
-      if (activeTab !== 'chat' && (commentData?.length ?? 0) > 0) {
-        useUnreadStore.getState().setTicketChat(commentData?.length ?? 0);
+      if (activeTab !== 'chat' && commentData.length > 0) {
+        useUnreadStore.getState().setTicketChat(commentData.length);
       }
 
-      // Fetch activity
-      const activityRes = await serverApi.query<Activity[]>({
-        table: 'ticket_activity_log',
-        action: 'select',
-        select: `*`,
-        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
-        orders: [{ column: 'created_at', ascending: true }]
-      });
-      const activityDataRaw = activityRes.data ?? [];
-      const activityError = activityRes.error;
-      if (activityError) console.error('[fetchTicket] Activity error:', activityError);
-      
-      const activityData = activityDataRaw;
+      if (activityRes.error) console.error('[fetchTicket] Activity error:', activityRes.error);
+      const activityData = activityRes.data ?? [];
 
-      // Build userNameMap from activity entries for reassignment display and activity log names
+      if (escRes.error) console.error('[fetchTicket] Escalation error:', escRes.error);
+      const escData = escRes.data ?? [];
+
+      const featData = featRes.data;
+
+      const msts = (mstRes.data ?? [])
+        .filter((m: any) => m.role !== 'client')
+        .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
+        .filter((u: any) => u.id && u.full_name);
+
+      if (procurementRes.error) console.error('[fetchTicket] Procurement error:', procurementRes.error);
+      const procurementRequestsData = procurementRes.data ?? [];
+
+      if (visRes.error) console.error('[fetchTicket] Price visibility error:', visRes.error);
+      const priceVisibilityData = (visRes.data ?? []) as ProcurementPriceVisibilitySetting[];
+
+      // ── Build the actor-id set from the activity log ───────────────────────
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const newMap: Record<string, string> = {};
+
       activityData.forEach((act: Activity) => {
-        // Resolve performed_by (primary field)
-        if (act.performed_by && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(act.performed_by)) {
+        if (act.performed_by && UUID_RE.test(act.performed_by)) {
           newMap[act.performed_by] = act.performed_by;
         }
-        // Also resolve user_id for backward compatibility (some old entries used user_id)
-        if ((act as any).user_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((act as any).user_id)) {
+        if ((act as any).user_id && UUID_RE.test((act as any).user_id)) {
           newMap[(act as any).user_id] = (act as any).user_id;
         }
-        const detailObj = act.details ? (() => { try { return JSON.parse(act.details); } catch { return null; } })() : null;
-        if (
-          (act.action === 'assigned' || act.action === 'reassigned') &&
-          detailObj?.new_value &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailObj.new_value)
-        ) {
-          newMap[detailObj.new_value] = detailObj.new_value;
-        }
-        if (
-          (act.action === 'assigned' || act.action === 'reassigned') &&
-          detailObj?.old_value &&
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailObj.old_value)
-        ) {
-          newMap[detailObj.old_value] = detailObj.old_value;
+        const detailObj = act.details
+          ? (() => { try { return JSON.parse(act.details); } catch { return null; } })()
+          : null;
+        if (act.action === 'assigned' || act.action === 'reassigned') {
+          if (detailObj?.new_value && UUID_RE.test(detailObj.new_value)) {
+            newMap[detailObj.new_value] = detailObj.new_value;
+          }
+          if (detailObj?.old_value && UUID_RE.test(detailObj.old_value)) {
+            newMap[detailObj.old_value] = detailObj.old_value;
+          }
         }
       });
-      // Resolve assignee names from the ticket's assignee relation
+
+      // Names we already hold from the ticket's own joins cost no extra lookup.
       if (ticketData.assignee?.id && ticketData.assignee?.full_name) {
         newMap[ticketData.assignee.id] = ticketData.assignee.full_name;
       }
       if (ticketData.creator?.id && ticketData.creator?.full_name) {
         newMap[ticketData.creator.id] = ticketData.creator.full_name;
       }
-      const idsToResolve = Object.keys(newMap).filter(k =>
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)
-      );
-      if ((idsToResolve?.length ?? 0) > 0) {
-        const userRes = await serverApi.query<any[]>({
-          table: 'users',
-          action: 'select',
-          select: 'id, full_name',
-          filters: [{ op: 'in', column: 'id', values: idsToResolve }]
-        });
-        const userRows = userRes.data ?? [];
-        userRows.forEach((u: { id: string; full_name: string }) => {
-          newMap[u.id] = u.full_name;
-        });
-      }
-      
+      // The MST list we just fetched covers most actors, so reuse it instead of
+      // asking the server for those ids again.
+      msts.forEach((m: { id: string; full_name: string }) => {
+        if (newMap[m.id] === m.id) newMap[m.id] = m.full_name;
+      });
+
+      // ── Wave 2: only the lookups that genuinely depend on wave 1 ───────────
+      const unresolvedIds = Object.keys(newMap).filter((k) => newMap[k] === k && UUID_RE.test(k));
+      const matReqIds = procurementRequestsData.map((r: any) => r.id).filter(Boolean);
+
+      const [userRes, logRes] = await Promise.all([
+        unresolvedIds.length > 0
+          ? serverApi.query<any[]>({
+              table: 'users',
+              action: 'select',
+              select: 'id, full_name',
+              filters: [{ op: 'in', column: 'id', values: unresolvedIds }],
+            })
+          : Promise.resolve({ data: [], error: null }),
+
+        matReqIds.length > 0
+          ? serverApi.query<ProcurementActivityLog[]>({
+              table: 'procurement_activity_log',
+              action: 'select',
+              select: `*, user:users!user_id(full_name), material_request:material_requests!inner(ticket_id, ticket:tickets(ticket_number, title))`,
+              filters: [{ op: 'in', column: 'material_request_id', values: matReqIds }],
+              orders: [{ column: 'created_at', ascending: false }],
+            })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      (userRes.data ?? []).forEach((u: { id: string; full_name: string }) => {
+        newMap[u.id] = u.full_name;
+      });
+
+      if (logRes.error) console.error('[fetchTicket] Procurement logs error:', logRes.error);
+      const procurementLogsData = (logRes.data ?? []) as ProcurementActivityLog[];
+
       const populatedActivities = activityData.map((act: Activity) => {
-        // Try performed_by first, then user_id for backward compatibility
         const actorId = act.performed_by || (act as any).user_id;
         if (actorId && newMap[actorId] && newMap[actorId] !== actorId) {
-           return { ...act, user: { full_name: newMap[actorId] } };
+          return { ...act, user: { full_name: newMap[actorId] } };
         }
         return act;
       });
-      
-      setActivities(populatedActivities as Activity[]);
-      setUserNameMap(newMap);
 
-      // Fetch escalation logs
-      const escRes = await serverApi.query<EscalationLog[]>({
-        table: 'ticket_escalation_logs',
-        action: 'select',
-        select: `*, from_employee:users!from_employee_id(full_name), to_employee:users!to_employee_id(full_name)`,
-        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
-        orders: [{ column: 'escalated_at', ascending: true }]
-      });
-      const escData = escRes.data ?? [];
-      const escError = escRes.error;
-      if (escError) console.error('[fetchTicket] Escalation error:', escError);
-      setEscalationLogs(escData);
-
-      // Fetch validationEnabled from property_features
-      const featRes = await serverApi.query<any>({
-        table: 'property_features',
-        action: 'select',
-        select: 'feature_key, is_enabled',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'feature_key', value: 'ticket_validation' }
-        ],
-        single: true
-      });
-      const featData = featRes.data;
-
-      // Fetch MSTs inline
-      let msts: { id: string; full_name: string }[] = [];
-      const mstRes = await serverApi.query<any[]>({
-        table: 'property_memberships',
-        action: 'select',
-        select: 'role, user:users(id, full_name)',
-        filters: [
-          { op: 'eq', column: 'property_id', value: propertyId },
-          { op: 'eq', column: 'is_active', value: true }
-        ]
-      });
-      const mstData = mstRes.data ?? [];
-      
-      msts = mstData
-        .filter((m: any) => m.role !== 'client')
-        .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
-        .filter((u: any) => u.id && u.full_name);
-
-      // Fetch material requests
-      let procurementRequestsData = [];
-      const procurementRes = await serverApi.query<any[]>({
-        table: 'material_requests',
-        action: 'select',
-        select: `*, items:material_request_items(*), requester:users!requested_by(full_name), assignee:users!assignee_uid(full_name)`,
-        filters: [{ op: 'eq', column: 'ticket_id', value: id }],
-        orders: [{ column: 'created_at', ascending: false }]
-      });
-      const procurementData = procurementRes.data;
-      const procurementError = procurementRes.error;
-      
-      if (procurementError) {
-        console.error('[fetchTicket] Procurement error:', procurementError);
-      } else {
-        procurementRequestsData = procurementData || [];
-      }
-
-      // Fetch procurement activity logs for this ticket
-      let procurementLogsData: ProcurementActivityLog[] = [];
-      try {
-        const matReqIds = (procurementRequestsData || []).map((r: any) => r.id);
-        if ((matReqIds?.length ?? 0) > 0) {
-          const logRes = await serverApi.query<ProcurementActivityLog[]>({
-            table: 'procurement_activity_log',
-            action: 'select',
-            select: `*, user:users!user_id(full_name), material_request:material_requests!inner(ticket_id, ticket:tickets(ticket_number, title))`,
-            filters: [{ op: 'in', column: 'material_request_id', value: matReqIds }],
-            orders: [{ column: 'created_at', ascending: false }]
-          });
-          if (logRes.error) {
-            console.error('[fetchTicket] Procurement logs error:', logRes.error);
-          } else {
-            procurementLogsData = logRes.data || [];
-          }
-        }
-      } catch (logErr) {
-        console.error('[fetchTicket] Procurement logs fetch failed:', logErr);
-      }
-
-      // Fetch procurement price visibility settings for this organization
-      let priceVisibilityData: ProcurementPriceVisibilitySetting[] = [];
-      try {
-        const ticketOrgId = (ticketData as any)?.organization_id;
-        if (ticketOrgId) {
-          const visRes = await serverApi.query<ProcurementPriceVisibilitySetting[]>({
-            table: 'procurement_price_visibility',
-            action: 'select',
-            select: 'property_id, roles, users',
-            filters: [{ op: 'eq', column: 'organization_id', value: ticketOrgId }]
-          });
-          if (visRes.error) {
-            console.error('[fetchTicket] Price visibility error:', visRes.error);
-          } else {
-            priceVisibilityData = visRes.data || [];
-          }
-        }
-      } catch (visErr) {
-        console.error('[fetchTicket] Price visibility fetch failed:', visErr);
-      }
 
       return {
         ticket: ticketData as Ticket,
@@ -537,7 +519,11 @@ export default function TicketDetailScreen() {
     {
       staleTime: 1000 * 60 * 5,
       enabled: !!id,
-      refetchOnMount: 'always',
+      // Deliberately NOT 'always'. The list screen seeds this cache entry, and
+      // 'always' plus the removed refetch() effect below meant opening a ticket
+      // ran the whole multi-query fetch twice. `true` respects staleTime: cached
+      // data paints instantly and only a stale entry triggers a refetch.
+      refetchOnMount: true,
     }
   );
 
@@ -563,13 +549,6 @@ export default function TicketDetailScreen() {
       setLoading(false);
     }
   }, [data, isLoading]);
-
-  // Trigger fetch when ticket ID changes (navigation to same ticket re-mounts component)
-  useEffect(() => {
-    if (id && propertyId) {
-      refetch();
-    }
-  }, [id, propertyId]);
 
   const handleSendComment = () => {
     if (!newComment.trim() || !id) return;
@@ -643,18 +622,7 @@ export default function TicketDetailScreen() {
     }
     setTicket(optimisticTicket);
 
-    // Optimistically update the dashboard cache
-    const queryKey = ['tickets', propertyId];
-    const previousTicketsData = queryClient.getQueryData<{ data: Ticket[] }>(queryKey);
-    if (previousTicketsData?.data) {
-      queryClient.setQueryData(queryKey, {
-        ...previousTicketsData,
-        data: previousTicketsData.data.map((t) =>
-          t.id === id ? { ...t, ...optimisticTicket } : t
-        ),
-      });
-    }
-
+    // Build the DB patch first so the cache and the server get the same values.
     const updates: any = { status: newStatus };
     if ((newStatus === 'closed' || newStatus === 'resolved') && !ticket.resolved_at) {
       updates.resolved_at = new Date().toISOString();
@@ -666,28 +634,36 @@ export default function TicketDetailScreen() {
       updates.resolved_at = null;
     }
 
-    // Fire in background
-    serverApi.query({
+    // Patch EVERY cached list variant plus the detail entry, via prefix match.
+    // The previous code wrote to the exact key ['tickets', propertyId] and read a
+    // `.data` field; neither exists, so it silently did nothing and the list only
+    // caught up after a network refetch.
+    const snapshot = patchTicketEverywhere(propertyId, id, updates);
+    patchTicketStatusCounts(propertyId, originalTicket.status, newStatus);
+
+    // Fire in background. `select` makes the update return the row, so we no
+    // longer need a second round trip just to confirm the write landed.
+    serverApi.query<{ id: string; status: string; resolved_at: string | null }[]>({
       table: 'tickets',
       action: 'update',
       values: updates,
+      select: 'id, status, resolved_at',
       filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
     }).then((updateRes) => {
       if (updateRes.error) throw new Error(updateRes.error.message);
 
-      // Verify
-      return serverApi.query<{ id: string; status: string; resolved_at: string | null }>({
-        table: 'tickets',
-        action: 'select',
-        select: 'id, status, resolved_at',
-        filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
-        single: true,
-      });
-    }).then((verifyRes) => {
-      if (verifyRes?.error || verifyRes?.data?.status !== newStatus) {
+      // Verify from the returned row when we get one. An empty result is NOT
+      // treated as failure: the server runs SELECTs through the admin client but
+      // mutations through the anon client under RLS, so the implicit
+      // SELECT-after-UPDATE can come back empty for a row the user is legitimately
+      // allowed to see and update. Failing here would roll back a write that
+      // actually landed.
+      const rows = Array.isArray(updateRes.data) ? updateRes.data : updateRes.data ? [updateRes.data] : [];
+      const saved = rows[0] as { status?: string } | undefined;
+      if (saved && saved.status !== newStatus) {
         throw new Error('Status was not saved correctly.');
       }
-      
+
       // Log activity
       const actingUserId = authUser?.id;
       let activityAction: string | null = null;
@@ -715,10 +691,10 @@ export default function TicketDetailScreen() {
       });
     }).catch((err) => {
       console.error('[handleUpdateStatus] Background sync failed:', err);
-      // Rollback
+      // Roll back local state AND every cache entry we patched.
       setTicket(originalTicket);
-      if (previousTicketsData) queryClient.setQueryData(queryKey, previousTicketsData);
-      
+      rollbackTicketPatch(snapshot);
+
       Toast.show({
         type: 'error',
         text1: 'Update Failed',
@@ -763,17 +739,6 @@ export default function TicketDetailScreen() {
     
     setTicket(optimisticTicket);
 
-    const queryKey = ['tickets', propertyId];
-    const previousTicketsData = queryClient.getQueryData<{ data: Ticket[] }>(queryKey);
-    if (previousTicketsData?.data) {
-      queryClient.setQueryData(queryKey, {
-        ...previousTicketsData,
-        data: previousTicketsData.data.map((t) =>
-          t.id === id ? { ...t, ...optimisticTicket } : t
-        ),
-      });
-    }
-
     const updates: any = {
       assigned_to: mstId || null,
       status: newStatus,
@@ -785,14 +750,25 @@ export default function TicketDetailScreen() {
       updates.total_paused_minutes = 0;
     }
 
-    // Background sync
-    serverApi.query({
+    // Patch every cached list variant + the detail entry (prefix match). The
+    // assignee object is cached separately from assigned_to, so pass both.
+    const snapshot = patchTicketEverywhere(propertyId, id, {
+      ...updates,
+      assignee: mstId ? optimisticTicket.assignee ?? null : null,
+    });
+    patchTicketStatusCounts(propertyId, originalTicket.status, newStatus);
+
+    // Background sync. `select` returns the row so no verify round trip is needed.
+    serverApi.query<{ id: string; status: string }[]>({
       table: 'tickets',
       action: 'update',
       values: updates,
+      select: 'id, status',
       filters: [{ op: 'eq', column: 'id', value: id }, { op: 'eq', column: 'property_id', value: propertyId }],
     }).then((reassignRes) => {
       if (reassignRes.error) throw new Error(reassignRes.error.message);
+      // As above: no returned row is not proof of failure (admin-client SELECT vs
+      // anon-client mutation), only an explicit error is.
 
       if (actingUserId) {
         const oldAssigneeId = originalTicket.assignee?.id ?? originalTicket.assigned_to ?? null;
@@ -825,9 +801,9 @@ export default function TicketDetailScreen() {
       });
     }).catch((err) => {
       console.error('[handleReassign] Error:', err);
-      // Rollback
+      // Roll back local state AND every cache entry we patched.
       setTicket(originalTicket);
-      if (previousTicketsData) queryClient.setQueryData(queryKey, previousTicketsData);
+      rollbackTicketPatch(snapshot);
       
       Toast.show({
         type: 'error',

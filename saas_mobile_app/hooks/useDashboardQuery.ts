@@ -218,8 +218,8 @@ export function useDashboardQuery(
     gcTime,
     enabled: enabled && !!propertyId && propertyId !== 'all',
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
-    retry: 2,
+    refetchOnMount: true,
+    retry: 1,
     networkMode: 'offlineFirst',
   });
 
