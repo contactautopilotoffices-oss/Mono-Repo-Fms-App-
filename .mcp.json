@@ -3,6 +3,10 @@
     "notebooklm": {
       "command": "/Users/lohitaksha/.local/share/mcp-servers/notebooklm-env/bin/notebooklm-mcp",
       "args": ["--transport", "stdio"]
+    },
+    "figma": {
+      "type": "http",
+      "url": "https://mcp.figma.com/mcp"
     }
   }
 }
