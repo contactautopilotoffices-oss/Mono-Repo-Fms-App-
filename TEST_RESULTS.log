@@ -588,3 +588,13 @@ Mobile → Fastify /cassandra/chat/stream (port 3001)
 - Test with real Supabase credentials when FMS project is configured
 - E2E mobile test: attach photo → create ticket → verify persisted
 
+
+---
+
+## Dev Spec Build Info: 2026-10-06 (Figma MCP setup)
+
+- Module status: N/A (tooling change only, no app code touched)
+- Environmental changes: added `figma` remote MCP server (`https://mcp.figma.com/mcp`, http transport) to project `.mcp.json`
+- Auth: each developer must run `/mcp` -> figma -> Authenticate once in Claude Code (Figma OAuth). For claude.ai cloud sessions, connect the Figma connector at https://claude.ai/customize/connectors instead.
+- Technical debts: `notebooklm` entry in `.mcp.json` points to a local macOS path, so it fails to start in cloud sessions; NotebookLM LTM sync was skipped this session for that reason.
+- Next action: authenticate Figma, then test write-to-canvas by generating one FMS screen (e.g. ticket list) into a Figma file.
