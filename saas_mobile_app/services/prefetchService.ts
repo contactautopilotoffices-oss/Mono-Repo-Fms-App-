@@ -106,7 +106,7 @@ export async function prefetchImportantOnLogin(propertyId: string): Promise<void
         const res = await serverApi.query({
           table: 'tickets',
           action: 'select',
-          select: `*, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id)), material_requests:procurement_material_requests(id, status)`,
+          select: `*, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships!property_memberships_user_id_fkey(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships!property_memberships_user_id_fkey(role, property_id)), material_requests:procurement_material_requests(id, status)`,
           filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
           orders: [{ column: 'created_at', ascending: false }],
           limit: 50,
@@ -159,7 +159,7 @@ export async function prefetchImportantOnLogin(propertyId: string): Promise<void
         const res = await serverApi.query({
           table: 'property_memberships',
           action: 'select',
-          select: 'role, users(id,full_name,user_photo_url)',
+          select: 'role, users!user_id(id,full_name,user_photo_url)',
           filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
         });
         return res;

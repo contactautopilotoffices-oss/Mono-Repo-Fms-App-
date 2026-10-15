@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
           is_active,
           created_at,
           property:properties(id, name),
-          user:users(id, full_name, email, user_photo_url, phone)
+          user:users!user_id(id, full_name, email, user_photo_url, phone)
           `
         )
         .eq("property_id", propertyId)
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
         role,
         is_active,
         created_at,
-        user:users(id, full_name, email, user_photo_url, phone)
+        user:users!user_id(id, full_name, email, user_photo_url, phone)
         `
       )
       .eq("organization_id", orgId!)
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
         is_active,
         created_at,
         property:properties!inner(id, name, organization_id),
-        user:users(id, full_name, email, user_photo_url, phone)
+        user:users!user_id(id, full_name, email, user_photo_url, phone)
         `
       )
       .eq("properties.organization_id", orgId!)

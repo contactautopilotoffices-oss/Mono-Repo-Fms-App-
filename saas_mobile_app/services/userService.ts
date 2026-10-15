@@ -201,7 +201,7 @@ export const userService = {
       const res = await serverApi.query<any[]>({
         table: 'users',
         action: 'select',
-        select: '*, property_memberships(role, is_active)',
+        select: '*, property_memberships!property_memberships_user_id_fkey(role, is_active)',
       });
       if (res.error) throw new Error(res.error?.message ?? 'Failed to fetch stats');
       const rows = res.data ?? [];

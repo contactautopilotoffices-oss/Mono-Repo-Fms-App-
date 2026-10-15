@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
     const { data: membership, error } = await supabase
       .from("property_memberships")
-      .select("*, users(full_name, email, phone)")
+      .select("*, users!user_id(full_name, email, phone)")
       .eq("id", membershipId)
       .maybeSingle();
 

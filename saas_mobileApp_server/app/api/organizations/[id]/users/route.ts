@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
     const { data, error } = await admin
       .from("organization_memberships")
-      .select("role, is_active, created_at, users(id, full_name, email, phone)")
+      .select("role, is_active, created_at, users!user_id(id, full_name, email, phone)")
       .eq("organization_id", orgId)
       .order("created_at", { ascending: false });
 

@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
           user_id,
           role,
           is_active,
-          user:users(id, full_name, email, user_photo_url)
+          user:users!user_id(id, full_name, email, user_photo_url)
         `)
         .eq("property_id", propertyId)
         .eq("is_active", true)

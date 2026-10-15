@@ -26,8 +26,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         *,
         category:issue_categories(id, code, name),
         skill_group:skill_groups(id, code, name),
-        assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)),
-        creator:users!raised_by(id, full_name, email, user_photo_url, property_memberships(role, property_id))
+        assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships!property_memberships_user_id_fkey(role, property_id)),
+        creator:users!raised_by(id, full_name, email, user_photo_url, property_memberships!property_memberships_user_id_fkey(role, property_id))
       `)
       .eq("id", id)
       .single();
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     // Fetch available MSTs for this property
     const { data: mstData } = await admin
       .from("property_memberships")
-      .select("role, user:users(id, full_name)")
+      .select("role, user:users!user_id(id, full_name)")
       .eq("property_id", ticket.property_id)
       .eq("is_active", true);
 

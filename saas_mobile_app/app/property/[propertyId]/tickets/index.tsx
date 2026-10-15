@@ -268,7 +268,7 @@ export default function TicketsScreen() {
                property_id, organization_id, photo_before_url, internal, raised_by, assigned_to,
                skill_group:skill_groups${categoryInner}(name, code),
                assignee:users!assigned_to(id, full_name, user_photo_url),
-               creator:users!raised_by(id, full_name, property_memberships(role)),
+               creator:users!raised_by(id, full_name, property_memberships!property_memberships_user_id_fkey(role)),
                ticket_escalation_logs(from_level, to_level, escalated_at,
                  from_employee:users!from_employee_id(full_name, user_photo_url),
                  to_employee:users!to_employee_id(full_name, user_photo_url)),
@@ -378,8 +378,11 @@ const fetchTickets = useCallback(async () => {
     const hasMoreItems = items.length > limit;
     return { tickets: items.slice(0, limit), hasMore: hasMoreItems };
   } catch (err) {
+    // Rethrow so React Query reports the failure. Returning an empty list here
+    // made a broken query (e.g. PGRST201 on an ambiguous embed) look exactly like
+    // "No Requests", and it was cached as if it were real data.
     console.error('Error fetching tickets:', err);
-    return { tickets: [] as Ticket[], hasMore: false };
+    throw err;
   }
 }, [propertyId, buildQueryParams, limit, membership?.role]);
 
@@ -389,7 +392,7 @@ const fetchTickets = useCallback(async () => {
 // refetch() effect to stay correct. With them in the key React Query refetches on
 // its own, each filter combination is cached separately, and going back to a
 // previous filter is instant instead of another round trip.
-const { data, isLoading, isFetching, refetch } = useServerQuery(
+const { data, isLoading, isFetching, isError, refetch } = useServerQuery(
   [
     ...queryKeys.property.tickets(propertyId),
     statusFilter,
@@ -830,7 +833,18 @@ const onRefresh = useCallback(async () => {
       )}
 
         {/* Ticket List */}
-        {(!isValidProperty || isLoading || isFetching || !data) && displayedTickets.length === 0 ? (
+        {isError && !isFetching && displayedTickets.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="cloud-offline-outline" size={64} color={isDark ? '#4B5563' : '#CBD5E1'} />
+            <Text style={[styles.emptyTitle, { color: textPrimary }]}>Couldn't load requests</Text>
+            <Text style={[styles.emptySubtitle, { color: textSecondary }]}>
+              Something went wrong while loading. Please try again.
+            </Text>
+            <TouchableOpacity style={styles.emptyCreateBtn} onPress={() => refetch()}>
+              <Text style={styles.emptyCreateBtnText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (!isValidProperty || isLoading || isFetching || !data) && displayedTickets.length === 0 ? (
           <ScrollView style={{ flex: 1, width: '100%' }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
             {[1, 2, 3, 4, 5].map((i) => (
               <TicketListItemSkeleton key={i} />
