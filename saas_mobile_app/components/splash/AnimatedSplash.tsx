@@ -22,7 +22,7 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardStore } from '@/stores/dashboardStore';
-import { prefetchDashboard, prefetchImportantOnLogin } from '@/services/prefetchService';
+import { prefetchDashboard, prefetchImportantOnLogin, usesPropertyAdminDashboard } from '@/services/prefetchService';
 
 const MIN_DISPLAY_MS = 300; // Fast minimum time before exiting
 const HOLD_DURATION = 80;   // Short hold time for smooth handoff
@@ -120,6 +120,12 @@ export function AnimatedSplash({ onAnimationComplete, startupComplete }: Animate
     hasPrefetchedRef.current = true;
     const propertyId = useDashboardStore.getState().selectedPropertyId || membership.properties[0].id;
     if (!propertyId) return;
+
+    // These warm the property-admin dashboard and its admin modules. For any other
+    // role they were ~6 requests on every cold start whose results no screen reads,
+    // competing (Android allows ~5 parallel requests per host) with the requests
+    // the first screen actually needs.
+    if (!usesPropertyAdminDashboard(membership, propertyId)) return;
 
     Promise.allSettled([
       prefetchDashboard(propertyId),

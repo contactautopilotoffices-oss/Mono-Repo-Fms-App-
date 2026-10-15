@@ -620,3 +620,21 @@ selects `creator:users!raised_by(..., property_memberships(role))`. The whole qu
 ### Rollout note
 The ticket list select string lives in the app bundle, so tenants need the JS update
 (EAS Update / OTA, no native rebuild) plus a deploy of `saas_mobileApp_server`.
+
+---
+
+## Dev Spec Build Info: Mobile slow-loading diagnosis (2026-10-15)
+
+**Status:** Diagnosis written to `MOBILE_SLOW_LOADING_DIAGNOSIS.md`; three client fixes implemented and verified statically.
+**Verdict:** API layer is the main bottleneck (request count and serial gating on startup), then base64 property images (data), then DB (unverified).
+
+### Fixed
+- Disk-cache allowlist now includes the live dashboard keys (staff/MST/soft-service/tenant cold start no longer always skeleton).
+- Splash prefetch limited to roles that render the property-admin dashboard; dead tickets prefetch removed.
+- Property layout renders from cached membership and confirms access in the background; access grants cached 5 min.
+
+### Validation
+- Changed files transpile; undeclared-identifier scan shows no new names.
+
+### Needs a human
+- Move base64 `properties.image_url` into Storage; set `SUPABASE_JWT_SECRET` / `UPSTASH_*` and pin the Vercel region; verify indexes and RLS (see diagnosis doc).

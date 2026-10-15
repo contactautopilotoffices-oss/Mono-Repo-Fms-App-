@@ -64,6 +64,14 @@ export const queryClient = new QueryClient({
 // to refetch and stays in memory only.
 const PERSISTED_QUERY_PREFIXES = [
   'mst-dashboard',
+  // The live staff / MST / soft-service dashboards, their ticket counts, the
+  // staff dashboard and the tenant ticket list. Matching is on the exact first
+  // key segment, so without these every cold start for those roles painted a
+  // skeleton until the whole network chain finished.
+  'mst-dashboard-lovable',
+  'mst-dashboard-ticket-counts',
+  'dashboard-staff',
+  'tenant_tickets',
   'staff-dashboard',
   'property-dashboard',
   'dashboard',
