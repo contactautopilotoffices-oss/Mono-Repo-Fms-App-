@@ -513,7 +513,7 @@ export default function TicketDetailScreen() {
     }
   }, [propertyId, id, session]);
 
-  const { data, refetch, isLoading } = useServerQuery(
+  const { data, refetch, isLoading, isFetching } = useServerQuery(
     queryKeys.property.ticketDetail(id),
     fetchTicket,
     {
