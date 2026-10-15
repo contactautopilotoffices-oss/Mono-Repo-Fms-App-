@@ -111,11 +111,12 @@ export function patchTicketStatusCounts(
 ): void {
   if (!fromStatus || fromStatus === toStatus) return;
 
-  const OPEN = ['open', 'assigned', 'in_progress', 'wait_list'];
-  const CLOSED = ['completed', 'resolved', 'closed', 'pending_validation'];
+  const OPEN = ['open', 'assigned', 'in_progress', 'waitlist'];
+  const CLOSED = ['completed', 'resolved', 'closed'];
 
-  const bucketOf = (status: string): 'open' | 'closed' | null => {
+  const bucketOf = (status: string): 'open' | 'pending' | 'closed' | null => {
     if (OPEN.includes(status)) return 'open';
+    if (status === 'pending_validation') return 'pending';
     if (CLOSED.includes(status)) return 'closed';
     return null;
   };

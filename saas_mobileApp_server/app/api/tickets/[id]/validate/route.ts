@@ -113,7 +113,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     // Log activity
     await admin.from("ticket_activity_log").insert({
       ticket_id: ticketId,
-      performed_by: auth.user.id,
+      user_id: auth.user.id,
       action: approved ? "validated_approved" : "validated_rejected",
       old_value: "pending_validation",
       new_value: approved ? "resolved" : (validation_note || "rejected by client"),
@@ -123,14 +123,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     if (approved) {
       const { data: resolveActivity } = await admin
         .from("ticket_activity_log")
-        .select("performed_by")
+        .select("user_id")
         .eq("ticket_id", ticketId)
         .in("action", ["pending_validation", "completed"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      const resolverId = resolveActivity?.performed_by || ticket.assigned_to;
+      const resolverId = resolveActivity?.user_id || ticket.assigned_to;
       if (resolverId) {
         await recordTicketResolution(
           admin,

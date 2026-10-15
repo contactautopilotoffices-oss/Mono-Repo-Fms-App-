@@ -37,7 +37,7 @@ import { queryClient } from '@/utils/queryClient';
 
 
 
-type StatusFilter = 'all' | 'mine' | 'open' | 'closed';
+type StatusFilter = 'all' | 'mine' | 'open' | 'pending' | 'sla' | 'closed';
 type DateRangeFilter = 'all' | 'today' | 'week' | 'month';
 type SortBy = 'newest' | 'oldest' | 'priority_high' | 'priority_low';
 type MaterialFilter = 'all' | 'with_material' | 'without_material';
@@ -68,8 +68,23 @@ const FILTER_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'all',                label: 'All' },
   { key: 'mine',               label: 'My Tickets' },
   { key: 'open',               label: 'Opened' },
+  { key: 'pending',            label: 'Pending Approval' },
+  { key: 'sla',                label: 'SLA Breached' },
   { key: 'closed',             label: 'Closed' },
 ];
+
+// Status buckets shared by the list filter and the tab counts. Values match the
+// web app (`waitlist`, not `wait_list`). Pending validation is its own tab, as on web.
+const OPEN_STATUSES = ['open', 'assigned', 'in_progress', 'waitlist'];
+const CLOSED_STATUSES = ['completed', 'resolved', 'closed'];
+
+/** Same rule as the web `slaBreached=true` filter: past deadline or flagged, and still active. */
+function slaBreachedFilters(): any[] {
+  return [
+    { op: 'or', expression: `sla_deadline.lt.${new Date().toISOString()},sla_breached.eq.true` },
+    { op: 'not', column: 'status', operator: 'in', value: '(resolved,closed,completed)' },
+  ];
+}
 
 const DATE_RANGES: { key: DateRangeFilter; label: string }[] = [
   { key: 'all',   label: 'All Time' },
@@ -212,9 +227,13 @@ export default function TicketsScreen() {
         queryFilters.push({ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` });
       }
     } else if (statusFilter === 'open') {
-      queryFilters.push({ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] });
+      queryFilters.push({ op: 'in', column: 'status', values: OPEN_STATUSES });
+    } else if (statusFilter === 'pending') {
+      queryFilters.push({ op: 'eq', column: 'status', value: 'pending_validation' });
+    } else if (statusFilter === 'sla') {
+      queryFilters.push(...slaBreachedFilters());
     } else if (statusFilter === 'closed') {
-      queryFilters.push({ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] });
+      queryFilters.push({ op: 'in', column: 'status', values: CLOSED_STATUSES });
     } else if (statusFilter !== 'all') {
       queryFilters.push({ op: 'eq', column: 'status', value: statusFilter });
     }
@@ -281,7 +300,7 @@ export default function TicketsScreen() {
   }, [propertyId, statusFilter, dateRange, authUser?.id, membership?.properties, isNeedsAttentionMode, categoryFilter, raisedByFilter, assignedToFilter, sortBy, isTenant, debouncedSearch]);
 
 const defaultCounts: Record<StatusFilter, number> = {
-  all: 0, mine: 0, open: 0, closed: 0,
+  all: 0, mine: 0, open: 0, pending: 0, sla: 0, closed: 0,
 };
 
 const getStatusCounts = useCallback(async () => {
@@ -334,18 +353,22 @@ const getStatusCounts = useCallback(async () => {
     // These four counts are independent, so they run concurrently. Awaiting them
     // one by one meant the list waited on four serialised round trips (on top of
     // the ticket query itself) before it could paint.
-    const [all, mine, open, closed] = await Promise.all([
+    const [all, mine, open, pending, sla, closed] = await Promise.all([
       fetchCount([]),
       authUser?.id
         ? fetchCount([{ op: 'or', expression: `assigned_to.eq.${authUser.id},raised_by.eq.${authUser.id}` }])
         : Promise.resolve(0),
-      fetchCount([{ op: 'in', column: 'status', values: ['open', 'assigned', 'in_progress', 'wait_list'] }]),
-      fetchCount([{ op: 'in', column: 'status', values: ['completed', 'resolved', 'closed', 'pending_validation'] }]),
+      fetchCount([{ op: 'in', column: 'status', values: OPEN_STATUSES }]),
+      fetchCount([{ op: 'eq', column: 'status', value: 'pending_validation' }]),
+      fetchCount(slaBreachedFilters()),
+      fetchCount([{ op: 'in', column: 'status', values: CLOSED_STATUSES }]),
     ]);
 
     counts.all = all;
     counts.mine = mine;
     counts.open = open;
+    counts.pending = pending;
+    counts.sla = sla;
     counts.closed = closed;
 
     return counts;
