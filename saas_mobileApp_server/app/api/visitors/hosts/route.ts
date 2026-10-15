@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     // Fetch all active property members with user details
     const { data, error } = await admin
       .from("property_memberships")
-      .select("user_id, role, users!inner(id, full_name, email)")
+      .select("user_id, role, users!user_id!inner(id, full_name, email)")
       .eq("property_id", propertyId)
       .eq("is_active", true);
 

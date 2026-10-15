@@ -588,3 +588,35 @@ Mobile → Fastify /cassandra/chat/stream (port 3001)
 - Test with real Supabase credentials when FMS project is configured
 - E2E mobile test: attach photo → create ticket → verify persisted
 
+
+---
+
+## Dev Spec Build Info: Requests tab shows no tickets (2026-10-15)
+
+**Status:** Fixed in code, verified statically (no DB/network access from the build container).
+
+### Root cause
+Web migration `20261007000003_user_membership_audit_columns.sql` (saas_one) added
+`property_memberships.updated_by` and `organization_memberships.updated_by`, both
+`REFERENCES users(id)`. That gives PostgREST two relationships between `users` and the
+membership tables, so any embed without a FK hint now fails with PGRST201
+("more than one relationship was found"). The web app fixed its ticket queries the same
+day (saas_one commit 14f2834); the mobile app was never updated.
+
+The mobile ticket list (used by the tenant "Requests" tab and the staff "Tickets" screen)
+selects `creator:users!raised_by(..., property_memberships(role))`. The whole query failed,
+`fetchTickets` swallowed the error and returned `[]`, so the screen said "No Requests".
+
+### Fix
+- Hinted every users -> memberships embed with `property_memberships!property_memberships_user_id_fkey(...)`.
+- Hinted every memberships -> users embed with `users!user_id(...)`.
+- Ticket list now rethrows fetch errors and shows "Couldn't load requests" + Retry instead of a fake empty list.
+
+### Validation
+- `saas_mobileApp_server`: `tsc --noEmit` clean (0 errors before and after).
+- Changed mobile files transpile with no syntax errors.
+- All new select strings parse with supabase-js's select-query parser.
+
+### Rollout note
+The ticket list select string lives in the app bundle, so tenants need the JS update
+(EAS Update / OTA, no native rebuild) plus a deploy of `saas_mobileApp_server`.

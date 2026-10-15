@@ -49,7 +49,7 @@ export default function HostAutoComplete({ propertyId, value, onSelect, placehol
       const res = await serverApi.query<{ user_id: string; role: string; users: any }[]>({
         table: 'property_memberships',
         action: 'select',
-        select: 'user_id, role, users(full_name, email)',
+        select: 'user_id, role, users!user_id(full_name, email)',
         filters: [
           { op: 'eq', column: 'property_id', value: propertyId },
           { op: 'eq', column: 'is_active', value: true },

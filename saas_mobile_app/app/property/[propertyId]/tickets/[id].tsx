@@ -252,7 +252,7 @@ export default function TicketDetailScreen() {
       const ticketRes = await serverApi.query<Ticket>({
         table: 'tickets',
         action: 'select',
-        select: `*, assigned_to, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships(role, property_id))`,
+        select: `*, assigned_to, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships!property_memberships_user_id_fkey(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships!property_memberships_user_id_fkey(role, property_id))`,
         filters: [
           { op: 'eq', column: 'id', value: id },
           { op: 'eq', column: 'property_id', value: propertyId }
@@ -343,7 +343,7 @@ export default function TicketDetailScreen() {
         serverApi.query<any[]>({
           table: 'property_memberships',
           action: 'select',
-          select: 'role, user:users(id, full_name)',
+          select: 'role, user:users!user_id(id, full_name)',
           filters: [
             { op: 'eq', column: 'property_id', value: propertyId },
             { op: 'eq', column: 'is_active', value: true },

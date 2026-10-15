@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         role,
         is_active,
         created_at,
-        user:users(
+        user:users!user_id(
           id,
           full_name,
           email,

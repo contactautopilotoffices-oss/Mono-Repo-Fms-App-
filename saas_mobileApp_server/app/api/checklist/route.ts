@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
         .limit(5, { foreignTable: "sop_completions" }),
       admin
         .from("property_memberships")
-        .select("user_id, role, users:users(id, full_name)")
+        .select("user_id, role, users:users!user_id(id, full_name)")
         .eq("property_id", propertyId)
         .eq("is_active", true),
       admin.from("properties").select("organization_id").eq("id", propertyId).maybeSingle(),
