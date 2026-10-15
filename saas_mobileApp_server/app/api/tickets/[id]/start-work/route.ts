@@ -84,7 +84,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     // Log activity
     await admin.from("ticket_activity_log").insert({
       ticket_id: ticketId,
-      performed_by: auth.user.id,
+      user_id: auth.user.id,
       action: "work_started",
       old_value: ticket.status,
       new_value: "in_progress",

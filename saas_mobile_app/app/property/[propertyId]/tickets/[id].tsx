@@ -85,6 +85,10 @@ interface Ticket {
   assignee: { id: string; full_name: string; user_photo_url?: string | null; property_memberships?: { role: string; property_id: string }[] } | null;
   creator:  { id: string; full_name: string; email?: string; property_memberships?: { role: string; property_id: string }[] } | null;
   location?: string;
+  internal?: boolean | null;
+  is_internal?: boolean | null;
+  validation_status?: 'pending' | 'approved' | 'rejected' | null;
+  validation_note?: string | null;
 }
 
 interface Comment {
@@ -139,19 +143,54 @@ const PRIORITY_CONFIG: Record<string, { bg: string; text: string; label: string 
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   open:               ['assigned'],
+  waitlist:           ['assigned'],
   assigned:           ['in_progress'],
   in_progress:        ['resolved'],
+  pending_validation: ['closed'],
   resolved:           ['closed', 'in_progress'],
   closed:             ['in_progress'],
 };
 
 const STATUS_LABELS: Record<string, string> = {
   open:               'Open',
+  waitlist:           'Waitlist',
   assigned:           'Assigned',
   in_progress:        'In Progress',
+  pending_validation: 'Pending Approval',
   resolved:           'Resolved',
   closed:             'Closed',
 };
+
+// Roles that raise requests rather than service them (same list the web uses).
+const REQUESTER_ROLES = ['tenant', 'super_tenant', 'client', 'guest'];
+
+/**
+ * Old/new values of an activity row. The table stores them in `old_value` /
+ * `new_value` (what the web writes); older mobile rows packed them into a JSON
+ * `details` string, so both are read.
+ */
+function activityValues(act: any): { old_value?: string | null; new_value?: string | null } | null {
+  if (act?.details) {
+    try { return JSON.parse(act.details); } catch { return null; }
+  }
+  if (act?.old_value != null || act?.new_value != null) {
+    return { old_value: act.old_value ?? null, new_value: act.new_value ?? null };
+  }
+  return null;
+}
+
+/** Pull the server's `{ error }` text out of a "Server error 400: {...}" message. */
+function serverErrorText(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const jsonStart = raw.indexOf('{');
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart));
+      if (parsed?.error) return String(parsed.error);
+    } catch {}
+  }
+  return raw || fallback;
+}
 
 function formatDuration(ms: number): string {
   const totalMins = Math.floor(ms / 60000);
@@ -210,6 +249,8 @@ export default function TicketDetailScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectNote, setRejectNote] = useState('');
   const [optimisticMedia, setOptimisticMedia] = useState<{before?: {uri: string, type: 'image'|'video'}, after?: {uri: string, type: 'image'|'video'}}>({});
   const [optimisticUploading, setOptimisticUploading] = useState<{before: boolean, after: boolean}>({before: false, after: false});
 
@@ -373,7 +414,7 @@ export default function TicketDetailScreen() {
 
       // Internal Ticket Security Guard — still enforced before anything renders.
       const isTenant = userRole === 'tenant' || userRole === 'super_tenant';
-      if (ticketData.is_internal && isTenant) {
+      if ((ticketData.internal || ticketData.is_internal) && isTenant) {
         console.warn('[fetchTicket] Unauthorized access to internal ticket');
         Alert.alert('Access Denied', 'This is an internal maintenance ticket and is not visible to tenants.');
         router.back();
@@ -404,7 +445,7 @@ export default function TicketDetailScreen() {
       const featData = featRes.data;
 
       const msts = (mstRes.data ?? [])
-        .filter((m: any) => m.role !== 'client')
+        .filter((m: any) => !REQUESTER_ROLES.includes(m.role))
         .map((m: any) => ({ id: m.user?.id, full_name: m.user?.full_name }))
         .filter((u: any) => u.id && u.full_name);
 
@@ -425,9 +466,7 @@ export default function TicketDetailScreen() {
         if ((act as any).user_id && UUID_RE.test((act as any).user_id)) {
           newMap[(act as any).user_id] = (act as any).user_id;
         }
-        const detailObj = act.details
-          ? (() => { try { return JSON.parse(act.details); } catch { return null; } })()
-          : null;
+        const detailObj = activityValues(act);
         if (act.action === 'assigned' || act.action === 'reassigned') {
           if (detailObj?.new_value && UUID_RE.test(detailObj.new_value)) {
             newMap[detailObj.new_value] = detailObj.new_value;
@@ -498,7 +537,7 @@ export default function TicketDetailScreen() {
         comments: (commentData ?? []) as Comment[],
         activities: populatedActivities as Activity[],
         escalationLogs: (escData ?? []) as EscalationLog[],
-        validationEnabled: featData?.is_enabled === true,
+        validationEnabled: featData ? featData.is_enabled === true : true,
         userNameMap: newMap,
         availableMSTs: msts,
         procurementRequests: procurementRequestsData,
@@ -513,7 +552,7 @@ export default function TicketDetailScreen() {
     }
   }, [propertyId, id, session]);
 
-  const { data, refetch, isLoading } = useServerQuery(
+  const { data, refetch, isLoading, isFetching } = useServerQuery(
     queryKeys.property.ticketDetail(id),
     fetchTicket,
     {
@@ -677,9 +716,10 @@ export default function TicketDetailScreen() {
           action: 'insert',
           values: {
             ticket_id: id,
-            performed_by: actingUserId,
+            user_id: actingUserId,
             action: activityAction,
-            details: JSON.stringify({ old_value: originalTicket.status, new_value: newStatus }),
+            old_value: originalTicket.status,
+            new_value: newStatus,
           },
         }).catch(() => {});
       }
@@ -704,6 +744,78 @@ export default function TicketDetailScreen() {
   };
 
 
+
+  // Workflow transitions (start work, complete, tenant validation) go through the
+  // mobile server's dedicated routes, the same flow the web uses. Writing `status`
+  // straight to the table skipped validation_status, work timestamps, the activity
+  // log and gamification, and "Send for Approval" wrote `resolved`, which the web
+  // treats as finished, so tenants were never asked to validate.
+  const runTicketAction = async (
+    endpoint: 'start-work' | 'resolve' | 'validate',
+    body: Record<string, unknown>,
+    optimisticStatus: string,
+  ): Promise<boolean> => {
+    if (!id || !ticket || updatingStatus) return false;
+    const originalTicket = ticket;
+    setUpdatingStatus(true);
+    setTicket({ ...ticket, status: optimisticStatus });
+    const snapshot = patchTicketEverywhere(propertyId, id, { status: optimisticStatus });
+
+    try {
+      const res = await serverApi.post<{ ticket?: Partial<Ticket>; message?: string }>(
+        `/api/tickets/${id}/${endpoint}`,
+        body
+      );
+      if (res.error) throw new Error(res.error.message);
+
+      const saved = res.data?.ticket ?? {};
+      const finalStatus = saved.status ?? optimisticStatus;
+      // The route returns the bare row; keep the joined fields we already hold.
+      setTicket({ ...originalTicket, ...saved, status: finalStatus });
+      patchTicketEverywhere(propertyId, id, { ...saved, status: finalStatus });
+      patchTicketStatusCounts(propertyId, originalTicket.status, finalStatus);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Ticket Updated',
+        text2: res.data?.message ?? `Ticket marked as ${STATUS_LABELS[finalStatus] ?? finalStatus}.`,
+      });
+      // Pull the new activity entries and validation fields.
+      refetch();
+      return true;
+    } catch (err) {
+      console.error(`[runTicketAction:${endpoint}] failed:`, err);
+      setTicket(originalTicket);
+      rollbackTicketPatch(snapshot);
+      Toast.show({
+        type: 'error',
+        text1: 'Update Failed',
+        text2: serverErrorText(err, 'Could not update the ticket.'),
+      });
+      return false;
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const handleStartWork = () => runTicketAction('start-work', {}, 'in_progress');
+
+  const handleCompleteWork = () => {
+    const needsApproval = validationEnabled && !ticket?.internal;
+    runTicketAction('resolve', {}, needsApproval ? 'pending_validation' : 'closed');
+  };
+
+  const handleValidate = async (approved: boolean, note?: string) => {
+    const ok = await runTicketAction(
+      'validate',
+      { approved, validation_note: note?.trim() || undefined },
+      approved ? 'resolved' : 'open'
+    );
+    if (ok) {
+      setShowRejectModal(false);
+      setRejectNote('');
+    }
+  };
 
   const handleReassign = (mstId: string) => {
     if (!id || !ticket) return;
@@ -787,9 +899,10 @@ export default function TicketDetailScreen() {
           action: 'insert',
           values: {
             ticket_id: id,
-            performed_by: actingUserId,
+            user_id: actingUserId,
             action: action,
-            details: JSON.stringify({ old_value: oldAssigneeId, new_value: mstId }),
+            old_value: oldAssigneeId ?? 'unassigned',
+            new_value: mstId,
           },
         }).catch(() => {});
       }
@@ -1005,7 +1118,9 @@ export default function TicketDetailScreen() {
     });
   }
 
-  const isTenant = currentUserRole === 'client';
+  const isTenant = !!currentUserRole && REQUESTER_ROLES.includes(currentUserRole);
+  // The validate route accepts tenant/client only (web: tenant only).
+  const canValidate = currentUserRole === 'tenant' || currentUserRole === 'client';
   const bg = isDark ? '#0F1521' : '#F8FAFC';
   const cardBg = isDark ? '#1E2633' : '#FFFFFF';
   const textPrimary = isDark ? '#F0F4F8' : '#1A2332';
@@ -1235,15 +1350,16 @@ export default function TicketDetailScreen() {
           </SafeBlurView>
 
           {/* Actions Section — Accessible to all roles for reassignment/management */}
-          {(canOperateOnTicket || isTenant) && ticket.status !== 'resolved' && (
+          {canOperateOnTicket && !isTenant && !['resolved', 'pending_validation'].includes(ticket.status) && (
             <SafeBlurView intensity={60} tint="dark" style={[styles.card, { borderColor }]}>
               <Text style={[styles.sectionTitle, { color: textPrimary }]}>Ticket Actions</Text>
               <View style={styles.primaryActionRow}>
                 {/* Start Work — Only for the assigned technician */}
-                {isAssignee && (ticket.status === 'assigned' || ticket.status === 'open') && (
+                {isAssignee && ['assigned', 'open', 'waitlist'].includes(ticket.status) && (
                   <TouchableOpacity
                     style={[styles.primaryBlockBtn, { backgroundColor: '#3B82F6', flex: 1 }]}
-                    onPress={() => handleUpdateStatus('in_progress')}
+                    onPress={handleStartWork}
+                    disabled={updatingStatus}
                   >
                     <Ionicons name="play-circle" size={20} color="#FFF" />
                     <Text style={styles.primaryBlockBtnText}>Start Work</Text>
@@ -1252,12 +1368,13 @@ export default function TicketDetailScreen() {
                 {/* Complete / Send for Validation — Only for the assigned technician */}
                 {isAssignee && ticket.status === 'in_progress' && (
                   <TouchableOpacity
-                    style={[styles.primaryBlockBtn, { backgroundColor: validationEnabled ? '#8B5CF6' : '#10B981', flex: 1 }]}
-                    onPress={() => handleUpdateStatus(validationEnabled ? 'resolved' : 'closed')}
+                    style={[styles.primaryBlockBtn, { backgroundColor: validationEnabled && !ticket.internal ? '#8B5CF6' : '#10B981', flex: 1 }]}
+                    onPress={handleCompleteWork}
+                    disabled={updatingStatus}
                   >
-                    <Ionicons name={validationEnabled ? 'shield-checkmark' : 'checkmark-circle'} size={20} color="#FFF" />
+                    <Ionicons name={validationEnabled && !ticket.internal ? 'shield-checkmark' : 'checkmark-circle'} size={20} color="#FFF" />
                     <Text style={styles.primaryBlockBtnText}>
-                      {validationEnabled ? 'Send for Approval' : 'Complete'}
+                      {validationEnabled && !ticket.internal ? 'Send for Approval' : 'Complete'}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1292,7 +1409,31 @@ export default function TicketDetailScreen() {
           )}
 
           {/* Tenant Validation — shown when ticket is pending client approval */}
-          {isTenant && ticket.status === 'resolved' && (
+          {/* Awaiting-approval notice for the service team */}
+          {!isTenant && ticket.status === 'pending_validation' && (
+            <View style={[styles.card, { backgroundColor: 'rgba(139,92,246,0.08)', borderColor: 'rgba(139,92,246,0.3)' }]}>
+              <View style={styles.validationHeader}>
+                <Ionicons name="hourglass-outline" size={22} color="#8B5CF6" />
+                <Text style={[styles.sectionTitle, { color: '#8B5CF6' }]}>Waiting for Client Approval</Text>
+              </View>
+              <Text style={[styles.validationSubtext, { color: textSecondary }]}>
+                Work is marked complete. The client will confirm or send it back.
+              </Text>
+            </View>
+          )}
+
+          {/* Rejected-by-client note, shown after a validation was rejected */}
+          {ticket.validation_status === 'rejected' && !!ticket.validation_note && (
+            <View style={[styles.card, { backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)' }]}>
+              <View style={styles.validationHeader}>
+                <Ionicons name="alert-circle" size={22} color="#EF4444" />
+                <Text style={[styles.sectionTitle, { color: '#EF4444' }]}>Sent Back by Client</Text>
+              </View>
+              <Text style={[styles.validationSubtext, { color: textSecondary }]}>{ticket.validation_note}</Text>
+            </View>
+          )}
+
+          {canValidate && ticket.status === 'pending_validation' && (
             <View style={[styles.card, { backgroundColor: 'rgba(139,92,246,0.08)', borderColor: 'rgba(139,92,246,0.3)' }]}>
               <View style={styles.validationHeader}>
                 <Ionicons name="shield-checkmark" size={22} color="#8B5CF6" />
@@ -1304,7 +1445,7 @@ export default function TicketDetailScreen() {
               <View style={styles.validationActions}>
                 <TouchableOpacity
                   style={[styles.validateBtn, { flex: 1 }]}
-                  onPress={() => handleUpdateStatus('closed')}
+                  onPress={() => handleValidate(true)}
                   disabled={updatingStatus}
                 >
                   {updatingStatus ? (
@@ -1316,7 +1457,7 @@ export default function TicketDetailScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.rejectBtn, { flex: 1 }]}
-                  onPress={() => handleUpdateStatus('open')}
+                  onPress={() => setShowRejectModal(true)}
                   disabled={updatingStatus}
                 >
                   {updatingStatus ? (
@@ -1484,7 +1625,7 @@ export default function TicketDetailScreen() {
 
                 {/* 2. Activity Log Events */}
                 {activities.map((act, idx) => {
-                  const detailObj = act.details ? (() => { try { return JSON.parse(act.details); } catch { return null; } })() : null;
+                  const detailObj = activityValues(act);
                   const isReassign = act.action?.includes('reassign') || act.action === 'assigned' || act.action === 'reopened';
                   const isStart = act.action === 'work_started' || act.action === 'in_progress';
                   const isComplete = act.action === 'completed' || act.action === 'resolved' || act.action === 'closed';
@@ -2136,7 +2277,9 @@ export default function TicketDetailScreen() {
               {((comments?.length ?? 0) > 0) && (
               <View style={styles.whatsappChatContainer}>
                 {[
-                  ...comments.map(c => ({ ...c, type: 'comment' as const }))
+                  ...comments
+                    .filter(c => !(isTenant && c.is_internal))
+                    .map(c => ({ ...c, type: 'comment' as const }))
                 ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
                  .map(event => {
                     const isMe = Boolean(authUser?.id && event.user_id === authUser.id);
@@ -2231,6 +2374,47 @@ export default function TicketDetailScreen() {
 
 
       {/* Status Picker Modal */}
+      {/* Reject validation: the client says what is still wrong */}
+      <Modal visible={showRejectModal} transparent animationType="fade" onRequestClose={() => setShowRejectModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={[styles.pickerCard, { backgroundColor: isDark ? '#1E2633' : '#FFF', borderColor }]}>
+            <Text style={[styles.pickerTitle, { color: textPrimary }]}>Not Resolved?</Text>
+            <Text style={[styles.validationSubtext, { color: textSecondary }]}>
+              Tell the team what still needs fixing. The request will be reopened.
+            </Text>
+            <TextInput
+              value={rejectNote}
+              onChangeText={setRejectNote}
+              placeholder="e.g. The AC is still not cooling"
+              placeholderTextColor={textSecondary}
+              multiline
+              style={[styles.rejectNoteInput, { color: textPrimary, borderColor }]}
+            />
+            <View style={styles.validationActions}>
+              <TouchableOpacity
+                style={[styles.rejectBtn, { flex: 1 }]}
+                onPress={() => { setShowRejectModal(false); setRejectNote(''); }}
+                disabled={updatingStatus}
+              >
+                <Text style={styles.rejectBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.validateBtn, { flex: 1, backgroundColor: '#EF4444', opacity: rejectNote.trim() ? 1 : 0.5 }]}
+                onPress={() => handleValidate(false, rejectNote)}
+                disabled={updatingStatus || !rejectNote.trim()}
+              >
+                {updatingStatus ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Ionicons name="refresh-circle" size={18} color="#FFF" />
+                )}
+                <Text style={styles.validateBtnText}>Reopen Request</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={showStatusPicker} transparent animationType="fade" onRequestClose={() => setShowStatusPicker(false)}>
         <TouchableOpacity
           style={styles.modalOverlay}
@@ -3505,6 +3689,15 @@ const styles = StyleSheet.create({
   validationActions: {
     flexDirection: 'row',
     gap: 12,
+  },
+  rejectNoteInput: {
+    minHeight: 90,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 12,
+    textAlignVertical: 'top',
+    fontSize: 14,
   },
   validateBtn: {
     flexDirection: 'row',

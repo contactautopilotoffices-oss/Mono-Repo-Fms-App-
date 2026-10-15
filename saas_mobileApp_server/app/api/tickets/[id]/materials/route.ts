@@ -110,9 +110,9 @@ export async function POST(
 
     void admin.from("ticket_activity_log").insert({
       ticket_id: ticketId,
-      performed_by: auth.user.id,
+      user_id: auth.user.id,
       action: "procurement_requested",
-      details: JSON.stringify({ material_request_id: materialRequest.id, assignee_uid }),
+      new_value: materialRequest.id,
     });
 
     return NextResponse.json({ success: true, material_request: materialRequest }, { status: 201 });

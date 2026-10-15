@@ -26,9 +26,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const { data, error } = await admin.from("ticket_activity_log").insert({
       ticket_id: id,
-      performed_by: auth.user.id,
+      user_id: auth.user.id,
       action,
-      details,
+      new_value: details == null ? null : typeof details === "string" ? details : JSON.stringify(details),
     }).select().single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

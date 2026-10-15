@@ -214,7 +214,9 @@ export function TicketCreateModal({
         propertyId: finalPropId,
         organizationId: finalOrgId,
         isInternal,
-        priority: isCritical ? 'critical' : 'medium',
+        // Only an explicit "critical" is sent. Anything else lets the server use the
+        // category/AI priority, as the web does; a hardcoded 'medium' overrode it.
+        priority: isCritical ? 'critical' : undefined,
         assignedTo: taggedUser?.id,
       });
       if (result.error) throw new Error(result.error);

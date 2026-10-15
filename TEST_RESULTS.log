@@ -620,3 +620,35 @@ selects `creator:users!raised_by(..., property_memberships(role))`. The whole qu
 ### Rollout note
 The ticket list select string lives in the app bundle, so tenants need the JS update
 (EAS Update / OTA, no native rebuild) plus a deploy of `saas_mobileApp_server`.
+
+---
+
+## Dev Spec Build Info: Ticket parity with web, module 1 (2026-10-15)
+
+**Status:** Implemented, verified statically. Built on top of the Requests-tab fix branch.
+
+### Changes (mobile app)
+- Detail: Start Work / Complete / tenant Approve-Reject now call the existing server routes
+  (`/api/tickets/:id/start-work`, `/resolve`, `/validate`). Complete puts non-internal tickets in
+  `pending_validation` (validation on) exactly like web; before, mobile wrote `resolved`, so tenants
+  were never asked to validate.
+- Detail: tenant role check fixed (`tenant`, not `client`); reject now asks for a note; "Waiting for
+  Client Approval" and "Sent Back by Client" cards; internal comments hidden from tenants; internal
+  ticket guard reads `tickets.internal`; reassign picker excludes tenant/super_tenant/client/guest.
+- Detail: crash fix, `isFetching` was referenced but never defined.
+- Activity log: inserts use real columns (`user_id`, `old_value`, `new_value`); timeline reads both
+  the columns and legacy `details` JSON.
+- List: new "Pending Approval" and "SLA Breached" tabs (web parity); `wait_list` typo fixed to `waitlist`.
+- Create: non-critical tickets no longer force `priority: 'medium'` (server/AI priority applies).
+
+### Changes (mobile server)
+- `ticket_activity_log` inserts in start-work / resolve / assign / validate / activity / materials use
+  `user_id` (column `performed_by` does not exist, so those rows were silently dropped).
+
+### Validation
+- `saas_mobileApp_server`: `tsc --noEmit` clean.
+- Changed mobile files transpile; undeclared-identifier scan shows no new names (control case detected).
+
+### Next modules
+Ticket items still open: claim request, force close, delete (after hardening `PATCH/DELETE /api/tickets/:id`),
+material delivered + photos, tag procurement, asset logging, display badges (AI card, floor, risk flag).

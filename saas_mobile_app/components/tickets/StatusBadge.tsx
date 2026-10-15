@@ -8,6 +8,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In Progress',
   resolved: 'Resolved',
   closed: 'Closed',
+  waitlist: 'Waitlist',
+  pending_validation: 'Pending Approval',
 };
 
 interface StatusBadgeProps {

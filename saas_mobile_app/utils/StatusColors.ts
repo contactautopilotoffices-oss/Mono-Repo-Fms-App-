@@ -12,7 +12,8 @@ export type TicketStatus =
   | 'in_progress'
   | 'resolved'
   | 'closed'
-  | 'waitlist';
+  | 'waitlist'
+  | 'pending_validation';
 
 export const STATUS_CONFIG: Record<
   TicketStatus,
@@ -24,6 +25,7 @@ export const STATUS_CONFIG: Record<
   resolved:      { bg: '#22C55E18', text: '#22C55E', dot: '#22C55E' },  // green
   closed:        { bg: '#22C55E18', text: '#22C55E', dot: '#22C55E' },  // green
   waitlist:      { bg: '#64748B18', text: '#64748B', dot: '#64748B' },  // gray
+  pending_validation: { bg: '#8B5CF618', text: '#8B5CF6', dot: '#8B5CF6' },  // violet
 };
 
 // Fallback for unknown statuses
