@@ -398,6 +398,28 @@ export default function PropertyLayout() {
         return;
       }
 
+      // Paint straight away from the cached membership when it already lists this
+      // property, and let the server check below confirm or correct it. This is no
+      // looser than before: when the server check fails, the code below already
+      // falls back to this same membership role. Until now the whole property tree
+      // (and so every query the first screen fires) waited on that round trip.
+      const cachedRole = membership?.properties?.find((p) => p.id === propertyId)?.role ?? null;
+      if (cachedRole && propertyId !== 'all' && isMounted && currentVersion === versionRef.current) {
+        setAccessState((prev) =>
+          prev.checking ? { authorized: true, role: cachedRole, checking: false } : prev
+        );
+        if (!MOBILE_ROLES.includes(cachedRole)) {
+          const allowedPaths = getRoleAllowedPaths(cachedRole, propertyId);
+          const isPathAllowed = allowedPaths.some(
+            (allowed) => pathname.startsWith(allowed) || pathname === allowed
+          );
+          if (!isPathAllowed) {
+            router.replace(getRoleDefaultPath(cachedRole, propertyId) as never);
+            return;
+          }
+        }
+      }
+
       try {
         // Pass user from AuthContext so checkPropertyAccess doesn't need to re-hydrate
         // the session — the AuthContext client has it; the mobileApi singleton may not.

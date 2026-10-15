@@ -40,6 +40,26 @@ function isAccessDeniedError(error: any): boolean {
  * This replaces individual fetchers and writes directly to RQ.
  * Handles 403 errors gracefully - some users may not have access to all properties.
  */
+// Roles whose dashboard screen renders the property-admin dashboard, mirroring
+// app/property/[propertyId]/dashboard/index.tsx. Everyone else (tenant, staff,
+// MST, security, vendor) never reads the prefetched data.
+const ORG_ADMIN_ROLES = ['org_super_admin', 'org_admin', 'owner'];
+const PROPERTY_ADMIN_ROLES = ['property_admin', 'admin', 'manager', 'property_manager', 'facility_manager', 'spoc', 'administrator'];
+const MST_ROLES = ['master_admin', 'mst', 'super_admin'];
+
+export function usesPropertyAdminDashboard(
+  membership: { org_role?: string | null; properties?: { id: string; role?: string | null }[] } | null | undefined,
+  propertyId: string
+): boolean {
+  if (!membership) return false;
+  const orgRole = (membership.org_role || '').toLowerCase();
+  if (MST_ROLES.includes(orgRole)) return false;
+  if (ORG_ADMIN_ROLES.includes(orgRole)) return true;
+  const propRole = (membership.properties?.find((p) => p.id === propertyId)?.role || '').toLowerCase();
+  if (MST_ROLES.includes(propRole)) return false;
+  return ORG_ADMIN_ROLES.includes(propRole) || PROPERTY_ADMIN_ROLES.includes(propRole);
+}
+
 export async function prefetchDashboard(propertyId: string): Promise<void> {
   if (!propertyId || propertyId === 'all') return;
 
@@ -99,23 +119,10 @@ export async function prefetchImportantOnLogin(propertyId: string): Promise<void
   if (!propertyId || propertyId === 'all') return;
 
   await Promise.allSettled([
-    // Primary Tickets List
-    queryClient.prefetchQuery({
-      queryKey: [...queryKeys.property.tickets(propertyId), 'all', 'all', 'false', '50'],
-      queryFn: async () => {
-        const res = await serverApi.query({
-          table: 'tickets',
-          action: 'select',
-          select: `*, category:issue_categories(name, code), skill_group:skill_groups(name, code), assignee:users!assigned_to(id, full_name, user_photo_url, property_memberships!property_memberships_user_id_fkey(role, property_id)), creator:users!raised_by(id, full_name, email, property_memberships!property_memberships_user_id_fkey(role, property_id)), material_requests:procurement_material_requests(id, status)`,
-          filters: [{ op: 'eq', column: 'property_id', value: propertyId }],
-          orders: [{ column: 'created_at', ascending: false }],
-          limit: 50,
-        });
-        const items = (res.data ?? []) as any[];
-        return { tickets: items, hasMore: false, statusCounts: { all: items.length } };
-      },
-      staleTime: 5 * 60 * 1000,
-    }),
+    // A tickets-list prefetch used to be here. Its key ended in
+    // ['all', 'all', 'false', '50'] while the tickets screen registers an
+    // 11-part key, so nothing ever read it: one heavy 6-join request wasted on
+    // every cold start (the same dead prefetch already removed from the login path).
     // Checklist
     queryClient.prefetchQuery({
       queryKey: queryKeys.property.checklist(propertyId),

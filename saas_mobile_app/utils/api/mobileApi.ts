@@ -357,7 +357,31 @@ export interface PropertyAccessResponse {
  *   this function on mobile/Expo Go because the supabase singleton in mobileApi.ts may
  *   not share session state with the AuthContext client (separate AsyncStorage hydration).
  */
+// Positive access results, per user and property. The property layout re-ran this
+// check on every navigation and every membership refresh, each one a round trip
+// (and 2 to 4 DB queries server-side) before the screen could render. Grants are
+// cached briefly; denials never are. Every data request is still authorised by the
+// server on its own, so a revoked grant only lingers in this UI gate for the TTL.
+const PROPERTY_ACCESS_TTL_MS = 5 * 60 * 1000;
+const propertyAccessCache = new Map<string, { value: PropertyAccessResponse; at: number }>();
+
 export async function checkPropertyAccess(
+  propertyId: string,
+  userOverride?: { id: string; email?: string } | null
+): Promise<PropertyAccessResponse> {
+  const cacheKey = userOverride?.id ? `${userOverride.id}:${propertyId}` : null;
+  if (cacheKey) {
+    const hit = propertyAccessCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < PROPERTY_ACCESS_TTL_MS) return hit.value;
+  }
+  const result = await resolvePropertyAccess(propertyId, userOverride);
+  if (cacheKey && result.authorized) {
+    propertyAccessCache.set(cacheKey, { value: result, at: Date.now() });
+  }
+  return result;
+}
+
+async function resolvePropertyAccess(
   propertyId: string,
   userOverride?: { id: string; email?: string } | null
 ): Promise<PropertyAccessResponse> {
